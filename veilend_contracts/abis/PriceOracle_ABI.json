@@ -1,0 +1,618 @@
+[
+    {
+      "type": "impl",
+      "name": "PriceOracleImpl",
+      "interface_name": "veilend_contracts::interfaces::interfaces::IPriceOracle"
+    },
+    {
+      "type": "struct",
+      "name": "core::integer::u256",
+      "members": [
+        {
+          "name": "low",
+          "type": "core::integer::u128"
+        },
+        {
+          "name": "high",
+          "type": "core::integer::u128"
+        }
+      ]
+    },
+    {
+      "type": "enum",
+      "name": "core::bool",
+      "variants": [
+        {
+          "name": "False",
+          "type": "()"
+        },
+        {
+          "name": "True",
+          "type": "()"
+        }
+      ]
+    },
+    {
+      "type": "interface",
+      "name": "veilend_contracts::interfaces::interfaces::IPriceOracle",
+      "items": [
+        {
+          "type": "function",
+          "name": "get_price",
+          "inputs": [
+            {
+              "name": "asset",
+              "type": "core::starknet::contract_address::ContractAddress"
+            }
+          ],
+          "outputs": [
+            {
+              "type": "core::integer::u256"
+            }
+          ],
+          "state_mutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "get_price_safe",
+          "inputs": [
+            {
+              "name": "asset",
+              "type": "core::starknet::contract_address::ContractAddress"
+            }
+          ],
+          "outputs": [
+            {
+              "type": "(core::integer::u256, core::bool)"
+            }
+          ],
+          "state_mutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "get_prices",
+          "inputs": [
+            {
+              "name": "assets",
+              "type": "core::array::Array::<core::starknet::contract_address::ContractAddress>"
+            }
+          ],
+          "outputs": [
+            {
+              "type": "core::array::Array::<core::integer::u256>"
+            }
+          ],
+          "state_mutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "set_price",
+          "inputs": [
+            {
+              "name": "asset",
+              "type": "core::starknet::contract_address::ContractAddress"
+            },
+            {
+              "name": "price",
+              "type": "core::integer::u256"
+            }
+          ],
+          "outputs": [],
+          "state_mutability": "external"
+        },
+        {
+          "type": "function",
+          "name": "set_prices",
+          "inputs": [
+            {
+              "name": "assets",
+              "type": "core::array::Array::<core::starknet::contract_address::ContractAddress>"
+            },
+            {
+              "name": "prices",
+              "type": "core::array::Array::<core::integer::u256>"
+            }
+          ],
+          "outputs": [],
+          "state_mutability": "external"
+        },
+        {
+          "type": "function",
+          "name": "get_price_source",
+          "inputs": [
+            {
+              "name": "asset",
+              "type": "core::starknet::contract_address::ContractAddress"
+            }
+          ],
+          "outputs": [
+            {
+              "type": "core::starknet::contract_address::ContractAddress"
+            }
+          ],
+          "state_mutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "set_price_source",
+          "inputs": [
+            {
+              "name": "asset",
+              "type": "core::starknet::contract_address::ContractAddress"
+            },
+            {
+              "name": "source",
+              "type": "core::starknet::contract_address::ContractAddress"
+            }
+          ],
+          "outputs": [],
+          "state_mutability": "external"
+        },
+        {
+          "type": "function",
+          "name": "get_price_decimals",
+          "inputs": [],
+          "outputs": [
+            {
+              "type": "core::integer::u8"
+            }
+          ],
+          "state_mutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "get_base_currency",
+          "inputs": [],
+          "outputs": [
+            {
+              "type": "core::felt252"
+            }
+          ],
+          "state_mutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "get_staleness_threshold",
+          "inputs": [],
+          "outputs": [
+            {
+              "type": "core::integer::u64"
+            }
+          ],
+          "state_mutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "set_staleness_threshold",
+          "inputs": [
+            {
+              "name": "new_threshold",
+              "type": "core::integer::u64"
+            }
+          ],
+          "outputs": [],
+          "state_mutability": "external"
+        },
+        {
+          "type": "function",
+          "name": "get_last_update_timestamp",
+          "inputs": [
+            {
+              "name": "asset",
+              "type": "core::starknet::contract_address::ContractAddress"
+            }
+          ],
+          "outputs": [
+            {
+              "type": "core::integer::u64"
+            }
+          ],
+          "state_mutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "is_price_fresh",
+          "inputs": [
+            {
+              "name": "asset",
+              "type": "core::starknet::contract_address::ContractAddress"
+            }
+          ],
+          "outputs": [
+            {
+              "type": "core::bool"
+            }
+          ],
+          "state_mutability": "view"
+        }
+      ]
+    },
+    {
+      "type": "impl",
+      "name": "UpgradeableImpl",
+      "interface_name": "openzeppelin_upgrades::interface::IUpgradeable"
+    },
+    {
+      "type": "interface",
+      "name": "openzeppelin_upgrades::interface::IUpgradeable",
+      "items": [
+        {
+          "type": "function",
+          "name": "upgrade",
+          "inputs": [
+            {
+              "name": "new_class_hash",
+              "type": "core::starknet::class_hash::ClassHash"
+            }
+          ],
+          "outputs": [],
+          "state_mutability": "external"
+        }
+      ]
+    },
+    {
+      "type": "impl",
+      "name": "AccessControlImpl",
+      "interface_name": "openzeppelin_access::accesscontrol::interface::IAccessControl"
+    },
+    {
+      "type": "interface",
+      "name": "openzeppelin_access::accesscontrol::interface::IAccessControl",
+      "items": [
+        {
+          "type": "function",
+          "name": "has_role",
+          "inputs": [
+            {
+              "name": "role",
+              "type": "core::felt252"
+            },
+            {
+              "name": "account",
+              "type": "core::starknet::contract_address::ContractAddress"
+            }
+          ],
+          "outputs": [
+            {
+              "type": "core::bool"
+            }
+          ],
+          "state_mutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "get_role_admin",
+          "inputs": [
+            {
+              "name": "role",
+              "type": "core::felt252"
+            }
+          ],
+          "outputs": [
+            {
+              "type": "core::felt252"
+            }
+          ],
+          "state_mutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "grant_role",
+          "inputs": [
+            {
+              "name": "role",
+              "type": "core::felt252"
+            },
+            {
+              "name": "account",
+              "type": "core::starknet::contract_address::ContractAddress"
+            }
+          ],
+          "outputs": [],
+          "state_mutability": "external"
+        },
+        {
+          "type": "function",
+          "name": "revoke_role",
+          "inputs": [
+            {
+              "name": "role",
+              "type": "core::felt252"
+            },
+            {
+              "name": "account",
+              "type": "core::starknet::contract_address::ContractAddress"
+            }
+          ],
+          "outputs": [],
+          "state_mutability": "external"
+        },
+        {
+          "type": "function",
+          "name": "renounce_role",
+          "inputs": [
+            {
+              "name": "role",
+              "type": "core::felt252"
+            },
+            {
+              "name": "account",
+              "type": "core::starknet::contract_address::ContractAddress"
+            }
+          ],
+          "outputs": [],
+          "state_mutability": "external"
+        }
+      ]
+    },
+    {
+      "type": "constructor",
+      "name": "constructor",
+      "inputs": [
+        {
+          "name": "admin_address",
+          "type": "core::starknet::contract_address::ContractAddress"
+        },
+        {
+          "name": "base_currency",
+          "type": "core::felt252"
+        },
+        {
+          "name": "price_decimals",
+          "type": "core::integer::u8"
+        },
+        {
+          "name": "staleness_threshold",
+          "type": "core::integer::u64"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "openzeppelin_access::accesscontrol::accesscontrol::AccessControlComponent::RoleGranted",
+      "kind": "struct",
+      "members": [
+        {
+          "name": "role",
+          "type": "core::felt252",
+          "kind": "data"
+        },
+        {
+          "name": "account",
+          "type": "core::starknet::contract_address::ContractAddress",
+          "kind": "data"
+        },
+        {
+          "name": "sender",
+          "type": "core::starknet::contract_address::ContractAddress",
+          "kind": "data"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "openzeppelin_access::accesscontrol::accesscontrol::AccessControlComponent::RoleGrantedWithDelay",
+      "kind": "struct",
+      "members": [
+        {
+          "name": "role",
+          "type": "core::felt252",
+          "kind": "data"
+        },
+        {
+          "name": "account",
+          "type": "core::starknet::contract_address::ContractAddress",
+          "kind": "data"
+        },
+        {
+          "name": "sender",
+          "type": "core::starknet::contract_address::ContractAddress",
+          "kind": "data"
+        },
+        {
+          "name": "delay",
+          "type": "core::integer::u64",
+          "kind": "data"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "openzeppelin_access::accesscontrol::accesscontrol::AccessControlComponent::RoleRevoked",
+      "kind": "struct",
+      "members": [
+        {
+          "name": "role",
+          "type": "core::felt252",
+          "kind": "data"
+        },
+        {
+          "name": "account",
+          "type": "core::starknet::contract_address::ContractAddress",
+          "kind": "data"
+        },
+        {
+          "name": "sender",
+          "type": "core::starknet::contract_address::ContractAddress",
+          "kind": "data"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "openzeppelin_access::accesscontrol::accesscontrol::AccessControlComponent::RoleAdminChanged",
+      "kind": "struct",
+      "members": [
+        {
+          "name": "role",
+          "type": "core::felt252",
+          "kind": "data"
+        },
+        {
+          "name": "previous_admin_role",
+          "type": "core::felt252",
+          "kind": "data"
+        },
+        {
+          "name": "new_admin_role",
+          "type": "core::felt252",
+          "kind": "data"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "openzeppelin_access::accesscontrol::accesscontrol::AccessControlComponent::Event",
+      "kind": "enum",
+      "variants": [
+        {
+          "name": "RoleGranted",
+          "type": "openzeppelin_access::accesscontrol::accesscontrol::AccessControlComponent::RoleGranted",
+          "kind": "nested"
+        },
+        {
+          "name": "RoleGrantedWithDelay",
+          "type": "openzeppelin_access::accesscontrol::accesscontrol::AccessControlComponent::RoleGrantedWithDelay",
+          "kind": "nested"
+        },
+        {
+          "name": "RoleRevoked",
+          "type": "openzeppelin_access::accesscontrol::accesscontrol::AccessControlComponent::RoleRevoked",
+          "kind": "nested"
+        },
+        {
+          "name": "RoleAdminChanged",
+          "type": "openzeppelin_access::accesscontrol::accesscontrol::AccessControlComponent::RoleAdminChanged",
+          "kind": "nested"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "openzeppelin_introspection::src5::SRC5Component::Event",
+      "kind": "enum",
+      "variants": []
+    },
+    {
+      "type": "event",
+      "name": "openzeppelin_upgrades::upgradeable::UpgradeableComponent::Upgraded",
+      "kind": "struct",
+      "members": [
+        {
+          "name": "class_hash",
+          "type": "core::starknet::class_hash::ClassHash",
+          "kind": "data"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "openzeppelin_upgrades::upgradeable::UpgradeableComponent::Event",
+      "kind": "enum",
+      "variants": [
+        {
+          "name": "Upgraded",
+          "type": "openzeppelin_upgrades::upgradeable::UpgradeableComponent::Upgraded",
+          "kind": "nested"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "veilend_contracts::event_structs::event_structs::PriceUpdated",
+      "kind": "struct",
+      "members": [
+        {
+          "name": "asset",
+          "type": "core::starknet::contract_address::ContractAddress",
+          "kind": "data"
+        },
+        {
+          "name": "price",
+          "type": "core::integer::u256",
+          "kind": "data"
+        },
+        {
+          "name": "timestamp",
+          "type": "core::integer::u64",
+          "kind": "data"
+        },
+        {
+          "name": "updater",
+          "type": "core::starknet::contract_address::ContractAddress",
+          "kind": "data"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "veilend_contracts::event_structs::event_structs::PriceSourceSet",
+      "kind": "struct",
+      "members": [
+        {
+          "name": "asset",
+          "type": "core::starknet::contract_address::ContractAddress",
+          "kind": "data"
+        },
+        {
+          "name": "source",
+          "type": "core::starknet::contract_address::ContractAddress",
+          "kind": "data"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "veilend_contracts::event_structs::event_structs::StalenessThresholdUpdated",
+      "kind": "struct",
+      "members": [
+        {
+          "name": "old_threshold",
+          "type": "core::integer::u64",
+          "kind": "data"
+        },
+        {
+          "name": "new_threshold",
+          "type": "core::integer::u64",
+          "kind": "data"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "veilend_contracts::contracts::price_oracle::PriceOracle::Event",
+      "kind": "enum",
+      "variants": [
+        {
+          "name": "AccessControlEvent",
+          "type": "openzeppelin_access::accesscontrol::accesscontrol::AccessControlComponent::Event",
+          "kind": "flat"
+        },
+        {
+          "name": "SRC5Event",
+          "type": "openzeppelin_introspection::src5::SRC5Component::Event",
+          "kind": "flat"
+        },
+        {
+          "name": "UpgradeableEvent",
+          "type": "openzeppelin_upgrades::upgradeable::UpgradeableComponent::Event",
+          "kind": "flat"
+        },
+        {
+          "name": "PriceUpdated",
+          "type": "veilend_contracts::event_structs::event_structs::PriceUpdated",
+          "kind": "nested"
+        },
+        {
+          "name": "PriceSourceSet",
+          "type": "veilend_contracts::event_structs::event_structs::PriceSourceSet",
+          "kind": "nested"
+        },
+        {
+          "name": "StalenessThresholdUpdated",
+          "type": "veilend_contracts::event_structs::event_structs::StalenessThresholdUpdated",
+          "kind": "nested"
+        }
+      ]
+    }
+  ]

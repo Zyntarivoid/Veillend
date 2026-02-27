@@ -1,0 +1,815 @@
+[
+    {
+      "type": "impl",
+      "name": "ReserveDataImpl",
+      "interface_name": "veilend_contracts::interfaces::interfaces::IReserveData"
+    },
+    {
+      "type": "struct",
+      "name": "core::integer::u256",
+      "members": [
+        {
+          "name": "low",
+          "type": "core::integer::u128"
+        },
+        {
+          "name": "high",
+          "type": "core::integer::u128"
+        }
+      ]
+    },
+    {
+      "type": "enum",
+      "name": "core::bool",
+      "variants": [
+        {
+          "name": "False",
+          "type": "()"
+        },
+        {
+          "name": "True",
+          "type": "()"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "veilend_contracts::structs::structs::ReserveConfigurationResponse",
+      "members": [
+        {
+          "name": "optimal_utilization_rate",
+          "type": "core::integer::u256"
+        },
+        {
+          "name": "base_variable_borrow_rate",
+          "type": "core::integer::u256"
+        },
+        {
+          "name": "variable_rate_slope1",
+          "type": "core::integer::u256"
+        },
+        {
+          "name": "variable_rate_slope2",
+          "type": "core::integer::u256"
+        },
+        {
+          "name": "loan_to_value",
+          "type": "core::integer::u256"
+        },
+        {
+          "name": "liquidation_threshold",
+          "type": "core::integer::u256"
+        },
+        {
+          "name": "liquidation_bonus",
+          "type": "core::integer::u256"
+        },
+        {
+          "name": "reserve_factor",
+          "type": "core::integer::u256"
+        },
+        {
+          "name": "a_token_address",
+          "type": "core::starknet::contract_address::ContractAddress"
+        },
+        {
+          "name": "variable_debt_token_address",
+          "type": "core::starknet::contract_address::ContractAddress"
+        },
+        {
+          "name": "is_active",
+          "type": "core::bool"
+        },
+        {
+          "name": "is_frozen",
+          "type": "core::bool"
+        },
+        {
+          "name": "borrowing_enabled",
+          "type": "core::bool"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "veilend_contracts::structs::structs::ReserveStateResponse",
+      "members": [
+        {
+          "name": "total_liquidity",
+          "type": "core::integer::u256"
+        },
+        {
+          "name": "available_liquidity",
+          "type": "core::integer::u256"
+        },
+        {
+          "name": "total_variable_debt",
+          "type": "core::integer::u256"
+        },
+        {
+          "name": "liquidity_rate",
+          "type": "core::integer::u256"
+        },
+        {
+          "name": "variable_borrow_rate",
+          "type": "core::integer::u256"
+        },
+        {
+          "name": "liquidity_index",
+          "type": "core::integer::u256"
+        },
+        {
+          "name": "variable_borrow_index",
+          "type": "core::integer::u256"
+        },
+        {
+          "name": "last_update_timestamp",
+          "type": "core::integer::u64"
+        }
+      ]
+    },
+    {
+      "type": "struct",
+      "name": "veilend_contracts::structs::structs::UserReserveDataResponse",
+      "members": [
+        {
+          "name": "scaled_a_token_balance",
+          "type": "core::integer::u256"
+        },
+        {
+          "name": "scaled_variable_debt",
+          "type": "core::integer::u256"
+        },
+        {
+          "name": "is_using_as_collateral",
+          "type": "core::bool"
+        }
+      ]
+    },
+    {
+      "type": "interface",
+      "name": "veilend_contracts::interfaces::interfaces::IReserveData",
+      "items": [
+        {
+          "type": "function",
+          "name": "set_reserve_config",
+          "inputs": [
+            {
+              "name": "asset",
+              "type": "core::starknet::contract_address::ContractAddress"
+            },
+            {
+              "name": "optimal_utilization_rate",
+              "type": "core::integer::u256"
+            },
+            {
+              "name": "base_variable_borrow_rate",
+              "type": "core::integer::u256"
+            },
+            {
+              "name": "variable_rate_slope1",
+              "type": "core::integer::u256"
+            },
+            {
+              "name": "variable_rate_slope2",
+              "type": "core::integer::u256"
+            },
+            {
+              "name": "loan_to_value",
+              "type": "core::integer::u256"
+            },
+            {
+              "name": "liquidation_threshold",
+              "type": "core::integer::u256"
+            },
+            {
+              "name": "liquidation_bonus",
+              "type": "core::integer::u256"
+            },
+            {
+              "name": "reserve_factor",
+              "type": "core::integer::u256"
+            },
+            {
+              "name": "a_token_address",
+              "type": "core::starknet::contract_address::ContractAddress"
+            },
+            {
+              "name": "variable_debt_token_address",
+              "type": "core::starknet::contract_address::ContractAddress"
+            },
+            {
+              "name": "is_active",
+              "type": "core::bool"
+            },
+            {
+              "name": "is_frozen",
+              "type": "core::bool"
+            },
+            {
+              "name": "borrowing_enabled",
+              "type": "core::bool"
+            }
+          ],
+          "outputs": [],
+          "state_mutability": "external"
+        },
+        {
+          "type": "function",
+          "name": "get_reserve_config",
+          "inputs": [
+            {
+              "name": "asset",
+              "type": "core::starknet::contract_address::ContractAddress"
+            }
+          ],
+          "outputs": [
+            {
+              "type": "veilend_contracts::structs::structs::ReserveConfigurationResponse"
+            }
+          ],
+          "state_mutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "set_reserve_state",
+          "inputs": [
+            {
+              "name": "asset",
+              "type": "core::starknet::contract_address::ContractAddress"
+            },
+            {
+              "name": "total_liquidity",
+              "type": "core::integer::u256"
+            },
+            {
+              "name": "available_liquidity",
+              "type": "core::integer::u256"
+            },
+            {
+              "name": "total_variable_debt",
+              "type": "core::integer::u256"
+            },
+            {
+              "name": "liquidity_rate",
+              "type": "core::integer::u256"
+            },
+            {
+              "name": "variable_borrow_rate",
+              "type": "core::integer::u256"
+            },
+            {
+              "name": "liquidity_index",
+              "type": "core::integer::u256"
+            },
+            {
+              "name": "variable_borrow_index",
+              "type": "core::integer::u256"
+            }
+          ],
+          "outputs": [],
+          "state_mutability": "external"
+        },
+        {
+          "type": "function",
+          "name": "get_reserve_state",
+          "inputs": [
+            {
+              "name": "asset",
+              "type": "core::starknet::contract_address::ContractAddress"
+            }
+          ],
+          "outputs": [
+            {
+              "type": "veilend_contracts::structs::structs::ReserveStateResponse"
+            }
+          ],
+          "state_mutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "set_user_reserve_data",
+          "inputs": [
+            {
+              "name": "user",
+              "type": "core::starknet::contract_address::ContractAddress"
+            },
+            {
+              "name": "asset",
+              "type": "core::starknet::contract_address::ContractAddress"
+            },
+            {
+              "name": "scaled_a_token_balance",
+              "type": "core::integer::u256"
+            },
+            {
+              "name": "scaled_variable_debt",
+              "type": "core::integer::u256"
+            },
+            {
+              "name": "is_using_as_collateral",
+              "type": "core::bool"
+            }
+          ],
+          "outputs": [],
+          "state_mutability": "external"
+        },
+        {
+          "type": "function",
+          "name": "get_user_reserve_data",
+          "inputs": [
+            {
+              "name": "user",
+              "type": "core::starknet::contract_address::ContractAddress"
+            },
+            {
+              "name": "asset",
+              "type": "core::starknet::contract_address::ContractAddress"
+            }
+          ],
+          "outputs": [
+            {
+              "type": "veilend_contracts::structs::structs::UserReserveDataResponse"
+            }
+          ],
+          "state_mutability": "view"
+        }
+      ]
+    },
+    {
+      "type": "impl",
+      "name": "UpgradeableImpl",
+      "interface_name": "openzeppelin_upgrades::interface::IUpgradeable"
+    },
+    {
+      "type": "interface",
+      "name": "openzeppelin_upgrades::interface::IUpgradeable",
+      "items": [
+        {
+          "type": "function",
+          "name": "upgrade",
+          "inputs": [
+            {
+              "name": "new_class_hash",
+              "type": "core::starknet::class_hash::ClassHash"
+            }
+          ],
+          "outputs": [],
+          "state_mutability": "external"
+        }
+      ]
+    },
+    {
+      "type": "impl",
+      "name": "AccessControlImpl",
+      "interface_name": "openzeppelin_access::accesscontrol::interface::IAccessControl"
+    },
+    {
+      "type": "interface",
+      "name": "openzeppelin_access::accesscontrol::interface::IAccessControl",
+      "items": [
+        {
+          "type": "function",
+          "name": "has_role",
+          "inputs": [
+            {
+              "name": "role",
+              "type": "core::felt252"
+            },
+            {
+              "name": "account",
+              "type": "core::starknet::contract_address::ContractAddress"
+            }
+          ],
+          "outputs": [
+            {
+              "type": "core::bool"
+            }
+          ],
+          "state_mutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "get_role_admin",
+          "inputs": [
+            {
+              "name": "role",
+              "type": "core::felt252"
+            }
+          ],
+          "outputs": [
+            {
+              "type": "core::felt252"
+            }
+          ],
+          "state_mutability": "view"
+        },
+        {
+          "type": "function",
+          "name": "grant_role",
+          "inputs": [
+            {
+              "name": "role",
+              "type": "core::felt252"
+            },
+            {
+              "name": "account",
+              "type": "core::starknet::contract_address::ContractAddress"
+            }
+          ],
+          "outputs": [],
+          "state_mutability": "external"
+        },
+        {
+          "type": "function",
+          "name": "revoke_role",
+          "inputs": [
+            {
+              "name": "role",
+              "type": "core::felt252"
+            },
+            {
+              "name": "account",
+              "type": "core::starknet::contract_address::ContractAddress"
+            }
+          ],
+          "outputs": [],
+          "state_mutability": "external"
+        },
+        {
+          "type": "function",
+          "name": "renounce_role",
+          "inputs": [
+            {
+              "name": "role",
+              "type": "core::felt252"
+            },
+            {
+              "name": "account",
+              "type": "core::starknet::contract_address::ContractAddress"
+            }
+          ],
+          "outputs": [],
+          "state_mutability": "external"
+        }
+      ]
+    },
+    {
+      "type": "constructor",
+      "name": "constructor",
+      "inputs": [
+        {
+          "name": "admin_address",
+          "type": "core::starknet::contract_address::ContractAddress"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "openzeppelin_access::accesscontrol::accesscontrol::AccessControlComponent::RoleGranted",
+      "kind": "struct",
+      "members": [
+        {
+          "name": "role",
+          "type": "core::felt252",
+          "kind": "data"
+        },
+        {
+          "name": "account",
+          "type": "core::starknet::contract_address::ContractAddress",
+          "kind": "data"
+        },
+        {
+          "name": "sender",
+          "type": "core::starknet::contract_address::ContractAddress",
+          "kind": "data"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "openzeppelin_access::accesscontrol::accesscontrol::AccessControlComponent::RoleGrantedWithDelay",
+      "kind": "struct",
+      "members": [
+        {
+          "name": "role",
+          "type": "core::felt252",
+          "kind": "data"
+        },
+        {
+          "name": "account",
+          "type": "core::starknet::contract_address::ContractAddress",
+          "kind": "data"
+        },
+        {
+          "name": "sender",
+          "type": "core::starknet::contract_address::ContractAddress",
+          "kind": "data"
+        },
+        {
+          "name": "delay",
+          "type": "core::integer::u64",
+          "kind": "data"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "openzeppelin_access::accesscontrol::accesscontrol::AccessControlComponent::RoleRevoked",
+      "kind": "struct",
+      "members": [
+        {
+          "name": "role",
+          "type": "core::felt252",
+          "kind": "data"
+        },
+        {
+          "name": "account",
+          "type": "core::starknet::contract_address::ContractAddress",
+          "kind": "data"
+        },
+        {
+          "name": "sender",
+          "type": "core::starknet::contract_address::ContractAddress",
+          "kind": "data"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "openzeppelin_access::accesscontrol::accesscontrol::AccessControlComponent::RoleAdminChanged",
+      "kind": "struct",
+      "members": [
+        {
+          "name": "role",
+          "type": "core::felt252",
+          "kind": "data"
+        },
+        {
+          "name": "previous_admin_role",
+          "type": "core::felt252",
+          "kind": "data"
+        },
+        {
+          "name": "new_admin_role",
+          "type": "core::felt252",
+          "kind": "data"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "openzeppelin_access::accesscontrol::accesscontrol::AccessControlComponent::Event",
+      "kind": "enum",
+      "variants": [
+        {
+          "name": "RoleGranted",
+          "type": "openzeppelin_access::accesscontrol::accesscontrol::AccessControlComponent::RoleGranted",
+          "kind": "nested"
+        },
+        {
+          "name": "RoleGrantedWithDelay",
+          "type": "openzeppelin_access::accesscontrol::accesscontrol::AccessControlComponent::RoleGrantedWithDelay",
+          "kind": "nested"
+        },
+        {
+          "name": "RoleRevoked",
+          "type": "openzeppelin_access::accesscontrol::accesscontrol::AccessControlComponent::RoleRevoked",
+          "kind": "nested"
+        },
+        {
+          "name": "RoleAdminChanged",
+          "type": "openzeppelin_access::accesscontrol::accesscontrol::AccessControlComponent::RoleAdminChanged",
+          "kind": "nested"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "openzeppelin_introspection::src5::SRC5Component::Event",
+      "kind": "enum",
+      "variants": []
+    },
+    {
+      "type": "event",
+      "name": "openzeppelin_upgrades::upgradeable::UpgradeableComponent::Upgraded",
+      "kind": "struct",
+      "members": [
+        {
+          "name": "class_hash",
+          "type": "core::starknet::class_hash::ClassHash",
+          "kind": "data"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "openzeppelin_upgrades::upgradeable::UpgradeableComponent::Event",
+      "kind": "enum",
+      "variants": [
+        {
+          "name": "Upgraded",
+          "type": "openzeppelin_upgrades::upgradeable::UpgradeableComponent::Upgraded",
+          "kind": "nested"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "veilend_contracts::event_structs::event_structs::ReserveConfigurationUpdated",
+      "kind": "struct",
+      "members": [
+        {
+          "name": "asset",
+          "type": "core::starknet::contract_address::ContractAddress",
+          "kind": "data"
+        },
+        {
+          "name": "optimal_utilization_rate",
+          "type": "core::integer::u256",
+          "kind": "data"
+        },
+        {
+          "name": "base_variable_borrow_rate",
+          "type": "core::integer::u256",
+          "kind": "data"
+        },
+        {
+          "name": "variable_rate_slope1",
+          "type": "core::integer::u256",
+          "kind": "data"
+        },
+        {
+          "name": "variable_rate_slope2",
+          "type": "core::integer::u256",
+          "kind": "data"
+        },
+        {
+          "name": "loan_to_value",
+          "type": "core::integer::u256",
+          "kind": "data"
+        },
+        {
+          "name": "liquidation_threshold",
+          "type": "core::integer::u256",
+          "kind": "data"
+        },
+        {
+          "name": "liquidation_bonus",
+          "type": "core::integer::u256",
+          "kind": "data"
+        },
+        {
+          "name": "reserve_factor",
+          "type": "core::integer::u256",
+          "kind": "data"
+        },
+        {
+          "name": "a_token_address",
+          "type": "core::starknet::contract_address::ContractAddress",
+          "kind": "data"
+        },
+        {
+          "name": "variable_debt_token_address",
+          "type": "core::starknet::contract_address::ContractAddress",
+          "kind": "data"
+        },
+        {
+          "name": "is_active",
+          "type": "core::bool",
+          "kind": "data"
+        },
+        {
+          "name": "is_frozen",
+          "type": "core::bool",
+          "kind": "data"
+        },
+        {
+          "name": "borrowing_enabled",
+          "type": "core::bool",
+          "kind": "data"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "veilend_contracts::event_structs::event_structs::ReserveStateUpdated",
+      "kind": "struct",
+      "members": [
+        {
+          "name": "asset",
+          "type": "core::starknet::contract_address::ContractAddress",
+          "kind": "data"
+        },
+        {
+          "name": "total_liquidity",
+          "type": "core::integer::u256",
+          "kind": "data"
+        },
+        {
+          "name": "available_liquidity",
+          "type": "core::integer::u256",
+          "kind": "data"
+        },
+        {
+          "name": "total_variable_debt",
+          "type": "core::integer::u256",
+          "kind": "data"
+        },
+        {
+          "name": "liquidity_rate",
+          "type": "core::integer::u256",
+          "kind": "data"
+        },
+        {
+          "name": "variable_borrow_rate",
+          "type": "core::integer::u256",
+          "kind": "data"
+        },
+        {
+          "name": "liquidity_index",
+          "type": "core::integer::u256",
+          "kind": "data"
+        },
+        {
+          "name": "variable_borrow_index",
+          "type": "core::integer::u256",
+          "kind": "data"
+        },
+        {
+          "name": "last_update_timestamp",
+          "type": "core::integer::u64",
+          "kind": "data"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "veilend_contracts::event_structs::event_structs::UserReserveDataUpdated",
+      "kind": "struct",
+      "members": [
+        {
+          "name": "user",
+          "type": "core::starknet::contract_address::ContractAddress",
+          "kind": "data"
+        },
+        {
+          "name": "asset",
+          "type": "core::starknet::contract_address::ContractAddress",
+          "kind": "data"
+        },
+        {
+          "name": "scaled_a_token_balance",
+          "type": "core::integer::u256",
+          "kind": "data"
+        },
+        {
+          "name": "scaled_variable_debt",
+          "type": "core::integer::u256",
+          "kind": "data"
+        },
+        {
+          "name": "is_using_as_collateral",
+          "type": "core::bool",
+          "kind": "data"
+        }
+      ]
+    },
+    {
+      "type": "event",
+      "name": "veilend_contracts::contracts::reserve_data::ReserveData::Event",
+      "kind": "enum",
+      "variants": [
+        {
+          "name": "AccessControlEvent",
+          "type": "openzeppelin_access::accesscontrol::accesscontrol::AccessControlComponent::Event",
+          "kind": "flat"
+        },
+        {
+          "name": "SRC5Event",
+          "type": "openzeppelin_introspection::src5::SRC5Component::Event",
+          "kind": "flat"
+        },
+        {
+          "name": "UpgradeableEvent",
+          "type": "openzeppelin_upgrades::upgradeable::UpgradeableComponent::Event",
+          "kind": "flat"
+        },
+        {
+          "name": "ReserveConfigurationUpdated",
+          "type": "veilend_contracts::event_structs::event_structs::ReserveConfigurationUpdated",
+          "kind": "nested"
+        },
+        {
+          "name": "ReserveStateUpdated",
+          "type": "veilend_contracts::event_structs::event_structs::ReserveStateUpdated",
+          "kind": "nested"
+        },
+        {
+          "name": "UserReserveDataUpdated",
+          "type": "veilend_contracts::event_structs::event_structs::UserReserveDataUpdated",
+          "kind": "nested"
+        }
+      ]
+    }
+  ]
