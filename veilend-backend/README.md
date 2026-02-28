@@ -1,3 +1,107 @@
+# VeilLend Backend
+
+This repository contains the VeilLend backend — a NestJS API server that integrates with Starknet smart contracts (Cairo) and persists user data using Supabase (or a local Postgres fallback). It provides wallet-based authentication (nonce + signature + JWT), Starknet helpers, and controllers/services that mirror the on-chain contract methods for lending, shielded transfers, price oracles, reserves, and governance.
+
+**Quick start**
+
+- **Clone & install:**
+
+```bash
+cd veilend-backend
+npm install
+```
+
+- **Dev server (with Supabase or local Postgres + Starknet devnet running):**
+
+```bash
+# Copy example env
+cp .env.example .env
+# Edit .env to set SUPABASE_URL/SUPABASE_KEY or DATABASE_URL
+npm run start:dev
+```
+
+**Local dev notes**
+- For on-chain testing run a Starknet devnet (default RPC: `http://127.0.0.1:5050`).
+- If you do not use Supabase, the backend will automatically connect to the `DATABASE_URL` Postgres and apply `supabase_schema.sql` on startup.
+- Admin signing keys in `.env` are for development only. Use a secure signer (KMS/HSM) in production.
+
+**Environment variables**
+- **App**: `NODE_ENV`, `PORT`, `LOG_LEVEL`
+- **Auth**: `JWT_SECRET`, `JWT_EXPIRES_IN` (optional)
+- **Supabase**: `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `USE_SUPABASE`
+- **Starknet**: `STARKNET_RPC_URL`, `STARKNET_DEVNET_URL`
+- **Admin wallet (dev only)**: `ADMIN_NODE_URL`, `ADMIN_WALLET_ADDRESS`, `ADMIN_PRIVATE_KEY`
+- **Postgres fallback**: `DATABASE_URL`, `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`
+
+See the example file: [.env.example](.env.example)
+
+**Key features**
+- Wallet-auth: nonce generation, typed-data signature verification (Starknet), JWT issuance.
+- Starknet service: ABI loader, calldata compiler, account instantiate + execute transaction helpers, and parsed event output.
+- Contract modules scaffolded to mirror on-chain contracts: ShieldedPool, LendingPool, PriceOracle, ReserveData, AddressesProvider, InterestToken, Governance.
+- Postgres fallback adapter that executes `supabase_schema.sql` on startup when Supabase is not configured.
+
+**Folder structure (important files)**
+
+- **Project root**
+  - **.env.example** - example environment variables
+  - **supabase_schema.sql** - SQL schema applied to local Postgres fallback
+  - **package.json**
+
+- **src/**
+  - **app.module.ts** - application module and registered feature modules
+  - **main.ts** - app bootstrap, Swagger, global validation
+  - **starknet/**
+    - **starknet.module.ts** - Nest module for Starknet helpers
+    - **starknet.service.ts** - ABI loader, calldata compiler, account helpers, `executeTransaction()` (returns `{ txHash, receipt, events }`)
+  - **auth/**
+    - **auth.module.ts** - Jwt config via ConfigService
+    - **auth.service.ts** - nonce generation, signature verification, login JWT
+    - **auth.controller.ts** - auth endpoints
+  - **supabase/**
+    - **supabase.module.ts**
+    - **supabase.service.ts** - Supabase client or Postgres fallback adapter (runs `supabase_schema.sql` on startup)
+  - **users/**, **transactions/**, **positions/** - business models using Supabase or Postgres fallback
+  - **shielded-pool/**, **lending-pool/**, **price-oracle/**, **reserve-data/**, **addresses-provider/**, **interest-token/**, **governance/**
+    - Each module contains `*.module.ts`, `*.service.ts`, `*.controller.ts` and `dto/` for write operations
+
+See the app module: [src/app.module.ts](src/app.module.ts)
+
+**APIs (high-level)**
+- `POST /auth/nonce` — generate nonce for a wallet address
+- `POST /auth/verify` — verify typed-data signature and issue JWT
+- Contract read endpoints (GET) under `/lending-pool`, `/shielded-pool`, `/price-oracle`, etc.
+- Contract write endpoints (POST) under respective controllers (require admin signing or authenticated flows depending on your setup). Write endpoints return parsed events when available.
+
+**Database & Migrations**
+- The repository contains `supabase_schema.sql` (idempotent CREATE IF NOT EXISTS statements). If Supabase is not configured, the backend will connect to `DATABASE_URL` and execute the SQL on startup.
+- For production, prefer a migration tool (recommended): `node-pg-migrate`, `Prisma Migrate`, Flyway, or a CI-run SQL migration job. I can add one if desired.
+
+**Testing**
+- Unit tests use Jest. Run:
+
+```bash
+npm run test
+```
+
+**Security & production notes**
+- Never store production private keys in `.env`. Use a secure signing service (AWS KMS, Azure Key Vault, HashiCorp Vault, or an HSM).
+- Use `SUPABASE_SERVICE_ROLE_KEY` only on the server side; rotate regularly.
+- Harden CORS and auth strategies when exposing APIs publicly.
+
+**Next steps / Improvements**
+- Add integration tests that mock Starknet provider and simulate transactions/events.
+- Add Swagger decorators across controllers for full API documentation (Swagger is enabled in `main.ts`).
+- Integrate a robust migration system and CI pre-deploy checks.
+- Replace dev admin-signer with a signer service (KMS) and implement RBAC for admin endpoints.
+
+If you'd like, I can now:
+- Run local `npm install` and `npm run build`/`test` (I can run in your environment or provide commands),
+- Add full Swagger decorators for all controllers,
+- Add a migration tool and CI scripts.
+
+---
+Generated by assistant — reach out if you want the README extended with API examples or a contributor guide.
 <p align="center">
   <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
 </p>

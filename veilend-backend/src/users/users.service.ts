@@ -6,7 +6,8 @@ export type User = {
   address: string;
   username?: string;
   avatar_url?: string;
-  nonce?: string;
+  nonce?: string | null;
+  nonce_expires_at?: number | string | null;
   balance?: number;
   collateral_value?: number;
   borrowed_value?: number;
