@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
-import { View, Text, TouchableOpacity, Alert, StyleSheet, Image, Dimensions } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Image, Dimensions } from 'react-native';
+import Toast from '../utils/toast';
 import { useConnect, useAccount } from '@starknet-react/core';
 import { useStarknetkitConnectModal } from 'starknetkit';
 import { useStore } from '../store/store';
@@ -15,7 +16,7 @@ const { width } = Dimensions.get('window');
 export default function ConnectWalletScreen() {
   const { connect, connectors } = useConnect();
   const { address, account } = useAccount();
-  const { setAddress, setAuthToken } = useStore();
+  const { setAddress, requestNonce, verify, setAuthToken } = useStore();
   const scale = useSharedValue(1);
 
   useEffect(() => {
@@ -64,8 +65,8 @@ export default function ConnectWalletScreen() {
       if (!address || !account) return;
       setAddress(address);
 
-      // 1. Get Nonce
-      const { data: { nonce } } = await api.post(`/auth/nonce?address=${address}`);
+      // 1. Get Nonce (via store helper)
+      const nonce = await requestNonce(address);
 
       // 2. Sign Message
       const typedData = {
@@ -92,18 +93,12 @@ export default function ConnectWalletScreen() {
 
       const signature = await account.signMessage(typedData);
       
-      // 3. Verify
-      const { data: { access_token } } = await api.post('/auth/verify', {
-        address,
-        signature,
-        typedData,
-        publicKey: address, 
-      });
-
-      setAuthToken(access_token);
+      // 3. Verify (via store helper)
+      const token = await verify({ address, signature, typedData, publicKey: address });
+      if (token) setAuthToken(token);
     } catch (error: any) {
       console.error(error);
-      Alert.alert('Auth Failed', 'Could not authenticate wallet. ' + error.message);
+      Toast.show({ type: 'error', text1: 'Auth Failed', text2: 'Could not authenticate wallet. ' + (error?.message || '') });
     }
   };
 

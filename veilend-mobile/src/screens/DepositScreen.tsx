@@ -1,10 +1,40 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Image, Modal, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { MOCK_ASSETS } from '../data/mockData';
+import { useStore } from '../store/store';
+import { ActivityIndicator } from 'react-native';
+import Toast from '../utils/toast';
+
+type SelectedAsset = { id: string; name: string; symbol: string; balance?: number } | null;
 
 export default function DepositScreen() {
+  const [modalVisible, setModalVisible] = useState(false);
+  const [selectedAsset, setSelectedAsset] = useState<SelectedAsset>(null);
+  const [amount, setAmount] = useState<string>('');
+
+  const openDepositModal = (asset: any) => {
+    setSelectedAsset(asset);
+    setAmount(String(asset.balance ?? '1'));
+    setModalVisible(true);
+  };
+
+  const confirmDeposit = async () => {
+    if (!selectedAsset) return;
+      try {
+      const res = await useStore.getState().deposit({ amount, asset: selectedAsset.symbol });
+      Toast.show({ type: 'success', text1: 'Deposit Submitted', text2: JSON.stringify(res) });
+      setModalVisible(false);
+    } catch (err: any) {
+      // Fallback to mock response when offline / API fails
+      const mockRes = { txHash: 'mock-' + Date.now(), status: 'mock', amount, asset: selectedAsset.symbol };
+      useStore.setState({ lastLendingTx: mockRes });
+      Toast.show({ type: 'info', text1: 'Offline - Mock Deposit', text2: JSON.stringify(mockRes) });
+      setModalVisible(false);
+    }
+  };
   return (
+    <>
     <ScrollView style={styles.container}>
       <Text style={styles.headerTitle}>Supply Market</Text>
       
@@ -25,7 +55,11 @@ export default function DepositScreen() {
       
       <View style={styles.assetsList}>
         {MOCK_ASSETS.map((asset) => (
-          <TouchableOpacity key={asset.id} style={styles.assetCard}>
+          <TouchableOpacity
+            key={asset.id}
+            style={styles.assetCard}
+            onPress={() => openDepositModal(asset)}
+          >
             <View style={styles.assetLeft}>
               <View style={styles.iconContainer}>
                  <Ionicons name={asset.icon as any} size={24} color="#A855F7" />
@@ -50,7 +84,37 @@ export default function DepositScreen() {
       
       <View style={{ height: 100 }} />
     </ScrollView>
-  );
+      {/* Amount Modal */}
+        <Modal
+          visible={modalVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setModalVisible(false)}
+        >
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Deposit {selectedAsset?.symbol}</Text>
+              <TextInput
+                value={amount}
+                onChangeText={setAmount}
+                keyboardType="numeric"
+                style={styles.amountInput}
+                placeholder="Amount"
+                placeholderTextColor="#888"
+              />
+              <View style={styles.modalButtons}>
+                <TouchableOpacity onPress={() => setModalVisible(false)} style={[styles.modalBtn, { backgroundColor: '#333' }]}>
+                    <Text style={styles.buttonText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={confirmDeposit} style={[styles.modalBtn, { backgroundColor: '#A855F7' }]} disabled={useStore.getState().lendingLoading}>
+                    {useStore.getState().lendingLoading ? <ActivityIndicator color="#fff"/> : <Text style={styles.buttonText}>Confirm</Text>}
+                  </TouchableOpacity>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+          </Modal>
+          </>
+        );
 }
 
 const styles = StyleSheet.create({

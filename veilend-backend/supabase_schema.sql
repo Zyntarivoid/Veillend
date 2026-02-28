@@ -8,6 +8,7 @@ create table if not exists users (
   username text,
   avatar_url text,
   nonce text,
+  nonce_expires_at timestamp with time zone,
   balance numeric default 12500.50,
   collateral_value numeric default 8000.00,
   borrowed_value numeric default 1000.00,
