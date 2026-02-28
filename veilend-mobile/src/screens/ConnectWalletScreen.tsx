@@ -155,7 +155,7 @@ export default function ConnectWalletScreen() {
         <Animated.View style={[styles.connectButtonContainer, animatedButtonStyle]}>
            <TouchableOpacity 
             activeOpacity={0.8}
-            onPress={handleBypass}
+            onPress={handleConnect}
           >
             <LinearGradient
               colors={['#C084FC', '#A855F7']}

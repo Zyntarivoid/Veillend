@@ -6,6 +6,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { MOCK_USER, MOCK_TRANSACTIONS } from '../data/mockData';
+import { shortenAddress } from '../utils/helpers';
 
 const { width } = Dimensions.get('window');
 const isSmallScreen = width < 380;
@@ -26,10 +27,18 @@ export default function DashboardScreen({ navigation }: any) {
   
   // Profile Menu State
   const [profileVisible, setProfileVisible] = useState(false);
-  const [username, setUsername] = useState(MOCK_USER.name);
+  const [username, setUsername] = useState(address ? shortenAddress(address) : MOCK_USER.name);
   const [isEditingName, setIsEditingName] = useState(false);
-  const [tempName, setTempName] = useState(MOCK_USER.name);
+  const [tempName, setTempName] = useState(address ? shortenAddress(address) : MOCK_USER.name);
   const [profileImage, setProfileImage] = useState('https://i.pravatar.cc/100?img=5');
+
+  useEffect(() => {
+    if (address) {
+      const shortAddr = shortenAddress(address);
+      setUsername(shortAddr);
+      setTempName(shortAddr);
+    }
+  }, [address]);
 
   const handleLogout = () => {
     setProfileVisible(false);
