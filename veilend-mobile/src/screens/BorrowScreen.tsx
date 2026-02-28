@@ -34,6 +34,7 @@ export default function BorrowScreen() {
     }
   };
   return (
+    <>
     <ScrollView style={styles.container}>
       <Text style={styles.headerTitle}>Borrow Market</Text>
       
@@ -83,7 +84,7 @@ export default function BorrowScreen() {
       
       <View style={{ height: 100 }} />
     </ScrollView>
-        {/* Amount Modal */}
+      {/* Amount Modal */}
         <Modal
           visible={modalVisible}
           transparent
@@ -111,8 +112,9 @@ export default function BorrowScreen() {
               </View>
             </View>
           </KeyboardAvoidingView>
-        </Modal>
-  );
+          </Modal>
+          </>
+        );
 }
 
 const styles = StyleSheet.create({

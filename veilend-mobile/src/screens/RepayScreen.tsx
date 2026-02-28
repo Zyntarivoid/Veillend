@@ -33,6 +33,7 @@ export default function RepayScreen() {
   };
 
   return (
+    <>
     <ScrollView style={styles.container}>
       <Text style={styles.headerTitle}>Repay Loans</Text>
 
@@ -94,7 +95,7 @@ export default function RepayScreen() {
         </View>
       )}
     </ScrollView>
-        {/* Amount Modal */}
+      {/* Amount Modal */}
         <Modal
           visible={modalVisible}
           transparent
@@ -122,8 +123,9 @@ export default function RepayScreen() {
               </View>
             </View>
           </KeyboardAvoidingView>
-        </Modal>
-  );
+          </Modal>
+          </>
+        );
 }
 
 const styles = StyleSheet.create({
