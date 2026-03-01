@@ -36,9 +36,14 @@ export default function ConnectWalletScreen() {
 
   const { starknetkitConnectModal } = useStarknetkitConnectModal({
     connectors: connectors as any,
+    modalTheme: 'dark',
+    dappName: 'VeilLend',
   });
 
   const handleConnect = async () => {
+    // Bypass wallet connection for now
+    handleBypass();
+    /*
     try {
         const { connector } = await starknetkitConnectModal();
         if (connector) {
@@ -47,6 +52,7 @@ export default function ConnectWalletScreen() {
     } catch(e) {
         console.error("Connection failed", e);
     }
+    */
   };
 
   const handleBypass = () => {
@@ -153,7 +159,8 @@ export default function ConnectWalletScreen() {
         </View>
         
         <Animated.View style={[styles.connectButtonContainer, animatedButtonStyle]}>
-           <TouchableOpacity 
+        <View>
+          <TouchableOpacity 
             activeOpacity={0.8}
             onPress={handleConnect}
           >
@@ -166,7 +173,8 @@ export default function ConnectWalletScreen() {
               <Text style={styles.buttonText}>Connect Wallet</Text>
             </LinearGradient>
           </TouchableOpacity>
-        </Animated.View>
+        </View>
+      </Animated.View>
 
         {/* <TouchableOpacity onPress={handleBypass}>
           <Text style={styles.loginText}>Already have an account? <Text style={styles.loginTextBold}>Log in</Text></Text>
