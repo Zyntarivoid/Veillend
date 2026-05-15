@@ -2,7 +2,7 @@
 
 > **Private Lending. Stellar Speed. X-Ray Privacy.**
 
-**VeilLend** is a privacy-first decentralized lending protocol built on **Stellar/Soroban**, enabling users to deposit, borrow, and transact with complete financial privacy—powered by **X-Ray ZK proofs** for shielded transactions (mainnet live since January 2026). With sub-second settlements, near-zero fees (<0.01¢), and multi-chain support, VeilLend is designed for instant, borderless DeFi.
+**VeilLend** is a privacy-first decentralized lending protocol built on **Stellar/Soroban**, enabling users to deposit, borrow, and transact with complete financial privacy—powered by **X-Ray ZK proofs** for shielded transactions . With sub-second settlements, near-zero fees (<0.01¢), and multi-chain support, VeilLend is designed for instant, borderless DeFi.
 
 This tool is ideal for:
 - 💼 Freelancers managing cross-border payments and lending
