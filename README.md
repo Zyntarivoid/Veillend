@@ -16,44 +16,42 @@ Whether you're a solo developer building privacy-first finance or a team scaling
 
 ## 🏗️ Architecture
 
-VeilLend uses a modern monorepo structure for efficient development across apps and shared libraries. The structure features an `app/` parent folder containing the core application directories, with shared packages for reusability:
+VeilLend is currently organized as a multi-part repository with separate mobile, backend, and Soroban contract workspaces:
 
 ```
 veillend/
-├── app/
-│   ├── backend/           # NestJS API server (relayer, indexer, multi-chain operations)
-│   ├── mobile/            # React Native app (iOS/Android for on-the-go lending)
-│   └── contract/          # Soroban Rust contracts (privacy/escrow/lending logic)
-├── packages/
-│   ├── ui/                # Shared UI components
-│   └── stellar-sdk/       # Stellar utils (Horizon queries, wallet connect, ZK helpers)
-├── turbo.json             # Build/dev pipelines
-└── pnpm-workspace.yaml    # Workspace config
+├── veilend-soroban/       # Active Soroban Rust contract workspace for VeilLend on Stellar
+├── veilend-backend/       # NestJS API server and indexing layer
+├── veilend-mobile/        # React Native / Expo mobile app
+├── docs/                  # Contributor and migration notes
+└── README.md
 ```
 
 | Component | Tech Stack | Description |
 | :--- | :--- | :--- |
-| **Smart Contracts** | **Rust/Soroban** | On-chain logic for Lending Pools, ZK Shielding, and Asset Management on Stellar. |
-| **Mobile App** | **React Native (Expo)** | Cross-platform mobile wallet interface with "Privacy Mode" and multi-chain (Starknet + Stellar) SDK integration. |
-| **Backend API** | **NestJS** | Relayer service, indexer, and off-chain data aggregator backed by **Supabase**, now supporting multi-chain operations. |
-| **Database** | **PostgreSQL (Supabase)** | Stores encrypted user profiles, transaction history, and active positions across multiple blockchains. |
+| **Smart Contracts** | **Rust/Soroban** | Initial VeilLend contract scaffold for lending state, asset configuration, and event emission on Stellar. |
+| **Mobile App** | **React Native (Expo)** | Cross-platform mobile experience for deposit, borrow, repay, privacy mode, and wallet-driven onboarding. |
+| **Backend API** | **NestJS** | API, indexing, and off-chain data services backed by **Supabase**. |
+| **Database** | **PostgreSQL (Supabase)** | Stores user profiles, transaction history, and active positions. |
 
 ---
 
 ## 🔐 Smart Contracts (Soroban/Rust)
 
-Located in `/app/contract`, our Soroban smart contracts power the privacy engine on Stellar:
+Located in `/veilend-soroban`, the current Soroban codebase is the new VeilLend contract foundation on Stellar.
 
-### 1. **ZK Shielded Pool (`shielded_pool.rs`)**
-- Implements **X-Ray ZK privacy** for shielded transactions (mainnet live).
-- **Deposit**: Users generate a secret off-chain, hash it (SHA-256), and deposit funds with the `commitment`.
-- **Withdraw**: Users provide the `secret` (nullifier) to prove ownership without revealing their identity.
-- **Privacy**: The on-chain state only tracks hashed commitments, breaking the link between deposit and withdrawal.
+### Current contract foundation
+- Initializes the contract with an admin and minimum collateral ratio.
+- Tracks supported assets for lending actions.
+- Stores per-user positions with deposited and borrowed balances.
+- Exposes basic `deposit`, `borrow`, `repay`, and `withdraw` state transitions.
+- Emits events for indexing and analytics.
 
-### 2. **Lending Pool (`lending_pool.rs`)**
-- Standard DeFi logic for **Supply**, **Borrow**, and **Repay**.
-- Integrated with Stellar assets (XLM, USDC, etc.) and cross-chain bridging.
-- Emits events for real-time indexing and analytics.
+### Planned next layer
+- Stellar token transfer integration for real asset movement.
+- Oracle-backed collateral valuation and liquidation rules.
+- Shielded commitment/nullifier flows for privacy-preserving actions.
+- Additional testing, security review, and deployment automation.
 
 ---
 
@@ -61,17 +59,17 @@ Located in `/app/contract`, our Soroban smart contracts power the privacy engine
 
 ### Core
 - **🛡️ X-Ray Privacy Dashboard**: Toggle "Privacy Mode" to mask balances and positions with zero-knowledge proofs.
-- **🔑 Multi-Chain Login**: Authenticate securely using cryptographic signatures (Starknet: Argent/Braavos; Stellar: Freighter/Albedo) via multi-chain SDKs.
+- **🔑 Wallet Login**: Authenticate securely using cryptographic signatures and wallet-based onboarding.
 - **⚡ Instant Actions**: One-tap Deposit, Borrow, and Repay flows across multiple blockchains.
 - **🔄 Real-time Updates**: Live synchronization with on-chain data via the Backend API for all supported chains.
 
 ### Privacy & Security
-- **X-Ray Privacy Toggle**: Uses ZK proofs to hide amounts/senders (mainnet live since January 22, 2026).
+- **X-Ray Privacy Toggle**: Designed to hide sensitive balances and activity as the privacy layer is integrated.
 - **Scam Alerts**: Flags suspicious transactions (e.g., unusual patterns, missing memos).
 - **Self-Custody**: Funds route directly to your wallet—no central holding.
 
 ### Advanced (v2+)
-- **Multi-asset support** with auto-swap between Stellar and Starknet assets.
+- **Multi-asset support** with future expansion across Stellar-native and interoperable assets.
 - **Recurring loan/repayment links** for automated financial management.
 - **Fiat on/off-ramps** (MoneyGram, Banxa) for seamless fiat-to-crypto conversion.
 - **Notifications** (email/Telegram) for transaction confirmations and alerts.
@@ -84,7 +82,7 @@ Located in `/app/contract`, our Soroban smart contracts power the privacy engine
 - **Node.js** (v18+; nodejs.org)
 - **pnpm** (for monorepo management; install via `npm install -g pnpm`)
 - **Rust toolchain** (for Soroban contracts; install via rustup.rs)
-- **Soroban CLI** (for contract deployment; `cargo install --locked soroban-cli`)
+- **Stellar CLI** (for contract deployment; `cargo install --locked stellar-cli --features opt`)
 - **Docker** (for local Stellar network; docker.com)
 - **A Stellar wallet** (Freighter recommended; freighter.app)
 - **Supabase account** (free tier; supabase.com)
@@ -116,28 +114,33 @@ Configure the Stellar network:
 - **Development**: Defaults to testnet; fund your wallet at laboratory.stellar.org
 - **Production**: Set to mainnet in `.env.local` and ensure your wallet holds real assets
 
-For contracts: Add environment variables to `app/contract/.env` (e.g., `STELLAR_NETWORK=testnet`).
+For contracts: Add environment variables in the `veilend-soroban/` workspace as needed for your target Stellar network and deployment flow.
 
 ### Running Locally
-Launch all services using TurboRepo:
+Launch the backend and mobile workspaces from their respective directories:
 
 ```bash
-pnpm turbo run dev
+cd veilend-backend && npm install && npm run start:dev
 ```
 
-This starts the backend (app/backend), prepares contracts/mobile, and serves the frontend.
+In a separate terminal, start the mobile app:
+
+```bash
+cd veilend-mobile && npm install && npx expo start
+```
 
 Access the web app at http://localhost:3000.
 
 For the mobile app:
 ```bash
-cd app/mobile && npx react-native run-ios  # or run-android
+cd veilend-mobile && npx expo start
 ```
 
 For contracts (testing/deploying):
 ```bash
-cd app/contract && cargo test  # Run unit tests
-# Deploy to testnet: Use Soroban CLI as per Soroban docs
+cd veilend-soroban
+cargo build --target wasm32-unknown-unknown --release
+stellar contract build
 ```
 
 Connect your wallet in the app to claim a username and test features.
@@ -146,11 +149,11 @@ Connect your wallet in the app to claim a username and test features.
 
 ## 🛠️ Tech Deep Dive: ZK Privacy Flow (Stellar)
 
-1.  **Client-Side**: User selects "Shielded Deposit". App generates a random `secret`.
-2.  **Hashing**: App computes `commitment = SHA256(secret || amount || asset)`.
-3.  **On-Chain**: App calls `deposit_shielded(commitment, amount, asset)`.
-4.  **Storage**: Contract stores `commitment` mapped to `amount`.
-5.  **Withdrawal**: User provides `secret` to a fresh address. Contract verifies `SHA256(secret || amount || asset) == commitment` and transfers funds.
+1.  **Client-Side**: User selects a privacy-enabled lending action from the mobile app.
+2.  **Preparation**: The app prepares lending inputs and any privacy metadata needed for the action.
+3.  **On-Chain**: The Soroban contract records the position update and emits events for indexing.
+4.  **Off-Chain Services**: The backend syncs positions and transaction history for the app experience.
+5.  **Future Privacy Layer**: Shielded commitments and proof verification will extend this flow in later releases.
 
 ---
 
@@ -199,7 +202,7 @@ Deployment is automated for most components:
 
 - **Frontend and Backend**: Connect to Vercel via dashboard, add environment variables
 - **Mobile**: Use Expo CLI for over-the-air updates or app store builds
-- **Contracts**: Build and deploy via CI/CD (GitHub Actions in `app/contract`)
+- **Contracts**: Build and deploy from the `veilend-soroban/` workspace using Cargo and Stellar CLI
 
 ### Contributing
 Contributions are welcome and encouraged to help evolve VeilLend! To get started:
@@ -221,4 +224,4 @@ All contributors must adhere to the Code of Conduct and sign off commits for DCO
 - [Drips Contributor Program](https://drips.network/contributors)
 - [Stellar Discord](https://discord.gg/stellardev)
 
-**Ready to contribute?** Start with the `veilend_hello` contract in `/app/contract` and help us build the future of private lending on Stellar! 🌟
+**Ready to contribute?** Start with the VeilLend Soroban contract in `/veilend-soroban` and help us build the future of private lending on Stellar! 🌟

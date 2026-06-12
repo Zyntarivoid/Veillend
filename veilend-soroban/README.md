@@ -1,58 +1,81 @@
-# VeilLend Soroban Contracts
+# VeilLend Soroban Contract
 
-This directory contains Soroban smart contracts for the VeilLend protocol on the Stellar network.
+This directory is the active Rust/Soroban contract workspace for VeilLend on Stellar.
 
-## Getting Started
+## Current Scope
 
-### Prerequisites
-- Rust toolchain (1.76.0+)
-- Soroban CLI (21.0.0+)
-- Docker (for local network)
+The contract currently provides an initial VeilLend lending scaffold with:
 
-### Installation
+- contract initialization with an admin and minimum collateral ratio
+- supported-asset configuration
+- position storage per user and asset
+- basic `deposit`, `borrow`, `repay`, and `withdraw` state transitions
+- typed contract events for key lending actions
+
+This is a protocol foundation, not the full privacy implementation yet. Token transfers, price oracles, liquidation logic, and shielded proof verification still need to be added in follow-up iterations.
+
+## Prerequisites
+
+Install the pinned Rust toolchain for this contract:
+
 ```bash
-# Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source $HOME/.cargo/env
-rustup target add wasm32-unknown-unknown
-
-# Install Soroban CLI
-cargo install --locked soroban-cli
-
-# Install Docker
-curl -fsSL https://get.docker.com | sh
+rustup toolchain install 1.84.0
 ```
 
-### Building
+Install the WebAssembly targets used by Cargo and the Stellar CLI:
+
 ```bash
-cd veilend_hello
-soroban contract build
+rustup target add wasm32-unknown-unknown --toolchain 1.84.0
+rustup target add wasm32v1-none --toolchain 1.84.0
 ```
 
-### Testing
+Install the Stellar CLI:
+
+```bash
+cargo install --locked stellar-cli --features opt
+```
+
+## Local Build
+
+From this directory, run either build flow:
+
+```bash
+cargo build --target wasm32-unknown-unknown --release
+```
+
+```bash
+stellar contract build
+```
+
+## Testing
+
 ```bash
 cargo test
 ```
 
-## Contracts
-- `veilend_hello`: Hello World contract for testing and development
-- `lending_pool`: Core lending logic (deposit, borrow, repay, withdraw)
-- `shielded_pool`: Privacy-preserving transactions with ZK proofs
-- `price_oracle`: Asset price feeds with staleness detection
-- `reserve_data`: Reserve configuration and state management
-- `interest_token`: Interest-bearing tokens (aTokens)
-- `addresses_provider`: Central registry for all contracts
+## Notes
+
+- `rust-toolchain.toml` pins the contract to Rust `1.84.0`.
+- The crate is named `veillend-contract` and exposes the `VeilLendContract` Soroban contract.
+- Event emission uses Soroban `#[contractevent]` types rather than the deprecated legacy publish payload pattern.
 
 ## Development Workflow
-1. Write Code → src/lib.rs
-2. Format & Lint → cargo fmt && cargo clippy
-3. Run Tests → cargo test
-4. Build WASM → soroban contract build
-5. Deploy to Local → soroban contract deploy --network local
-6. Test Manually → soroban contract invoke
-7. Deploy to Testnet → soroban contract deploy --network testnet
+
+1. Write code in `src/lib.rs`
+2. Format and lint with `cargo fmt` and `cargo clippy`
+3. Run `cargo test`
+4. Build WASM with `cargo build --target wasm32-unknown-unknown --release`
+5. Build Soroban artifacts with `stellar contract build`
+
+## Next Steps
+
+- wire in Stellar token transfers for deposit and repayment flows
+- add price feeds and enforce collateral health using oracle-backed values
+- introduce liquidation and reserve management logic
+- add shielded commitment/nullifier storage for the privacy layer
+- add Soroban host tests for the lending lifecycle and authorization rules
 
 ## Documentation
+
 - [Soroban Documentation](https://soroban.stellar.org/docs)
 - [Stellar Developer Docs](https://developers.stellar.org/docs)
-- [VeilLend Migration Guide](../veilend_contracts/docs/migration/contract-mapping.md)

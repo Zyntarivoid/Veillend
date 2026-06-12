@@ -823,7 +823,7 @@ In this dual-hash model:
 - [Commitment & MerkleProof structs](../../veilend_cairo/src/structs/structs.cairo) — Data structures
 - [ShieldedPool backend service](../../veilend-backend/src/shielded-pool/shielded-pool.service.ts) — RPC interaction
 - [Mobile store](../../veilend-mobile/src/store/store.ts) — Client-side shielded operations
-- [Soroban hello contract](../../veilend-soroban/veilend_hello/src/lib.rs) — Soroban starter template
+- [VeilLend Soroban contract](../../veilend-soroban/src/lib.rs) — active VeilLend Soroban scaffold
 - [Mobile-Stellar integration guide](./mobile-stellar-integration.md) — Related migration doc
 - [Soroban contributing guide](../CONTRIBUTING_SOROBAN.md) — Dev environment setup
 
