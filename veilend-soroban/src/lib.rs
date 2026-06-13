@@ -134,7 +134,12 @@ impl VeilLendContract {
         position.deposited += amount;
         Self::write_position(&env, &user, &asset, &position);
 
-        DepositEvent { user, asset, amount }.publish(&env);
+        DepositEvent {
+            user,
+            asset,
+            amount,
+        }
+        .publish(&env);
     }
 
     pub fn borrow(env: Env, user: Address, asset: Address, amount: i128) {
@@ -147,7 +152,12 @@ impl VeilLendContract {
         Self::assert_collateralized(&env, &position);
         Self::write_position(&env, &user, &asset, &position);
 
-        BorrowEvent { user, asset, amount }.publish(&env);
+        BorrowEvent {
+            user,
+            asset,
+            amount,
+        }
+        .publish(&env);
     }
 
     pub fn repay(env: Env, user: Address, asset: Address, amount: i128) {
@@ -163,7 +173,12 @@ impl VeilLendContract {
         position.borrowed -= amount;
         Self::write_position(&env, &user, &asset, &position);
 
-        RepayEvent { user, asset, amount }.publish(&env);
+        RepayEvent {
+            user,
+            asset,
+            amount,
+        }
+        .publish(&env);
     }
 
     pub fn withdraw(env: Env, user: Address, asset: Address, amount: i128) {
@@ -180,7 +195,12 @@ impl VeilLendContract {
         Self::assert_collateralized(&env, &position);
         Self::write_position(&env, &user, &asset, &position);
 
-        WithdrawEvent { user, asset, amount }.publish(&env);
+        WithdrawEvent {
+            user,
+            asset,
+            amount,
+        }
+        .publish(&env);
     }
 
     pub fn get_position(env: Env, user: Address, asset: Address) -> Position {
