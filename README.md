@@ -16,14 +16,15 @@ Whether you're a solo developer building privacy-first finance or a team scaling
 
 ## 🏗️ Architecture
 
-VeilLend is currently organized as a multi-part repository with separate mobile, backend, and Soroban contract workspaces:
+VeilLend is currently organized around the active Stellar contract and mobile app workspaces, with older implementation work archived under `legacy/` for reference:
 
 ```
 veillend/
 ├── veilend-soroban/       # Active Soroban Rust contract workspace for VeilLend on Stellar
-├── veilend-backend/       # NestJS API server and indexing layer
-├── veilend-mobile/        # React Native / Expo mobile app
-├── docs/                  # Contributor and migration notes
+├── veilend-mobile/        # Active React Native / Expo mobile app
+├── legacy/
+│   ├── veilend-backend/   # Archived NestJS backend from the previous architecture
+│   └── docs/              # Archived migration notes and contributor docs
 └── README.md
 ```
 
@@ -31,8 +32,8 @@ veillend/
 | :--- | :--- | :--- |
 | **Smart Contracts** | **Rust/Soroban** | Initial VeilLend contract scaffold for lending state, asset configuration, and event emission on Stellar. |
 | **Mobile App** | **React Native (Expo)** | Cross-platform mobile experience for deposit, borrow, repay, privacy mode, and wallet-driven onboarding. |
-| **Backend API** | **NestJS** | API, indexing, and off-chain data services backed by **Supabase**. |
-| **Database** | **PostgreSQL (Supabase)** | Stores user profiles, transaction history, and active positions. |
+| **Backend API** | **Planned Rebuild** | The backend is being rebuilt for the Stellar ecosystem; the previous NestJS version is archived in `legacy/veilend-backend`. |
+| **Archived Research** | **Markdown / Notes** | Migration notes and previous contributor docs are preserved in `legacy/docs`. |
 
 ---
 
@@ -61,7 +62,7 @@ Located in `/veilend-soroban`, the current Soroban codebase is the new VeilLend 
 - **🛡️ X-Ray Privacy Dashboard**: Toggle "Privacy Mode" to mask balances and positions with zero-knowledge proofs.
 - **🔑 Wallet Login**: Authenticate securely using cryptographic signatures and wallet-based onboarding.
 - **⚡ Instant Actions**: One-tap Deposit, Borrow, and Repay flows across multiple blockchains.
-- **🔄 Real-time Updates**: Live synchronization with on-chain data via the Backend API for all supported chains.
+- **🔄 Rebuild-Friendly Architecture**: The app is being prepared for a new Stellar-native backend and contributor-driven implementation.
 
 ### Privacy & Security
 - **X-Ray Privacy Toggle**: Designed to hide sensitive balances and activity as the privacy layer is integrated.
@@ -80,12 +81,10 @@ Located in `/veilend-soroban`, the current Soroban codebase is the new VeilLend 
 
 ### Prerequisites
 - **Node.js** (v18+; nodejs.org)
-- **pnpm** (for monorepo management; install via `npm install -g pnpm`)
 - **Rust toolchain** (for Soroban contracts; install via rustup.rs)
 - **Stellar CLI** (for contract deployment; `cargo install --locked stellar-cli --features opt`)
 - **Docker** (for local Stellar network; docker.com)
 - **A Stellar wallet** (Freighter recommended; freighter.app)
-- **Supabase account** (free tier; supabase.com)
 - **Git** (for cloning)
 - **Expo Go** (for mobile testing)
 
@@ -96,44 +95,22 @@ Clone the repository:
 git clone https://github.com/your-org/veillend.git
 cd veillend
 
-# Install dependencies across the monorepo
-pnpm install
+# Install mobile dependencies
+cd veilend-mobile && npm install
 ```
 
 ### Environment Setup
-Create a Supabase project and retrieve your `SUPABASE_URL` and `SUPABASE_ANON_KEY` from the dashboard.
-
-Copy `.env.example` to `.env.local` in the root directory and populate it:
-```
-SUPABASE_URL=your_supabase_url
-SUPABASE_ANON_KEY=your_supabase_anon_key
-NEXT_PUBLIC_STELLAR_NETWORK=testnet  # Use 'mainnet' for production
-```
-
 Configure the Stellar network:
 - **Development**: Defaults to testnet; fund your wallet at laboratory.stellar.org
-- **Production**: Set to mainnet in `.env.local` and ensure your wallet holds real assets
+- **Production**: Ensure your wallet holds the required live assets and network configuration
 
 For contracts: Add environment variables in the `veilend-soroban/` workspace as needed for your target Stellar network and deployment flow.
 
 ### Running Locally
-Launch the backend and mobile workspaces from their respective directories:
-
-```bash
-cd veilend-backend && npm install && npm run start:dev
-```
-
-In a separate terminal, start the mobile app:
+Start the mobile app from its workspace:
 
 ```bash
 cd veilend-mobile && npm install && npx expo start
-```
-
-Access the web app at http://localhost:3000.
-
-For the mobile app:
-```bash
-cd veilend-mobile && npx expo start
 ```
 
 For contracts (testing/deploying):
@@ -143,7 +120,7 @@ cargo build --target wasm32-unknown-unknown --release
 stellar contract build
 ```
 
-Connect your wallet in the app to claim a username and test features.
+The previous backend and migration documents remain available under `legacy/` while the new Stellar-native backend is rebuilt.
 
 ---
 
@@ -152,7 +129,7 @@ Connect your wallet in the app to claim a username and test features.
 1.  **Client-Side**: User selects a privacy-enabled lending action from the mobile app.
 2.  **Preparation**: The app prepares lending inputs and any privacy metadata needed for the action.
 3.  **On-Chain**: The Soroban contract records the position update and emits events for indexing.
-4.  **Off-Chain Services**: The backend syncs positions and transaction history for the app experience.
+4.  **Off-Chain Services**: A new Stellar-native backend will eventually sync positions and transaction history for the app experience.
 5.  **Future Privacy Layer**: Shielded commitments and proof verification will extend this flow in later releases.
 
 ---
@@ -171,38 +148,27 @@ We're actively seeking contributors to help build VeilLend on Stellar! This is y
 
 ### How to Get Started:
 1. **Setup**: Follow the Getting Started guide above
-2. **Pick an Issue**: Check GitHub issues labeled `good-first-issue`, `soroban`, or `privacy`
-3. **Contribute**: Implement features, fix bugs, or improve documentation
+2. **Pick an Issue**: Check GitHub issues labeled `good-first-issue`, `soroban`, `mobile`, or `privacy`
+3. **Contribute**: Implement features, fix bugs, or help shape the new Stellar-native backend
 4. **Submit**: Create a PR with tests and documentation updates
-
-### Monorepo Best Practices:
-- Use `pnpm turbo run build` to validate changes across packages
-- Update shared packages (`packages/ui` or `packages/stellar-sdk`) only when needed, and bump versions
-- Run `pnpm turbo run lint --filter=...` for targeted checks (e.g., `--filter=app/frontend`)
 
 ### Testing
 Run tests to validate code quality and functionality:
 
 ```bash
-# Lint and type-check the entire monorepo
-pnpm turbo run lint
-pnpm turbo run type-check
-
-# Execute end-to-end tests
-pnpm turbo run test:e2e
+# Soroban contract checks
+cd veilend-soroban && cargo build --locked --target wasm32-unknown-unknown --release
 
 # Mobile-specific tests
-cd app/mobile && npm test
+cd veilend-mobile && npm test
 ```
-
-Tests require a testnet wallet; detailed setup is in `TESTING.md`.
 
 ### Deployment
 Deployment is automated for most components:
 
-- **Frontend and Backend**: Connect to Vercel via dashboard, add environment variables
 - **Mobile**: Use Expo CLI for over-the-air updates or app store builds
 - **Contracts**: Build and deploy from the `veilend-soroban/` workspace using Cargo and Stellar CLI
+- **Backend**: The new Stellar-native backend will be introduced after the archived implementation is replaced
 
 ### Contributing
 Contributions are welcome and encouraged to help evolve VeilLend! To get started:
@@ -220,7 +186,7 @@ All contributors must adhere to the Code of Conduct and sign off commits for DCO
 ### Resources:
 - [Soroban Documentation](https://soroban.stellar.org/docs)
 - [Stellar Developer Docs](https://developers.stellar.org/docs)
-- [VeilLend Migration Guide](veilend_contracts/docs/migration/contract-mapping.md)
+- Archived research: `legacy/docs`
 - [Drips Contributor Program](https://drips.network/contributors)
 - [Stellar Discord](https://discord.gg/stellardev)
 

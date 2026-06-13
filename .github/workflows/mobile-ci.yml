@@ -1,0 +1,52 @@
+name: Mobile CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "veilend-mobile/**"
+      - ".github/workflows/mobile-ci.yml"
+  pull_request:
+    paths:
+      - "veilend-mobile/**"
+      - ".github/workflows/mobile-ci.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: mobile-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mobile-checks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: veilend-mobile
+
+    env:
+      CI: "1"
+      NPM_CONFIG_LEGACY_PEER_DEPS: "true"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: veilend-mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Validate Expo configuration
+        run: npx expo config --type public > /dev/null
+
+      - name: Run Expo Doctor
+        run: npx expo-doctor@latest
