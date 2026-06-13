@@ -82,7 +82,7 @@ Located in `/veilend-soroban`, the current Soroban codebase is the new VeilLend 
 ### Prerequisites
 - **Node.js** (v18+; nodejs.org)
 - **Rust toolchain** (for Soroban contracts; install via rustup.rs)
-- **Stellar CLI** (for contract deployment; `cargo install --locked stellar-cli --version 23.0.1`)
+- **Stellar CLI** (for contract deployment; on Ubuntu install `pkg-config` and `libdbus-1-dev` first, then run `cargo install --locked stellar-cli --version 23.0.1`)
 - **Docker** (for local Stellar network; docker.com)
 - **A Stellar wallet** (Freighter recommended; freighter.app)
 - **Git** (for cloning)

@@ -35,6 +35,13 @@ Install the Stellar CLI:
 cargo install --locked stellar-cli --version 23.0.1
 ```
 
+On Ubuntu runners or local Ubuntu machines, install the required system packages first:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y pkg-config libdbus-1-dev
+```
+
 ## Local Build
 
 From this directory, run either build flow:
@@ -66,6 +73,7 @@ cargo clippy --locked --all-targets -- -D warnings
 - Event emission uses Soroban `#[contractevent]` types rather than the deprecated legacy publish payload pattern.
 - Cargo does not set a default target in `.cargo/config.toml`; use explicit `--target wasm32-unknown-unknown` when building contract WASM artifacts.
 - `stellar-cli` is pinned to `23.0.1` in CI/local setup because newer releases require a newer Rust compiler than this repo currently uses.
+- On Ubuntu, `stellar-cli` currently also needs `pkg-config` and `libdbus-1-dev` installed before `cargo install`.
 
 ## Development Workflow
 
