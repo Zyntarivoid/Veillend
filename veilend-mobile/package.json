@@ -18,6 +18,7 @@
     "buffer": "^6.0.3",
     "expo": "~54.0.35",
     "expo-dev-client": "~6.0.21",
+    "expo-font": "~14.0.12",
     "expo-image-picker": "~17.0.11",
     "expo-linear-gradient": "~15.0.8",
     "expo-secure-store": "~15.0.8",
@@ -28,7 +29,7 @@
     "react-dom": "^19.1.0",
     "react-native": "0.81.5",
     "react-native-gesture-handler": "~2.28.0",
-    "react-native-get-random-values": "^2.0.0",
+    "react-native-get-random-values": "~1.11.0",
     "react-native-reanimated": "~4.1.1",
     "react-native-safe-area-context": "^5.6.2",
     "react-native-screens": "~4.16.0",
@@ -42,10 +43,15 @@
     "starknetkit": "^3.4.3",
     "zustand": "^5.0.11"
   },
+  "overrides": {
+    "starknetkit": {
+      "react": "19.1.0",
+      "react-dom": "19.1.0"
+    }
+  },
   "private": true,
   "devDependencies": {
     "@types/react": "~19.1.10",
-    "@types/react-native": "^0.72.8",
     "babel-preset-expo": "^54.0.10",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.3.2",

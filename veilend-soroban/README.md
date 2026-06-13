@@ -53,16 +53,23 @@ stellar contract build
 cargo test
 ```
 
+## Linting
+
+```bash
+cargo clippy --locked --all-targets -- -D warnings
+```
+
 ## Notes
 
 - `rust-toolchain.toml` pins the contract to Rust `1.88.0`.
 - The crate is named `veillend-contract` and exposes the `VeilLendContract` Soroban contract.
 - Event emission uses Soroban `#[contractevent]` types rather than the deprecated legacy publish payload pattern.
+- Cargo does not set a default target in `.cargo/config.toml`; use explicit `--target wasm32-unknown-unknown` when building contract WASM artifacts.
 
 ## Development Workflow
 
 1. Write code in `src/lib.rs`
-2. Format and lint with `cargo fmt` and `cargo clippy`
+2. Format and lint with `cargo fmt` and `cargo clippy --all-targets -- -D warnings`
 3. Run `cargo test`
 4. Build WASM with `cargo build --target wasm32-unknown-unknown --release`
 5. Build Soroban artifacts with `stellar contract build`
