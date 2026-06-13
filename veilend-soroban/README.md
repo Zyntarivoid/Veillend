@@ -19,14 +19,14 @@ This is a protocol foundation, not the full privacy implementation yet. Token tr
 Install the pinned Rust toolchain for this contract:
 
 ```bash
-rustup toolchain install 1.85.0
+rustup toolchain install 1.88.0
 ```
 
 Install the WebAssembly targets used by Cargo and the Stellar CLI:
 
 ```bash
-rustup target add wasm32-unknown-unknown --toolchain 1.85.0
-rustup target add wasm32v1-none --toolchain 1.85.0
+rustup target add wasm32-unknown-unknown --toolchain 1.88.0
+rustup target add wasm32v1-none --toolchain 1.88.0
 ```
 
 Install the Stellar CLI:
@@ -55,7 +55,7 @@ cargo test
 
 ## Notes
 
-- `rust-toolchain.toml` pins the contract to Rust `1.85.0`.
+- `rust-toolchain.toml` pins the contract to Rust `1.88.0`.
 - The crate is named `veillend-contract` and exposes the `VeilLendContract` Soroban contract.
 - Event emission uses Soroban `#[contractevent]` types rather than the deprecated legacy publish payload pattern.
 
