@@ -1,0 +1,9 @@
+# Rust build artifacts
+/target/
+/veilend-soroban/target/
+
+# Root planning backlogs
+/backend.md
+/mobile.md
+/soroban.md
+/web.md
