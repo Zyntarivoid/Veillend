@@ -8,6 +8,11 @@ on:
       - "veilend-mobile/**"
       - ".github/workflows/mobile-ci.yml"
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
     paths:
       - "veilend-mobile/**"
       - ".github/workflows/mobile-ci.yml"

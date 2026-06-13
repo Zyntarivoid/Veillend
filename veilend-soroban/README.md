@@ -32,7 +32,7 @@ rustup target add wasm32v1-none --toolchain 1.88.0
 Install the Stellar CLI:
 
 ```bash
-cargo install --locked stellar-cli --features opt
+cargo install --locked stellar-cli --version 23.0.1 --features opt
 ```
 
 ## Local Build
@@ -65,6 +65,7 @@ cargo clippy --locked --all-targets -- -D warnings
 - The crate is named `veillend-contract` and exposes the `VeilLendContract` Soroban contract.
 - Event emission uses Soroban `#[contractevent]` types rather than the deprecated legacy publish payload pattern.
 - Cargo does not set a default target in `.cargo/config.toml`; use explicit `--target wasm32-unknown-unknown` when building contract WASM artifacts.
+- `stellar-cli` is pinned to `23.0.1` in CI/local setup because newer releases require a newer Rust compiler than this repo currently uses.
 
 ## Development Workflow
 
