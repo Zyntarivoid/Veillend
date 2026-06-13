@@ -20,10 +20,11 @@ export const showInfo = (text1: string, text2?: string) => show({ type: 'info', 
 
 // Minimal React component placeholder so App.tsx can mount <Toast /> safely.
 import React from 'react';
-const ToastComponent: React.FC = () => null;
-(ToastComponent as any).show = show;
-
-export default ToastComponent as unknown as {
-  (props: any): JSX.Element;
+type ToastComponentType = React.FC & {
   show: (opts: ToastOpts) => void;
 };
+
+const ToastComponent: ToastComponentType = () => null;
+ToastComponent.show = show;
+
+export default ToastComponent;
