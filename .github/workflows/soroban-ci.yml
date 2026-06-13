@@ -59,7 +59,7 @@ jobs:
         run: cargo build --locked --target wasm32-unknown-unknown --release
 
       - name: Install Stellar CLI
-        run: cargo install --locked stellar-cli --version 23.0.1 --features opt
+        run: cargo install --locked stellar-cli --version 23.0.1
 
       - name: Build Soroban contract artifact
         run: stellar contract build

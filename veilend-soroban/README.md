@@ -32,7 +32,7 @@ rustup target add wasm32v1-none --toolchain 1.88.0
 Install the Stellar CLI:
 
 ```bash
-cargo install --locked stellar-cli --version 23.0.1 --features opt
+cargo install --locked stellar-cli --version 23.0.1
 ```
 
 ## Local Build
