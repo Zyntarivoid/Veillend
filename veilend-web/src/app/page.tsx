@@ -1,65 +1,135 @@
-import Image from "next/image";
+import { Button } from "@/components/Button";
+import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/Card";
+import { Badge } from "@/components/Badge";
+import { Input } from "@/components/Input";
+import { Container, Section, Flex, Grid } from "@/components/Layout";
+import { Skeleton } from "@/components/Skeleton";
+import { Spinner } from "@/components/Spinner";
+import { Alert } from "@/components/Alert";
 
 export default function Home() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+    <div className="min-h-screen">
+      <Container>
+        <Section>
+          <h1 className="text-4xl font-bold text-primary mb-2">VeilLend Design System</h1>
+          <p className="text-text-secondary text-lg mb-12">Reusable UI primitives for VeilLend on Stellar</p>
+        </Section>
+
+        <Section>
+          <h2 className="text-2xl font-semibold text-text mb-6">Buttons</h2>
+          <Flex gap="lg" wrap>
+            <Button variant="primary">Primary</Button>
+            <Button variant="secondary">Secondary</Button>
+            <Button variant="outline">Outline</Button>
+            <Button variant="ghost">Ghost</Button>
+          </Flex>
+          <Flex gap="lg" wrap className="mt-4">
+            <Button variant="primary" size="sm">Small</Button>
+            <Button variant="primary" size="md">Medium</Button>
+            <Button variant="primary" size="lg">Large</Button>
+          </Flex>
+        </Section>
+
+        <Section>
+          <h2 className="text-2xl font-semibold text-text mb-6">Badges</h2>
+          <Flex gap="md" wrap>
+            <Badge variant="default">Default</Badge>
+            <Badge variant="primary">Primary</Badge>
+            <Badge variant="secondary">Secondary</Badge>
+            <Badge variant="success">Success</Badge>
+            <Badge variant="warning">Warning</Badge>
+            <Badge variant="error">Error</Badge>
+          </Flex>
+        </Section>
+
+        <Section>
+          <h2 className="text-2xl font-semibold text-text mb-6">Input</h2>
+          <Flex direction="col" gap="md" className="max-w-md">
+            <Input label="Email" placeholder="Enter your email" />
+            <Input label="Password" placeholder="Enter your password" type="password" />
+            <Input label="Error Example" placeholder="Invalid input" error="This field is required" />
+          </Flex>
+        </Section>
+
+        <Section>
+          <h2 className="text-2xl font-semibold text-text mb-6">Cards</h2>
+          <Grid columns={3} gap="lg">
+            <Card>
+              <CardHeader>
+                <CardTitle>Market Overview</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-text-secondary">View available assets and market rates</p>
+              </CardContent>
+              <CardFooter>
+                <Button variant="primary" fullWidth>Explore Markets</Button>
+              </CardFooter>
+            </Card>
+            <Card hoverable>
+              <CardHeader>
+                <CardTitle>Deposit</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-text-secondary">Supply assets to earn interest</p>
+              </CardContent>
+              <CardFooter>
+                <Button variant="secondary" fullWidth>Deposit Now</Button>
+              </CardFooter>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>Borrow</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-text-secondary">Borrow assets with collateral</p>
+              </CardContent>
+              <CardFooter>
+                <Button variant="outline" fullWidth>Get Started</Button>
+              </CardFooter>
+            </Card>
+          </Grid>
+        </Section>
+
+        <Section>
+          <h2 className="text-2xl font-semibold text-text mb-6">Skeletons</h2>
+          <Flex gap="lg" align="stretch" wrap>
+            <Flex direction="col" gap="md" className="w-full md:w-64">
+              <Skeleton variant="card" />
+            </Flex>
+            <Flex direction="col" gap="md" className="flex-1">
+              <Skeleton variant="text" />
+              <Skeleton variant="text" width="50%" />
+              <Skeleton variant="text" width="66%" />
+            </Flex>
+          </Flex>
+          <Flex gap="md" className="mt-6" wrap>
+            <Skeleton variant="circular" width={40} height={40} />
+            <Skeleton variant="rectangular" width={120} height={32} />
+          </Flex>
+        </Section>
+
+        <Section>
+          <h2 className="text-2xl font-semibold text-text mb-6">Spinners</h2>
+          <Flex gap="lg" align="center" wrap>
+            <Spinner size="sm" />
+            <Spinner size="md" />
+            <Spinner size="lg" />
+            <Spinner size="xl" color="var(--veil-secondary)" />
+          </Flex>
+        </Section>
+
+        <Section>
+          <h2 className="text-2xl font-semibold text-text mb-6">Alerts</h2>
+          <Flex direction="col" gap="md">
+            <Alert variant="default" title="Default">This is a default alert message</Alert>
+            <Alert variant="success" title="Success">Transaction confirmed! Your deposit has been processed</Alert>
+            <Alert variant="warning" title="Warning">Health factor is approaching liquidation threshold</Alert>
+            <Alert variant="error" title="Error">Transaction failed. Please check your wallet balance</Alert>
+            <Alert variant="info" title="Info">New market available for XLM/USDC pair</Alert>
+          </Flex>
+        </Section>
+      </Container>
     </div>
   );
 }
