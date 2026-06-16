@@ -1,26 +1,50 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --veil-primary: #A855F7;
+  --veil-primary-hover: #9333EA;
+  --veil-secondary: #00D1FF;
+  --veil-secondary-hover: #00B8E6;
+  --veil-background: #0A0A0A;
+  --veil-background-alt: #141414;
+  --veil-card: #1A1A1A;
+  --veil-card-hover: #252525;
+  --veil-text: #FFFFFF;
+  --veil-text-secondary: #A1A1A1;
+  --veil-text-muted: #6B7280;
+  --veil-border: #2D2D2D;
+  --veil-success: #10B981;
+  --veil-warning: #F59E0B;
+  --veil-error: #EF4444;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-primary: var(--veil-primary);
+  --color-primary-hover: var(--veil-primary-hover);
+  --color-secondary: var(--veil-secondary);
+  --color-secondary-hover: var(--veil-secondary-hover);
+  --color-background: var(--veil-background);
+  --color-background-alt: var(--veil-background-alt);
+  --color-card: var(--veil-card);
+  --color-card-hover: var(--veil-card-hover);
+  --color-text: var(--veil-text);
+  --color-text-secondary: var(--veil-text-secondary);
+  --color-text-muted: var(--veil-text-muted);
+  --color-border: var(--veil-border);
+  --color-success: var(--veil-success);
+  --color-warning: var(--veil-warning);
+  --color-error: var(--veil-error);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--veil-background);
+  color: var(--veil-text);
   font-family: Arial, Helvetica, sans-serif;
 }
