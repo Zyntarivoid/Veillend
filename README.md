@@ -22,6 +22,7 @@ VeilLend is currently organized around the active Stellar contract and mobile ap
 veillend/
 ├── veilend-soroban/       # Active Soroban Rust contract workspace for VeilLend on Stellar
 ├── veilend-mobile/        # Active React Native / Expo mobile app
+├── veilend-web/           # Active Next.js 16 web application
 ├── legacy/
 │   ├── veilend-backend/   # Archived NestJS backend from the previous architecture
 │   └── docs/              # Archived migration notes and contributor docs
@@ -32,6 +33,7 @@ veillend/
 | :--- | :--- | :--- |
 | **Smart Contracts** | **Rust/Soroban** | Initial VeilLend contract scaffold for lending state, asset configuration, and event emission on Stellar. |
 | **Mobile App** | **React Native (Expo)** | Cross-platform mobile experience for deposit, borrow, repay, privacy mode, and wallet-driven onboarding. |
+| **Web App** | **Next.js 16 / TypeScript** | Privacy-first web interface for VeilLend on Stellar, with App Router, Tailwind CSS, and full TypeScript support. |
 | **Backend API** | **Planned Rebuild** | The backend is being rebuilt for the Stellar ecosystem; the previous NestJS version is archived in `legacy/veilend-backend`. |
 | **Archived Research** | **Markdown / Notes** | Migration notes and previous contributor docs are preserved in `legacy/docs`. |
 
