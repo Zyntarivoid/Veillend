@@ -56,4 +56,7 @@ veilend-web/
 3. Make your changes — ensure `npm run type-check` and `npm run lint` pass
 4. Open a pull request
 
+Frontend setup details, folder guidance, validation commands, and troubleshooting
+notes live in [CONTRIBUTING.md](./CONTRIBUTING.md).
+
 For more context, see the [root README](../README.md) and the broader VeilLend architecture.
