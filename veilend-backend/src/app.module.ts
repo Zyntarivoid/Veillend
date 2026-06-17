@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { StellarModule } from './stellar/stellar.module';
+import { IndexerModule } from './indexer/indexer.module';
 
 @Module({
   imports: [
@@ -10,6 +11,7 @@ import { StellarModule } from './stellar/stellar.module';
       isGlobal: true,
     }),
     StellarModule,
+    IndexerModule,
   ],
   controllers: [AppController],
   providers: [AppService],
