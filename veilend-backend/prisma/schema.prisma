@@ -1,0 +1,22 @@
+model User {
+  id String @id @default(uuid())
+
+  walletAddress String @unique
+
+  createdAt DateTime @default(now())
+}
+
+
+model WalletNonce {
+
+  id String @id @default(uuid())
+
+  walletAddress String
+
+  nonce String
+
+  expiresAt DateTime
+
+  used Boolean @default(false)
+
+}
