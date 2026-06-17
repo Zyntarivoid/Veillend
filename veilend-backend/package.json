@@ -21,8 +21,10 @@
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
+    "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
+    "@stellar/stellar-sdk": "^15.1.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },
