@@ -16,7 +16,7 @@ const CARD_WIDTH = width - 48; // Padding 24 * 2
   
   const CARDS = [
     { label: 'Total Balance', value: MOCK_USER.balance, icon: 'wallet-outline' },
-    { label: 'Collateral Value', value: 8000.00, icon: 'shield-checkmark-outline' },
+    { label: 'Collateral Value', value: 600.00, icon: 'shield-checkmark-outline' },
     { label: 'Borrowed Value', value: 1000.00, icon: 'trending-down-outline' },
   ];
 

@@ -8,13 +8,13 @@ export const MOCK_USER = {
 
 export const MOCK_ASSETS = [
   {
-    id: 'eth',
-    name: 'Ethereum',
-    symbol: 'ETH',
-    icon: 'logo-ethereum', // Ionicons name
-    balance: 2.5,
-    price: 3200,
-    apy: 3.5,
+    id: 'xlm',
+    name: 'Stellar',
+    symbol: 'XLM',
+    icon: 'planet', // Ionicons name
+    balance: 10000,
+    price: 0.12,
+    apy: 4.5,
     collateralFactor: 80,
   },
   {
@@ -28,12 +28,12 @@ export const MOCK_ASSETS = [
     collateralFactor: 90,
   },
   {
-    id: 'strk',
-    name: 'Starknet',
-    symbol: 'STRK',
-    icon: 'layers', // Ionicons name
-    balance: 10000,
-    price: 1.5,
+    id: 'veil',
+    name: 'VeilLend',
+    symbol: 'VEIL',
+    icon: 'shield-checkmark', // Ionicons name
+    balance: 25000,
+    price: 0.35,
     apy: 12.0,
     collateralFactor: 70,
   },
@@ -43,9 +43,9 @@ export const MOCK_TRANSACTIONS = [
   {
     id: '1',
     type: 'deposit',
-    title: 'Deposited ETH',
-    amount: '2.5 ETH',
-    value: '$8,000.00',
+    title: 'Deposited XLM',
+    amount: '5,000 XLM',
+    value: '$600.00',
     date: '01:11 PM, Today',
     icon: 'arrow-down',
   },
@@ -61,9 +61,9 @@ export const MOCK_TRANSACTIONS = [
   {
     id: '3',
     type: 'repay',
-    title: 'Repaid STRK',
-    amount: '500 STRK',
-    value: '$750.00',
+    title: 'Repaid VEIL',
+    amount: '500 VEIL',
+    value: '$175.00',
     date: '09:30 AM, Yesterday',
     icon: 'arrow-up',
   },
@@ -72,10 +72,10 @@ export const MOCK_TRANSACTIONS = [
 export const MOCK_POSITIONS = [
   {
     id: 'pos1',
-    asset: 'ETH',
+    asset: 'XLM',
     type: 'Collateral',
-    amount: 2.5,
-    value: 8000,
+    amount: 5000,
+    value: 600,
     status: 'Healthy',
     healthFactor: 1.8,
   },

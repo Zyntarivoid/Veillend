@@ -1,11 +1,7 @@
 import React, { useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Image, Dimensions } from 'react-native';
 import Toast from '../utils/toast';
-import { useConnect, useAccount } from '@starknet-react/core';
-import { useStarknetkitConnectModal } from 'starknetkit';
 import { useStore } from '../store/store';
-import api from '../utils/api';
-import { constants } from 'starknet';
 import Animated, { FadeInDown, useSharedValue, useAnimatedStyle, withRepeat, withTiming, withSequence } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,9 +10,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 const { width } = Dimensions.get('window');
 
 export default function ConnectWalletScreen() {
-  const { connect, connectors } = useConnect();
-  const { address, account } = useAccount();
-  const { setAddress, requestNonce, verify, setAuthToken } = useStore();
+  const { setAddress, setAuthToken } = useStore();
   const scale = useSharedValue(1);
 
   useEffect(() => {
@@ -34,78 +28,15 @@ export default function ConnectWalletScreen() {
     transform: [{ scale: scale.value }],
   }));
 
-  const { starknetkitConnectModal } = useStarknetkitConnectModal({
-    connectors: connectors as any,
-    modalTheme: 'dark',
-    dappName: 'VeilLend',
-  });
-
   const handleConnect = async () => {
-    // Bypass wallet connection for now
+    // TODO: Replace with Stellar wallet connection (e.g. Freighter)
     handleBypass();
-    /*
-    try {
-        const { connector } = await starknetkitConnectModal();
-        if (connector) {
-            await connect({ connector });
-        }
-    } catch(e) {
-        console.error("Connection failed", e);
-    }
-    */
   };
 
   const handleBypass = () => {
-    setAddress('0x0000000000000000000000000000000000000000000000000000000000000001');
+    // Use a placeholder Stellar address format for local development
+    setAddress('G' + 'A'.repeat(55));
     setAuthToken('mock-token-for-dev');
-  };
-
-  useEffect(() => {
-    if (address && account) {
-      authenticate();
-    }
-  }, [address, account]);
-
-  const authenticate = async () => {
-    try {
-      if (!address || !account) return;
-      setAddress(address);
-
-      // 1. Get Nonce (via store helper)
-      const nonce = await requestNonce(address);
-
-      // 2. Sign Message
-      const typedData = {
-        types: {
-          StarkNetDomain: [
-            { name: 'name', type: 'felt' },
-            { name: 'version', type: 'felt' },
-            { name: 'chainId', type: 'felt' },
-          ],
-          Message: [
-            { name: 'nonce', type: 'felt' }
-          ],
-        },
-        primaryType: 'Message',
-        domain: {
-          name: 'VeilLend',
-          version: '1',
-          chainId: constants.StarknetChainId.SN_SEPOLIA,
-        },
-        message: {
-          nonce: nonce,
-        },
-      };
-
-      const signature = await account.signMessage(typedData);
-      
-      // 3. Verify (via store helper)
-      const token = await verify({ address, signature, typedData, publicKey: address });
-      if (token) setAuthToken(token);
-    } catch (error: any) {
-      console.error(error);
-      Toast.show({ type: 'error', text1: 'Auth Failed', text2: 'Could not authenticate wallet. ' + (error?.message || '') });
-    }
   };
 
   return (
@@ -118,7 +49,7 @@ export default function ConnectWalletScreen() {
       {/* Top Right Tagline */}
       <SafeAreaView style={styles.taglineContainer} edges={['top']}>
         <View style={styles.taglineWrapper}>
-          <Text style={styles.taglineText}>Private Lending. Starknet Speed.</Text>
+          <Text style={styles.taglineText}>Private Lending. Stellar Speed.</Text>
           <Ionicons name="shield-checkmark" size={16} color="#09cc71ff" style={styles.taglineIcon} />
         </View>
       </SafeAreaView>
@@ -153,7 +84,7 @@ export default function ConnectWalletScreen() {
       <Animated.View entering={FadeInDown.delay(500).duration(1000)} style={styles.content}>
         <View style={styles.titleWrapper}>
            <Text style={styles.mainTitle}>
-            Lend crypto assest{"\n"}with ease on Starknet
+            Lend crypto assets{"\n"}with ease on Stellar
           </Text>
           
         </View>
