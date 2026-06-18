@@ -13,7 +13,7 @@
     "@react-navigation/bottom-tabs": "^7.12.0",
     "@react-navigation/native": "^7.1.28",
     "@react-navigation/native-stack": "^7.12.0",
-    "@starknet-react/core": "^5.0.3",
+    "@stellar/stellar-base": "^12.1.0",
     "axios": "^1.13.4",
     "buffer": "^6.0.3",
     "expo": "~54.0.35",
@@ -39,15 +39,7 @@
     "react-native-web": "^0.21.2",
     "react-native-worklets": "^0.5.1",
     "react-native-worklets-core": "^1.6.2",
-    "starknet": "^9.2.1",
-    "starknetkit": "^3.4.3",
     "zustand": "^5.0.11"
-  },
-  "overrides": {
-    "starknetkit": {
-      "react": "19.1.0",
-      "react-dom": "19.1.0"
-    }
   },
   "private": true,
   "devDependencies": {

@@ -20,8 +20,8 @@ type AuthState = {
   setAddress: (address: string | null) => void;
   setAuthToken: (token: string | null) => void;
   logout: () => void;
-  requestNonce: (address: string) => Promise<string>;
-  verify: (payload: { address: string; signature: any; typedData: any; publicKey?: string }) => Promise<string>;
+  requestNonce: (walletAddress: string) => Promise<string>;
+  verify: (payload: { walletAddress: string; nonce: string; signature: string }) => Promise<string>;
   authLoading: boolean;
 };
 
@@ -77,17 +77,17 @@ export const useStore = create<AuthState & UiState & LendingState & ShieldedStat
   togglePrivacyMode: () => set((state) => ({ isPrivacyMode: !state.isPrivacyMode })),
 
   // Async helpers (Auth)
-  requestNonce: async (address: string) => {
-    const res = await api.post(`/auth/nonce?address=${address}`);
+  requestNonce: async (walletAddress: string) => {
+    const res = await api.post('/auth/nonce', { walletAddress });
     return res.data?.nonce;
   },
-  verify: async ({ address, signature, typedData, publicKey }) => {
+  verify: async ({ walletAddress, nonce, signature }) => {
     set({ authLoading: true });
     try {
-      const res = await api.post('/auth/verify', { address, signature, typedData, publicKey });
-      const token = res.data?.access_token || null;
+      const res = await api.post('/auth/verify', { walletAddress, nonce, signature });
+      const token = res.data?.accessToken || null;
       set({ authLoading: false });
-      set({ authToken: token, address: address });
+      set({ authToken: token, address: walletAddress });
       try { if (token) SecureStore.setItemAsync('authToken', token); } catch (e) {}
       return token;
     } catch (err) {
