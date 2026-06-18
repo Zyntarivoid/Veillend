@@ -1,0 +1,40 @@
+---
+name: Backend bug report
+description: Report a reproducible backend problem
+title: "[Backend Bug]: "
+labels: ["bug", "backend"]
+body:
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: What breaks for users, contributors, or operators?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to Reproduce
+      value: |
+        1. 
+        2. 
+        3. 
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Logs or Validation Notes
+      description: Include redacted logs, status codes, test output, or screenshots where useful.
