@@ -1,0 +1,46 @@
+---
+name: Backend contribution
+description: Propose or report backend API, integration, data, or service work for VeilLend
+title: "[Backend]: "
+labels: ["backend"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for backend API, service, integration, database, queue, or security work. Keep the scope narrow enough for one pull request.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What should change and why?
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Link related routes, services, contracts, docs, or user flows.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: List the observable conditions that make this complete.
+      value: |
+        - [ ] 
+        - [ ] Tests or validation notes are included
+        - [ ] Security-sensitive behavior is documented when applicable
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Suggested Validation
+      description: Commands, manual checks, or test cases contributors should run.
+      placeholder: "cargo test, npm test, API smoke check, contract simulation, etc."
+  - type: textarea
+    id: security
+    attributes:
+      label: Security and Data Notes
+      description: Mention auth, privacy, funds movement, secrets, or migration risks.
