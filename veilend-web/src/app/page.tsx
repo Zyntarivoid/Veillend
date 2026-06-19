@@ -1,133 +1,167 @@
-import { Button } from "@/components/Button";
-import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/Card";
-import { Badge } from "@/components/Badge";
-import { Input } from "@/components/Input";
-import { Container, Section, Flex, Grid } from "@/components/Layout";
-import { Skeleton } from "@/components/Skeleton";
-import { Spinner } from "@/components/Spinner";
-import { Alert } from "@/components/Alert";
+import { Badge } from '@/components/Badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/Card';
+import { ContributorInterest } from '@/components/ContributorInterest';
+import { CampaignTracker } from '@/components/CampaignTracker';
+import { Container, Flex, Grid, Section } from '@/components/Layout';
+import { TrackedLink } from '@/components/TrackedLink';
+
+const contributionTracks = [
+  {
+    title: 'Soroban contracts',
+    description:
+      'Extend the Stellar contract foundation with token flows, collateral checks, and analytics events.',
+    badge: 'High impact',
+  },
+  {
+    title: 'Web campaign UX',
+    description:
+      'Ship a privacy-first web presence that helps contributors discover issues and onboarding steps quickly.',
+    badge: 'Good first issue',
+  },
+  {
+    title: 'Mobile product',
+    description:
+      'Improve private lending flows, wallet onboarding, and contributor-friendly demos in the Expo app.',
+    badge: 'Active track',
+  },
+];
+
+const campaignCtas = [
+  {
+    ctaId: 'view-issues',
+    ctaLabel: 'View open issues',
+    href: 'https://github.com/Zyntarivoid/Veillend/issues',
+    variant: 'primary' as const,
+  },
+  {
+    ctaId: 'read-contributor-guide',
+    ctaLabel: 'Read contributor guide',
+    href: 'https://github.com/Zyntarivoid/Veillend?tab=readme-ov-file#-join-the-drips-monthly-wave-contributor-program',
+    variant: 'secondary' as const,
+  },
+  {
+    ctaId: 'explore-soroban',
+    ctaLabel: 'Explore Soroban workspace',
+    href: 'https://github.com/Zyntarivoid/Veillend/tree/main/veilend-soroban',
+    variant: 'outline' as const,
+  },
+];
 
 export default function Home() {
   return (
-    <div className="min-h-screen">
-      <Container>
-        <Section>
-          <h1 className="text-4xl font-bold text-primary mb-2">VeilLend Design System</h1>
-          <p className="text-text-secondary text-lg mb-12">Reusable UI primitives for VeilLend on Stellar</p>
-        </Section>
-
-        <Section>
-          <h2 className="text-2xl font-semibold text-text mb-6">Buttons</h2>
-          <Flex gap="lg" wrap>
-            <Button variant="primary">Primary</Button>
-            <Button variant="secondary">Secondary</Button>
-            <Button variant="outline">Outline</Button>
-            <Button variant="ghost">Ghost</Button>
-          </Flex>
-          <Flex gap="lg" wrap className="mt-4">
-            <Button variant="primary" size="sm">Small</Button>
-            <Button variant="primary" size="md">Medium</Button>
-            <Button variant="primary" size="lg">Large</Button>
-          </Flex>
-        </Section>
-
-        <Section>
-          <h2 className="text-2xl font-semibold text-text mb-6">Badges</h2>
-          <Flex gap="md" wrap>
-            <Badge variant="default">Default</Badge>
-            <Badge variant="primary">Primary</Badge>
-            <Badge variant="secondary">Secondary</Badge>
-            <Badge variant="success">Success</Badge>
-            <Badge variant="warning">Warning</Badge>
-            <Badge variant="error">Error</Badge>
-          </Flex>
-        </Section>
-
-        <Section>
-          <h2 className="text-2xl font-semibold text-text mb-6">Input</h2>
-          <Flex direction="col" gap="md" className="max-w-md">
-            <Input label="Email" placeholder="Enter your email" />
-            <Input label="Password" placeholder="Enter your password" type="password" />
-            <Input label="Error Example" placeholder="Invalid input" error="This field is required" />
+    <div className="min-h-screen bg-background">
+      <CampaignTracker />
+      <Container className="pb-16">
+        <Section className="pt-20 pb-10">
+          <Flex direction="col" gap="lg" className="max-w-4xl">
+            <Flex gap="md" wrap>
+              <Badge variant="primary">GrantFox OSS campaign</Badge>
+              <Badge variant="secondary">Built on Stellar</Badge>
+              <Badge variant="success">Privacy-first analytics</Badge>
+            </Flex>
+            <div>
+              <h1 className="text-5xl font-bold leading-tight text-text sm:text-6xl">
+                Help build VeilLend on Stellar and measure campaign momentum responsibly
+              </h1>
+              <p className="mt-6 max-w-3xl text-lg leading-8 text-text-secondary">
+                This campaign page tracks page visits, CTA clicks, and contributor interest with
+                anonymous first-party events so the team can learn which contribution paths resonate
+                without collecting personal data.
+              </p>
+            </div>
+            <Flex gap="md" wrap className="pt-2">
+              {campaignCtas.map((cta) => (
+                <TrackedLink
+                  key={cta.ctaId}
+                  ctaId={cta.ctaId}
+                  ctaLabel={cta.ctaLabel}
+                  href={cta.href}
+                  variant={cta.variant}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {cta.ctaLabel}
+                </TrackedLink>
+              ))}
+            </Flex>
           </Flex>
         </Section>
 
         <Section>
-          <h2 className="text-2xl font-semibold text-text mb-6">Cards</h2>
           <Grid columns={3} gap="lg">
             <Card>
               <CardHeader>
-                <CardTitle>Market Overview</CardTitle>
+                <CardTitle>What gets measured</CardTitle>
               </CardHeader>
-              <CardContent>
-                <p className="text-text-secondary">View available assets and market rates</p>
+              <CardContent className="space-y-3 text-text-secondary">
+                <p>Anonymous page visits for the campaign landing page.</p>
+                <p>Outbound CTA clicks to GitHub, docs, and contributor resources.</p>
+                <p>Interest selections for contracts, web, mobile, privacy, and docs.</p>
               </CardContent>
-              <CardFooter>
-                <Button variant="primary" fullWidth>Explore Markets</Button>
-              </CardFooter>
-            </Card>
-            <Card hoverable>
-              <CardHeader>
-                <CardTitle>Deposit</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-text-secondary">Supply assets to earn interest</p>
-              </CardContent>
-              <CardFooter>
-                <Button variant="secondary" fullWidth>Deposit Now</Button>
-              </CardFooter>
             </Card>
             <Card>
               <CardHeader>
-                <CardTitle>Borrow</CardTitle>
+                <CardTitle>What stays private</CardTitle>
               </CardHeader>
-              <CardContent>
-                <p className="text-text-secondary">Borrow assets with collateral</p>
+              <CardContent className="space-y-3 text-text-secondary">
+                <p>No cookies or local storage identifiers.</p>
+                <p>No wallet addresses, emails, names, or contributor profiles.</p>
+                <p>No fingerprinting fields beyond the selected event metadata.</p>
               </CardContent>
-              <CardFooter>
-                <Button variant="outline" fullWidth>Get Started</Button>
-              </CardFooter>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>How to review results</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-text-secondary">
+                <p>Search deployment logs for the stable `campaign-analytics` marker.</p>
+                <p>Break down `campaign_cta_click` by `ctaId` to rank high-intent links.</p>
+                <p>Review `campaign_contributor_interest` to see which tracks draw attention.</p>
+              </CardContent>
             </Card>
           </Grid>
         </Section>
 
         <Section>
-          <h2 className="text-2xl font-semibold text-text mb-6">Skeletons</h2>
-          <Flex gap="lg" align="stretch" wrap>
-            <Flex direction="col" gap="md" className="w-full md:w-64">
-              <Skeleton variant="card" />
+          <div className="rounded-3xl border border-border bg-card p-8 shadow-card">
+            <Flex direction="col" gap="lg">
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-[0.3em] text-secondary">
+                  Contribution tracks
+                </p>
+                <h2 className="mt-3 text-3xl font-bold text-text">
+                  Guide contributors toward the highest-value work
+                </h2>
+              </div>
+              <Grid columns={3} gap="lg">
+                {contributionTracks.map((track) => (
+                  <Card key={track.title} className="h-full">
+                    <CardHeader>
+                      <Flex justify="between" align="center" gap="md">
+                        <CardTitle className="text-2xl">{track.title}</CardTitle>
+                        <Badge variant="warning">{track.badge}</Badge>
+                      </Flex>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="leading-7 text-text-secondary">{track.description}</p>
+                    </CardContent>
+                  </Card>
+                ))}
+              </Grid>
             </Flex>
-            <Flex direction="col" gap="md" className="flex-1">
-              <Skeleton variant="text" />
-              <Skeleton variant="text" width="50%" />
-              <Skeleton variant="text" width="66%" />
-            </Flex>
-          </Flex>
-          <Flex gap="md" className="mt-6" wrap>
-            <Skeleton variant="circular" width={40} height={40} />
-            <Skeleton variant="rectangular" width={120} height={32} />
-          </Flex>
+          </div>
         </Section>
 
         <Section>
-          <h2 className="text-2xl font-semibold text-text mb-6">Spinners</h2>
-          <Flex gap="lg" align="center" wrap>
-            <Spinner size="sm" />
-            <Spinner size="md" />
-            <Spinner size="lg" />
-            <Spinner size="xl" color="var(--veil-secondary)" />
-          </Flex>
+          <ContributorInterest />
         </Section>
 
-        <Section>
-          <h2 className="text-2xl font-semibold text-text mb-6">Alerts</h2>
-          <Flex direction="col" gap="md">
-            <Alert variant="default" title="Default">This is a default alert message</Alert>
-            <Alert variant="success" title="Success">Transaction confirmed! Your deposit has been processed</Alert>
-            <Alert variant="warning" title="Warning">Health factor is approaching liquidation threshold</Alert>
-            <Alert variant="error" title="Error">Transaction failed. Please check your wallet balance</Alert>
-            <Alert variant="info" title="Info">New market available for XLM/USDC pair</Alert>
-          </Flex>
+        <Section className="pt-0">
+          <div className="rounded-2xl border border-primary/20 bg-primary/10 p-6 text-sm leading-7 text-text-secondary">
+            Privacy note: the campaign analytics route only accepts a small allowlist of event
+            fields and records anonymous interaction metadata. It does not store cookies, wallet
+            identifiers, email addresses, or user-generated text.
+          </div>
         </Section>
       </Container>
     </div>

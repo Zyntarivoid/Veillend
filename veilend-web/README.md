@@ -25,24 +25,24 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ## Available Scripts
 
-| Script | Description |
-| :--- | :--- |
-| `npm run dev` | Start the development server |
-| `npm run build` | Build for production |
-| `npm run start` | Start the production server |
-| `npm run lint` | Run ESLint |
-| `npm run format` | Format all files with Prettier |
-| `npm run type-check` | Run TypeScript type checking |
+| Script               | Description                    |
+| :------------------- | :----------------------------- |
+| `npm run dev`        | Start the development server   |
+| `npm run build`      | Build for production           |
+| `npm run start`      | Start the production server    |
+| `npm run lint`       | Run ESLint                     |
+| `npm run format`     | Format all files with Prettier |
+| `npm run type-check` | Run TypeScript type checking   |
 
 ## Tech Stack
 
-| Tool | Version | Purpose |
-| :--- | :--- | :--- |
-| [Next.js](https://nextjs.org) | 16 | React framework with App Router |
-| [TypeScript](https://www.typescriptlang.org) | 5 | Type safety |
-| [Tailwind CSS](https://tailwindcss.com) | 4 | Utility-first styling |
-| [ESLint](https://eslint.org) | 9 | Code linting |
-| [Prettier](https://prettier.io) | 3 | Code formatting |
+| Tool                                         | Version | Purpose                         |
+| :------------------------------------------- | :------ | :------------------------------ |
+| [Next.js](https://nextjs.org)                | 16      | React framework with App Router |
+| [TypeScript](https://www.typescriptlang.org) | 5       | Type safety                     |
+| [Tailwind CSS](https://tailwindcss.com)      | 4       | Utility-first styling           |
+| [ESLint](https://eslint.org)                 | 9       | Code linting                    |
+| [Prettier](https://prettier.io)              | 3       | Code formatting                 |
 
 ## Project Structure
 
@@ -75,6 +75,33 @@ veilend-web/
 - **src/components/**: Reusable UI primitives (Button, Card, Input, etc.).
 - **package.json**: Lists dependencies, scripts, and project metadata.
 
+## Campaign Analytics
+
+The GrantFox OSS campaign landing page uses a lightweight first-party analytics flow to measure campaign effectiveness without introducing third-party tracking scripts.
+
+### Tracked events
+
+| Event                           | Purpose                                            | Fields                                             |
+| :------------------------------ | :------------------------------------------------- | :------------------------------------------------- |
+| `campaign_page_visit`           | Measure landing page traffic                       | `path`, `referrer`, `source`                       |
+| `campaign_cta_click`            | Measure CTA engagement                             | `path`, `source`, `ctaId`, `ctaLabel`, `targetUrl` |
+| `campaign_contributor_interest` | Measure which contribution tracks attract interest | `path`, `source`, `interestArea`                   |
+
+### Implementation
+
+- Client-side helpers in `src/lib/campaignAnalytics.ts` send events to the first-party route `src/app/api/campaign-events/route.ts`.
+- `CampaignTracker` records a page visit on mount.
+- `TrackedLink` records outbound CTA clicks before navigation.
+- `ContributorInterest` records anonymous contributor track selection.
+- The API route sanitizes inputs, accepts only an allowlist of expected fields, and writes structured events to server logs using the `[campaign-analytics]` marker.
+
+### Privacy considerations
+
+- No cookies, local storage identifiers, wallet addresses, emails, names, or free-form text are collected.
+- Only anonymous interaction metadata needed for campaign measurement is accepted by the API route.
+- Referrer and UTM source are optional and truncated during sanitization.
+- If longer-term reporting is needed later, route the structured log output into your preferred first-party observability platform rather than embedding third-party trackers by default.
+
 ## Contributing
 
 1. Fork the repo and create a branch from `main`
@@ -93,6 +120,7 @@ Here are common issues and their solutions:
 **Problem**: `npm install` fails with errors.
 
 **Solutions**:
+
 - Clear npm cache: `npm cache clean --force`
 - Delete `node_modules` and `package-lock.json`, then re-run `npm install`
 - Ensure you're using the correct Node.js version (22+)
@@ -102,6 +130,7 @@ Here are common issues and their solutions:
 **Problem**: `npm run dev` fails or the server doesn't load.
 
 **Solutions**:
+
 - Check if port 3000 is already in use (use `netstat -ano | findstr :3000` on Windows)
 - Try a different port: `npm run dev -- -p 3001`
 - Ensure dependencies are installed correctly
@@ -111,6 +140,7 @@ Here are common issues and their solutions:
 **Problem**: TypeScript type checks fail.
 
 **Solutions**:
+
 - Run `npm run type-check` for detailed errors
 - Ensure all type definitions are correctly imported
 - Check for outdated dependencies
@@ -120,6 +150,7 @@ Here are common issues and their solutions:
 **Problem**: ESLint reports linting issues.
 
 **Solutions**:
+
 - Run `npm run lint` to see all errors
 - Run `npm run format` to auto-fix formatting issues
 - Check `.eslintrc` (or `eslint.config.mjs`) for linting rules
@@ -129,6 +160,7 @@ Here are common issues and their solutions:
 **Problem**: Tailwind styles aren't showing up.
 
 **Solutions**:
+
 - Ensure you're using Tailwind utility classes correctly
 - Check `postcss.config.mjs` and `globals.css` for correct Tailwind configuration
 - Restart the development server
