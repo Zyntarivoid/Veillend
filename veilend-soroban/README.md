@@ -1,22 +1,27 @@
 # VeilLend Soroban Contract
 
-This directory is the active Rust/Soroban contract workspace for VeilLend on Stellar.
+This directory contains the active Rust/Soroban contract workspace for VeilLend
+on Stellar. The crate is named `veillend-contract` and exposes the
+`VeilLendContract` contract from `src/lib.rs`.
 
 ## Current Scope
 
-The contract currently provides an initial VeilLend lending scaffold with:
+The contract is a lending scaffold that currently supports:
 
-- contract initialization with an admin and minimum collateral ratio
-- supported-asset configuration
-- position storage per user and asset
+- one-time initialization with an admin and minimum collateral ratio
+- admin-managed supported asset configuration
+- per-user, per-asset position storage
 - basic `deposit`, `borrow`, `repay`, and `withdraw` state transitions
-- typed contract events for key lending actions
+- read methods for admin, collateral ratio, asset support, and positions
+- typed Soroban events for asset configuration and lending actions
 
-This is a protocol foundation, not the full privacy implementation yet. Token transfers, price oracles, liquidation logic, and shielded proof verification still need to be added in follow-up iterations.
+The scaffold does not yet move Stellar assets or verify privacy proofs. Token
+transfers, oracle pricing, liquidation, storage TTL policy, and shielded
+commitment/nullifier logic are planned follow-up work.
 
 ## Prerequisites
 
-Install the pinned Rust toolchain for this contract:
+Install the pinned Rust toolchain:
 
 ```bash
 rustup toolchain install 1.88.0
@@ -29,67 +34,72 @@ rustup target add wasm32-unknown-unknown --toolchain 1.88.0
 rustup target add wasm32v1-none --toolchain 1.88.0
 ```
 
-Install the Stellar CLI:
+Install the pinned Stellar CLI:
 
 ```bash
 cargo install --locked stellar-cli --version 23.0.1
 ```
 
-On Ubuntu runners or local Ubuntu machines, install the required system packages first:
+On Ubuntu runners or local Ubuntu machines, install the CLI system
+dependencies before installing `stellar-cli`:
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y pkg-config libdbus-1-dev libudev-dev
 ```
 
-## Local Build
+## Quick Start
 
-From this directory, run either build flow:
+Run commands from `veilend-soroban` unless noted otherwise.
 
 ```bash
+cargo fmt --check
+cargo test
+cargo clippy --locked --all-targets -- -D warnings
 cargo build --target wasm32-unknown-unknown --release
-```
-
-```bash
 stellar contract build
 ```
 
-## Testing
+The Cargo workspace root is the repository root, but the Soroban package lives
+in this directory. Cargo does not set a default build target in
+`.cargo/config.toml`, so use `--target wasm32-unknown-unknown` when building
+WASM artifacts directly.
 
-```bash
-cargo test
-```
+## Contract Surface
 
-## Linting
+Public methods:
 
-```bash
-cargo clippy --locked --all-targets -- -D warnings
-```
+- `__constructor(admin, min_collateral_ratio_bps)` initializes contract state.
+- `configure_asset(admin, asset, supported)` toggles supported asset status.
+- `deposit(user, asset, amount)` increases deposited balance.
+- `borrow(user, asset, amount)` increases borrowed balance after collateral checks.
+- `repay(user, asset, amount)` reduces borrowed balance.
+- `withdraw(user, asset, amount)` reduces deposited balance after collateral checks.
+- `get_position(user, asset)` returns stored position balances.
+- `is_asset_supported(asset)` returns current asset support status.
+- `admin()` returns the configured admin address.
+- `min_collateral_ratio_bps()` returns the configured collateral ratio.
 
-## Notes
-
-- `rust-toolchain.toml` pins the contract to Rust `1.88.0`.
-- The crate is named `veillend-contract` and exposes the `VeilLendContract` Soroban contract.
-- Event emission uses Soroban `#[contractevent]` types rather than the deprecated legacy publish payload pattern.
-- Cargo does not set a default target in `.cargo/config.toml`; use explicit `--target wasm32-unknown-unknown` when building contract WASM artifacts.
-- `stellar-cli` is pinned to `23.0.1` in CI/local setup because newer releases require a newer Rust compiler than this repo currently uses.
-- On Ubuntu, `stellar-cli` currently also needs `pkg-config`, `libdbus-1-dev`, and `libudev-dev` installed before `cargo install`.
+Errors are emitted with `panic_with_error!` and the `VeilLendError` contract
+error enum. Events use Soroban `#[contractevent]` types instead of the
+deprecated legacy publish payload pattern.
 
 ## Development Workflow
 
-1. Write code in `src/lib.rs`
-2. Format and lint with `cargo fmt` and `cargo clippy --all-targets -- -D warnings`
-3. Run `cargo test`
-4. Build WASM with `cargo build --target wasm32-unknown-unknown --release`
-5. Build Soroban artifacts with `stellar contract build`
+1. Make contract changes in `src/lib.rs`.
+2. Keep state keys, events, and errors explicit and stable for client integrators.
+3. Run formatting, tests, and lint checks.
+4. Build the WASM artifact with Cargo or `stellar contract build`.
+5. Update this README when public methods, events, errors, or setup steps change.
 
-## Next Steps
+## Roadmap
 
-- wire in Stellar token transfers for deposit and repayment flows
-- add price feeds and enforce collateral health using oracle-backed values
-- introduce liquidation and reserve management logic
-- add shielded commitment/nullifier storage for the privacy layer
-- add Soroban host tests for the lending lifecycle and authorization rules
+- wire Stellar token transfers into deposit, repay, and withdrawal flows
+- add price feeds and oracle-backed collateral valuation
+- enforce liquidation and reserve-management rules
+- define storage TTL bump strategy for persistent contract state
+- add shielded commitment and nullifier storage for the privacy layer
+- expand Soroban host tests for initialization, authorization, and lending flows
 
 ## Documentation
 
