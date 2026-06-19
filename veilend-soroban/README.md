@@ -54,6 +54,24 @@ cargo build --target wasm32-unknown-unknown --release
 stellar contract build
 ```
 
+## Contract Specs
+
+The compiled WASM includes the Soroban contract spec used by client tooling.
+After changing public methods, events, errors, or contract types, regenerate the
+integration specs:
+
+```bash
+stellar contract build
+scripts/export-spec.sh
+```
+
+The helper writes:
+
+- `specs/veillend-contract.md` for human-readable API review.
+- `specs/veillend-contract.xdr` for tooling that consumes raw contract spec entries.
+
+Set `VEILLEND_WASM` when exporting from a non-default WASM path.
+
 ## Testing
 
 ```bash
