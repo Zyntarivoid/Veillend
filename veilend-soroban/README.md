@@ -54,6 +54,48 @@ cargo build --target wasm32-unknown-unknown --release
 stellar contract build
 ```
 
+The helper script chooses `stellar contract build` when the Stellar CLI is
+available and falls back to Cargo's explicit WASM target otherwise:
+
+```bash
+scripts/build-contract.sh
+```
+
+## Testnet Scripts
+
+Copy the example environment file and fill in local values:
+
+```bash
+cp .env.testnet.example .env.testnet
+```
+
+Required variables:
+
+- `STELLAR_SOURCE_ACCOUNT`: a Stellar CLI identity configured locally.
+- `STELLAR_NETWORK`: Stellar CLI network name, defaulting to `testnet`.
+- `VEILLEND_WASM`: path to the built WASM artifact, defaulting to the release WASM.
+- `VEILLEND_CONTRACT_ID`: deployed contract id for invoke calls.
+
+Deploy the built contract to testnet:
+
+```bash
+STELLAR_SOURCE_ACCOUNT=alice scripts/deploy-testnet.sh
+```
+
+Invoke read methods on a deployed contract:
+
+```bash
+VEILLEND_CONTRACT_ID=CD... STELLAR_SOURCE_ACCOUNT=alice scripts/invoke-testnet.sh admin
+VEILLEND_CONTRACT_ID=CD... STELLAR_SOURCE_ACCOUNT=alice scripts/invoke-testnet.sh min_collateral_ratio_bps
+```
+
+Pass contract arguments after the function name:
+
+```bash
+VEILLEND_CONTRACT_ID=CD... STELLAR_SOURCE_ACCOUNT=alice scripts/invoke-testnet.sh is_asset_supported --asset <asset-address>
+VEILLEND_CONTRACT_ID=CD... STELLAR_SOURCE_ACCOUNT=alice scripts/invoke-testnet.sh get_position --user <user-address> --asset <asset-address>
+```
+
 ## Testing
 
 ```bash
