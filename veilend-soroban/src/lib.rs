@@ -33,6 +33,7 @@ pub enum VeilLendError {
     InsufficientDeposit = 6,
     RepayTooLarge = 7,
     InvalidCollateralRatio = 8,
+    NotInitialized = 9,
 }
 
 #[contractevent(topics = ["veillend", "asset_configured"])]
@@ -106,6 +107,7 @@ impl VeilLendContract {
     }
 
     pub fn configure_asset(env: Env, admin: Address, asset: Address, supported: bool) {
+        Self::require_initialized(&env);
         let stored_admin = Self::admin(env.clone());
         if admin != stored_admin {
             panic_with_error!(&env, VeilLendError::Unauthorized);
@@ -126,6 +128,7 @@ impl VeilLendContract {
     // This scaffold tracks protocol state first; token transfers and privacy proofs
     // can be layered on top once the Stellar asset integrations are finalized.
     pub fn deposit(env: Env, user: Address, asset: Address, amount: i128) {
+        Self::require_initialized(&env);
         Self::require_supported_asset(&env, &asset);
         Self::require_positive_amount(&env, amount);
         user.require_auth();
@@ -143,6 +146,7 @@ impl VeilLendContract {
     }
 
     pub fn borrow(env: Env, user: Address, asset: Address, amount: i128) {
+        Self::require_initialized(&env);
         Self::require_supported_asset(&env, &asset);
         Self::require_positive_amount(&env, amount);
         user.require_auth();
@@ -161,6 +165,7 @@ impl VeilLendContract {
     }
 
     pub fn repay(env: Env, user: Address, asset: Address, amount: i128) {
+        Self::require_initialized(&env);
         Self::require_supported_asset(&env, &asset);
         Self::require_positive_amount(&env, amount);
         user.require_auth();
@@ -182,6 +187,7 @@ impl VeilLendContract {
     }
 
     pub fn withdraw(env: Env, user: Address, asset: Address, amount: i128) {
+        Self::require_initialized(&env);
         Self::require_supported_asset(&env, &asset);
         Self::require_positive_amount(&env, amount);
         user.require_auth();
@@ -204,10 +210,12 @@ impl VeilLendContract {
     }
 
     pub fn get_position(env: Env, user: Address, asset: Address) -> Position {
+        Self::require_initialized(&env);
         Self::read_position(&env, &user, &asset)
     }
 
     pub fn is_asset_supported(env: Env, asset: Address) -> bool {
+        Self::require_initialized(&env);
         env.storage()
             .persistent()
             .get(&DataKey::SupportedAsset(asset))
@@ -218,18 +226,25 @@ impl VeilLendContract {
         env.storage()
             .instance()
             .get(&DataKey::Admin)
-            .unwrap_or_else(|| panic_with_error!(&env, VeilLendError::Unauthorized))
+            .unwrap_or_else(|| panic_with_error!(&env, VeilLendError::NotInitialized))
     }
 
     pub fn min_collateral_ratio_bps(env: Env) -> u32 {
+        Self::require_initialized(&env);
         env.storage()
             .instance()
             .get(&DataKey::MinCollateralRatioBps)
-            .unwrap_or(15_000)
+            .unwrap_or_else(|| panic_with_error!(&env, VeilLendError::NotInitialized))
     }
 }
 
 impl VeilLendContract {
+    fn require_initialized(env: &Env) {
+        if !env.storage().instance().has(&DataKey::Admin) {
+            panic_with_error!(env, VeilLendError::NotInitialized);
+        }
+    }
+
     fn read_position(env: &Env, user: &Address, asset: &Address) -> Position {
         env.storage()
             .persistent()

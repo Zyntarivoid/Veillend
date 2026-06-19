@@ -75,6 +75,22 @@ cargo clippy --locked --all-targets -- -D warnings
 - `stellar-cli` is pinned to `23.0.1` in CI/local setup because newer releases require a newer Rust compiler than this repo currently uses.
 - On Ubuntu, `stellar-cli` currently also needs `pkg-config`, `libdbus-1-dev`, and `libudev-dev` installed before `cargo install`.
 
+## Error Model
+
+Contract failures use `VeilLendError` with stable numeric codes:
+
+| Error | Code | Main trigger |
+| --- | ---: | --- |
+| `AlreadyInitialized` | 1 | Constructor called after admin state already exists. |
+| `Unauthorized` | 2 | Non-admin caller attempts an admin-only action. |
+| `UnsupportedAsset` | 3 | A lending action references an asset that is not enabled. |
+| `InvalidAmount` | 4 | Deposit, borrow, repay, or withdraw amount is zero or negative. |
+| `InsufficientCollateral` | 5 | Borrow or withdraw would break the collateral ratio. |
+| `InsufficientDeposit` | 6 | Withdraw amount exceeds the deposited balance. |
+| `RepayTooLarge` | 7 | Repay amount exceeds the outstanding borrowed balance. |
+| `InvalidCollateralRatio` | 8 | Constructor collateral ratio is below 100%. |
+| `NotInitialized` | 9 | Public methods are called before constructor state exists. |
+
 ## Development Workflow
 
 1. Write code in `src/lib.rs`
