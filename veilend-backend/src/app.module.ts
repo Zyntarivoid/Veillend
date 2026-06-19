@@ -6,6 +6,11 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { StellarModule } from './stellar/stellar.module';
 import { IndexerModule } from './indexer/indexer.module';
+import { PortfoliosModule } from './portfolios/portfolios.module';
+import { AssetsModule } from './assets/assets.module';
+import { TransactionsModule } from './transactions/transactions.module';
+import { AdminModule } from './admin/admin.module';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -24,6 +29,11 @@ import { IndexerModule } from './indexer/indexer.module';
     }),
     StellarModule,
     IndexerModule,
+    PortfoliosModule,
+    AssetsModule,
+    TransactionsModule,
+    AdminModule,
+    AuthModule,
   ],
   controllers: [AppController],
   providers: [
