@@ -1,0 +1,74 @@
+name: Backend contribution
+description: Propose or track backend work for legacy/veilend-backend.
+title: "[Backend]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for backend work in `legacy/veilend-backend`. Keep reports focused, reproducible, and safe for open-source review.
+
+  - type: input
+    id: area
+    attributes:
+      label: Backend area
+      description: Name the controller, service, module, script, config file, or documentation area affected.
+      placeholder: auth service, Supabase fallback, Starknet helper, README, tests
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Describe the contribution or problem in a few sentences.
+      placeholder: What should change and why?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: change_type
+    attributes:
+      label: Change type
+      options:
+        - Bug fix
+        - Feature
+        - Test coverage
+        - Documentation
+        - Configuration
+        - Refactor
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: Expected behavior or acceptance criteria
+      description: List the behavior, checks, or documentation that should exist after the work is complete.
+      placeholder: |
+        - API returns ...
+        - Tests cover ...
+        - README documents ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation plan
+      description: List the commands or manual checks a contributor should run from legacy/veilend-backend.
+      placeholder: |
+        npm run lint
+        npm run test
+        npm run build
+    validations:
+      required: true
+
+  - type: textarea
+    id: security
+    attributes:
+      label: Security and data notes
+      description: Mention auth, secrets, private keys, database migrations, API exposure, or user data impact if relevant.
+      placeholder: No secrets, private keys, or real user data are required for this change.
+    validations:
+      required: true
