@@ -73,7 +73,7 @@ export async function fetchDashboardData(address: string = DEMO_ADDRESS): Promis
         amount,
         usdValue: amount * price,
         timestamp: tx.timestamp,
-        status: 'COMPLETED',
+        status: 'COMPLETED' as const,
         txHash: tx.txHash,
       };
     }).sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()) : [];
