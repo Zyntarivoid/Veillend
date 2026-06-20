@@ -1,202 +1,99 @@
 # VeilLend Backend
 
-This repository contains the VeilLend backend — a NestJS API server that integrates with Starknet smart contracts (Cairo) and persists user data using Supabase (or a local Postgres fallback). It provides wallet-based authentication (nonce + signature + JWT), Starknet helpers, and controllers/services that mirror the on-chain contract methods for lending, shielded transfers, price oracles, reserves, and governance.
+VeilLend Backend is a NestJS API server for the legacy VeilLend workspace. It provides wallet authentication, Starknet contract helpers, Supabase support, and a local Postgres fallback for contributor development.
 
-**Quick start**
+## Project Location
 
-- **Clone & install:**
+Run all backend commands from this directory:
 
 ```bash
-cd veilend-backend
-npm install
+cd legacy/veilend-backend
 ```
 
-- **Dev server (with Supabase or local Postgres + Starknet devnet running):**
+## Prerequisites
+
+- Node.js and npm
+- A local Postgres database if you are not using Supabase
+- A Starknet devnet or RPC endpoint for contract-backed flows
+- A copied `.env` file based on `.env.example`
+
+## Setup From a Fresh Clone
 
 ```bash
-# Copy example env
+cd legacy/veilend-backend
+npm install
 cp .env.example .env
-# Edit .env to set SUPABASE_URL/SUPABASE_KEY or DATABASE_URL
+```
+
+Then edit `.env` for one of the supported data backends:
+
+- Supabase: set `USE_SUPABASE=true`, `SUPABASE_URL`, `SUPABASE_KEY`, and `SUPABASE_SERVICE_ROLE_KEY`.
+- Local Postgres fallback: keep `USE_SUPABASE=false` and set `DATABASE_URL` or the `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, and `PGDATABASE` values.
+
+For local contract flows, set `STARKNET_RPC_URL`, `STARKNET_DEVNET_URL`, and the development-only admin wallet values in `.env`.
+
+## Run the Backend
+
+```bash
 npm run start:dev
 ```
 
-**Local dev notes**
-- For on-chain testing run a Starknet devnet (default RPC: `http://127.0.0.1:5050`).
-- If you do not use Supabase, the backend will automatically connect to the `DATABASE_URL` Postgres and apply `supabase_schema.sql` on startup.
-- Admin signing keys in `.env` are for development only. Use a secure signer (KMS/HSM) in production.
+The default development port is `3000` unless `PORT` is changed in `.env`.
 
-**Environment variables**
-- **App**: `NODE_ENV`, `PORT`, `LOG_LEVEL`
-- **Auth**: `JWT_SECRET`, `JWT_EXPIRES_IN` (optional)
-- **Supabase**: `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `USE_SUPABASE`
-- **Starknet**: `STARKNET_RPC_URL`, `STARKNET_DEVNET_URL`
-- **Admin wallet (dev only)**: `ADMIN_NODE_URL`, `ADMIN_WALLET_ADDRESS`, `ADMIN_PRIVATE_KEY`
-- **Postgres fallback**: `DATABASE_URL`, `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`
+## Workspace Scripts
 
-See the example file: [.env.example](.env.example)
+| Command | Purpose |
+| --- | --- |
+| `npm run start` | Start the NestJS app once. |
+| `npm run start:dev` | Start the app in watch mode for local development. |
+| `npm run start:debug` | Start the app in debug watch mode. |
+| `npm run start:prod` | Run the compiled app from `dist/main`. |
+| `npm run build` | Compile the NestJS project. |
+| `npm run lint` | Run ESLint with automatic fixes over `src`, `apps`, `libs`, and `test`. |
+| `npm run format` | Format TypeScript files in `src` and `test`. |
+| `npm run test` | Run Jest unit tests. |
+| `npm run test:watch` | Run Jest in watch mode. |
+| `npm run test:cov` | Run Jest with coverage output. |
+| `npm run test:e2e` | Run e2e tests with `test/jest-e2e.json`. |
 
-**Key features**
-- Wallet-auth: nonce generation, typed-data signature verification (Starknet), JWT issuance.
-- Starknet service: ABI loader, calldata compiler, account instantiate + execute transaction helpers, and parsed event output.
-- Contract modules scaffolded to mirror on-chain contracts: ShieldedPool, LendingPool, PriceOracle, ReserveData, AddressesProvider, InterestToken, Governance.
-- Postgres fallback adapter that executes `supabase_schema.sql` on startup when Supabase is not configured.
+## Local Development Notes
 
-**Folder structure (important files)**
+- `.env.example` contains the full set of expected app, JWT, Supabase, Starknet, admin wallet, Postgres, and rate-limit variables.
+- The fallback database path uses `supabase_schema.sql` when Supabase is not configured.
+- Admin wallet values in `.env.example` are development placeholders only. Do not use production private keys in local files.
+- Swagger is enabled by the app bootstrap, so local API documentation should be available from the running server when the app starts successfully.
 
-- **Project root**
-  - **.env.example** - example environment variables
-  - **supabase_schema.sql** - SQL schema applied to local Postgres fallback
-  - **package.json**
+## Troubleshooting
 
-- **src/**
-  - **app.module.ts** - application module and registered feature modules
-  - **main.ts** - app bootstrap, Swagger, global validation
-  - **starknet/**
-    - **starknet.module.ts** - Nest module for Starknet helpers
-    - **starknet.service.ts** - ABI loader, calldata compiler, account helpers, `executeTransaction()` (returns `{ txHash, receipt, events }`)
-  - **auth/**
-    - **auth.module.ts** - Jwt config via ConfigService
-    - **auth.service.ts** - nonce generation, signature verification, login JWT
-    - **auth.controller.ts** - auth endpoints
-  - **supabase/**
-    - **supabase.module.ts**
-    - **supabase.service.ts** - Supabase client or Postgres fallback adapter (runs `supabase_schema.sql` on startup)
-  - **users/**, **transactions/**, **positions/** - business models using Supabase or Postgres fallback
-  - **shielded-pool/**, **lending-pool/**, **price-oracle/**, **reserve-data/**, **addresses-provider/**, **interest-token/**, **governance/**
-    - Each module contains `*.module.ts`, `*.service.ts`, `*.controller.ts` and `dto/` for write operations
+### `npm install` fails
 
-See the app module: [src/app.module.ts](src/app.module.ts)
+Confirm that Node.js and npm are installed, then retry from `legacy/veilend-backend`. Delete `node_modules` and reinstall only if the dependency tree is corrupted.
 
-**APIs (high-level)**
-- `POST /auth/nonce` — generate nonce for a wallet address
-- `POST /auth/verify` — verify typed-data signature and issue JWT
-- Contract read endpoints (GET) under `/lending-pool`, `/shielded-pool`, `/price-oracle`, etc.
-- Contract write endpoints (POST) under respective controllers (require admin signing or authenticated flows depending on your setup). Write endpoints return parsed events when available.
+### The app cannot connect to the database
 
-**Database & Migrations**
-- The repository contains `supabase_schema.sql` (idempotent CREATE IF NOT EXISTS statements). If Supabase is not configured, the backend will connect to `DATABASE_URL` and execute the SQL on startup.
-- For production, prefer a migration tool (recommended): `node-pg-migrate`, `Prisma Migrate`, Flyway, or a CI-run SQL migration job. I can add one if desired.
+If using local Postgres, check that Postgres is running and that `DATABASE_URL` or the `PG*` variables match the local database. If using Supabase, confirm `USE_SUPABASE=true` and that the Supabase URL and server-side keys are present.
 
-**Testing**
-- Unit tests use Jest. Run:
+### Starknet requests fail during local testing
+
+Start the configured Starknet devnet or update `STARKNET_RPC_URL`, `STARKNET_DEVNET_URL`, and `ADMIN_NODE_URL` to an available RPC endpoint.
+
+### Authentication fails immediately
+
+Set a non-empty `JWT_SECRET` in `.env`. For wallet signature flows, also confirm the request uses the same address format expected by the Starknet auth service.
+
+### Port `3000` is already in use
+
+Change `PORT` in `.env` or stop the process currently using the port.
+
+## Pull Request Checklist
+
+Before opening a backend PR, run the checks that match the change:
 
 ```bash
+npm run format
+npm run lint
 npm run test
+npm run build
 ```
 
-**Security & production notes**
-- Never store production private keys in `.env`. Use a secure signing service (AWS KMS, Azure Key Vault, HashiCorp Vault, or an HSM).
-- Use `SUPABASE_SERVICE_ROLE_KEY` only on the server side; rotate regularly.
-- Harden CORS and auth strategies when exposing APIs publicly.
-
-**Next steps / Improvements**
-- Add integration tests that mock Starknet provider and simulate transactions/events.
-- Add Swagger decorators across controllers for full API documentation (Swagger is enabled in `main.ts`).
-- Integrate a robust migration system and CI pre-deploy checks.
-- Replace dev admin-signer with a signer service (KMS) and implement RBAC for admin endpoints.
-
-If you'd like, I can now:
-- Run local `npm install` and `npm run build`/`test` (I can run in your environment or provide commands),
-- Add full Swagger decorators for all controllers,
-- Add a migration tool and CI scripts.
-
----
-Generated by assistant — reach out if you want the README extended with API examples or a contributor guide.
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
-
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
-
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
-
-## Description
-
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
-
-## Project setup
-
-```bash
-$ npm install
-```
-
-## Compile and run the project
-
-```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
-```
-
-## Run tests
-
-```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
-```
-
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
-
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
-```
-
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+Add `npm run test:e2e` when the change affects HTTP flows or end-to-end behavior.
