@@ -53,34 +53,72 @@ For list-based endpoints, the following conventions apply:
 - **Request**: `PageOptionsDto` defines query options (`page`, `take`, `order`).
 - **Response**: `PageDto<T>` wraps an array of data alongside pagination metadata (`PageMetaDto`).
 
-## Project setup
+## Contributor Setup
+
+From the repository root, enter the backend workspace and install the locked dependencies:
 
 ```bash
-$ npm install
+cd veilend-backend
+npm install
 ```
 
-## Compile and run the project
+Create a local environment file from the checked-in example:
 
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+cp .env.example .env
 ```
 
-## Run tests
+The default backend port is `3000`. Override it with `PORT` when needed:
+
+```env
+PORT=3001
+```
+
+The `.env.example` file includes rate-limit settings used by the global throttling guard. The Stellar and Soroban clients also have testnet defaults in code, but indexer work can be customized with the variables documented in `INDEXER.md`.
+
+## Running Locally
+
+Run the API in watch mode while developing:
+
+```bash
+npm run start:dev
+```
+
+Run the API once without watch mode:
+
+```bash
+npm run start
+```
+
+Build first, then run the compiled output:
+
+```bash
+npm run build
+npm run start:prod
+```
+
+## Testing and Quality Checks
 
 ```bash
 # unit tests
-$ npm run test
+npm run test
 
 # e2e tests
-$ npm run test:e2e
+npm run test:e2e
 
 # test coverage
-$ npm run test:cov
+npm run test:cov
+
+# TypeScript build
+npm run build
+
+# ESLint check/fix
+npm run lint
 ```
+
+## Troubleshooting
+
+- **`npm install` fails with dependency resolution errors**: remove `node_modules`, keep `package-lock.json`, and run `npm install` again from `veilend-backend`.
+- **The API starts on the wrong port**: set `PORT` in `.env`, then restart `npm run start:dev`.
+- **Indexer requests fail against Soroban RPC**: confirm the optional Stellar indexer variables from `INDEXER.md`, especially `STELLAR_CONTRACT_ID`, `STELLAR_INDEXER_START_LEDGER`, and `STELLAR_INDEXER_POLL_INTERVAL_MS`.
+- **Tests do not pick up new specs**: backend unit tests are matched with `src/.*\.spec\.ts$` in `package.json`; place focused unit specs under `src`.
