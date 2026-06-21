@@ -49,10 +49,11 @@ Located in `/veilend-soroban`, the current Soroban codebase is the new VeilLend 
 - Stores per-user positions with deposited and borrowed balances.
 - Exposes basic `deposit`, `borrow`, `repay`, and `withdraw` state transitions.
 - Emits events for indexing and analytics.
+- **Oracle-backed collateral valuation** using configurable asset prices for accurate borrowing power calculations.
 
 ### Planned next layer
 - Stellar token transfer integration for real asset movement.
-- Oracle-backed collateral valuation and liquidation rules.
+- Liquidation rules based on oracle price thresholds.
 - Shielded commitment/nullifier flows for privacy-preserving actions.
 - Additional testing, security review, and deployment automation.
 
