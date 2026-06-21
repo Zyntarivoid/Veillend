@@ -5,9 +5,11 @@ edition = "2021"
 publish = false
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 doctest = false
-test = false
 
 [dependencies]
 soroban-sdk = "=23.5.3"
+
+[dev-dependencies]
+soroban-sdk = { version = "=23.5.3", features = ["testutils"] }
