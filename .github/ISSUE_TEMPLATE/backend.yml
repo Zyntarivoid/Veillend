@@ -1,0 +1,65 @@
+name: Backend issue
+description: Report or propose work for the rebuilt VeilLend backend.
+title: "[Backend]: "
+labels:
+  - backend
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for backend API, indexing, authentication, data model, or tooling work. Include enough context for contributors to reproduce, design, and validate the change.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What needs to change, and why?
+      placeholder: Add a concise description of the backend problem or proposal.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Backend area
+      description: Which backend area is most affected?
+      options:
+        - Auth and wallet sessions
+        - Portfolios and positions
+        - Assets and price data
+        - Transactions and Soroban simulation
+        - Indexing and ledger events
+        - Admin configuration
+        - API contracts and DTOs
+        - Tooling or contributor experience
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: Describe the desired API behavior, workflow, or contributor experience.
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: Current behavior or gap
+      description: If this is a bug, include reproduction steps. If this is a feature, describe what is missing today.
+    validations:
+      required: false
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation plan
+      description: Which tests, scripts, or manual checks should prove the change?
+      placeholder: "Example: npm run test, npm run test:e2e, or a focused controller/service test."
+    validations:
+      required: true
+  - type: checkboxes
+    id: impact
+    attributes:
+      label: Impact checklist
+      options:
+        - label: This change may affect API request or response contracts.
+        - label: This change may require documentation updates.
+        - label: This change may touch authentication, authorization, secrets, or other security-sensitive behavior.
