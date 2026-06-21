@@ -1,0 +1,100 @@
+name: Backend contribution
+description: Report or propose backend API, indexing, auth, or infrastructure work.
+title: "[backend]: "
+labels: ["backend"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve the VeilLend backend. Use this template for NestJS API, indexing, auth, persistence, queue, observability, and backend contributor-experience work.
+
+  - type: dropdown
+    id: contribution_type
+    attributes:
+      label: Contribution type
+      description: Which backend area does this issue primarily cover?
+      options:
+        - Bug fix
+        - Feature request
+        - API contract change
+        - Indexing or event ingestion
+        - Authentication or authorization
+        - Observability or monitoring
+        - Developer experience or documentation
+        - Security-sensitive change
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Describe the issue or proposed backend change in a few sentences.
+      placeholder: What should change, and why does it matter for VeilLend contributors or users?
+    validations:
+      required: true
+
+  - type: textarea
+    id: current_behavior
+    attributes:
+      label: Current behavior
+      description: For bugs, explain what happens today. For features, describe the current gap.
+      placeholder: Include logs, request/response examples, or screenshots where useful.
+
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: Expected behavior
+      description: Describe the behavior contributors should implement or verify.
+      placeholder: What should the endpoint, service, queue, or workflow do instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: affected_area
+    attributes:
+      label: Affected backend area
+      description: Point contributors to the likely module or contract surface.
+      placeholder: "Example: veilend-backend/src/auth, src/indexer, src/transactions, Prisma schema, CI, README"
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction or implementation notes
+      description: Add reproduction steps for bugs, or suggested implementation steps for new work.
+      placeholder: |
+        1. Run npm ci in veilend-backend
+        2. Start the backend or run a specific test
+        3. Call the endpoint or execute the failing flow
+
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance criteria
+      description: List the concrete outcomes a pull request must satisfy.
+      placeholder: |
+        - [ ] API response shape is documented
+        - [ ] Unit or e2e tests cover the change
+        - [ ] Security-sensitive behavior is called out
+    validations:
+      required: true
+
+  - type: textarea
+    id: test_plan
+    attributes:
+      label: Suggested test plan
+      description: Which checks should contributors run before opening a PR?
+      value: |
+        - `cd veilend-backend && npm run lint`
+        - `cd veilend-backend && npm run build`
+        - `cd veilend-backend && npm run test`
+        - `cd veilend-backend && npm run test:e2e` when routes, auth, or persistence are affected
+
+  - type: checkboxes
+    id: security
+    attributes:
+      label: Security and privacy considerations
+      options:
+        - label: This change does not expose secrets, private keys, wallet signatures, tokens, or user financial data.
+        - label: This change updates authentication, authorization, or security-sensitive logic and needs explicit reviewer attention.
+        - label: This change affects user privacy, transaction history, portfolio data, or protocol configuration.
