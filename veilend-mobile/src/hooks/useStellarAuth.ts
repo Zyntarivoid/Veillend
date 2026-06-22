@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Keypair } from '@stellar/stellar-base';
 import { useStore } from '../store/store';
 import * as SecureStoreShim from '../utils/secureStoreShim';
+import { reportError } from '../utils/errorReporting';
 
 let SecureStore: typeof SecureStoreShim;
 try {
@@ -37,6 +38,10 @@ export function useStellarAuth() {
       await SecureStore.setItemAsync(SECRET_KEY_STORE, keypair.secret());
       await authenticate(keypair);
     } catch (e: any) {
+      reportError(e, {
+        severity: 'error',
+        source: 'wallet-generate',
+      });
       setError(e?.message ?? 'Failed to generate wallet');
     } finally {
       setLoading(false);
@@ -51,6 +56,10 @@ export function useStellarAuth() {
       await SecureStore.setItemAsync(SECRET_KEY_STORE, keypair.secret());
       await authenticate(keypair);
     } catch (e: any) {
+      reportError(e, {
+        severity: 'error',
+        source: 'wallet-import',
+      });
       setError(e?.message ?? 'Invalid secret key');
     } finally {
       setLoading(false);

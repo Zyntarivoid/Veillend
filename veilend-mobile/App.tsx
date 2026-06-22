@@ -5,6 +5,10 @@ import { View, StyleSheet, ActivityIndicator } from 'react-native';
 import Toast from './src/utils/toast';
 import { useStore } from './src/store/store';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import ErrorBoundary from './src/components/ErrorBoundary';
+import { installGlobalErrorHandler } from './src/utils/errorReporting';
+
+installGlobalErrorHandler();
 
 export default function App() {
   const authLoading = useStore((s) => s.authLoading);
@@ -14,18 +18,20 @@ export default function App() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <View style={styles.container}>
-        <RootNavigator />
-        <StatusBar style="light" />
+      <ErrorBoundary>
+        <View style={styles.container}>
+          <RootNavigator />
+          <StatusBar style="light" />
 
-        {anyLoading && (
-          <View style={styles.loadingOverlay} pointerEvents="none">
-            <ActivityIndicator size="large" color="#fff" />
-          </View>
-        )}
+          {anyLoading && (
+            <View style={styles.loadingOverlay} pointerEvents="none">
+              <ActivityIndicator size="large" color="#fff" />
+            </View>
+          )}
 
-        <Toast />
-      </View>
+          <Toast />
+        </View>
+      </ErrorBoundary>
     </GestureHandlerRootView>
   );
 }
