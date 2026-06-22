@@ -330,6 +330,7 @@ impl VeilLendContract {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use soroban_sdk::testutils::Address as _;
 
     #[test]
     fn test_position_creation() {
@@ -348,5 +349,52 @@ mod tests {
         assert_eq!(VeilLendError::UnsupportedAsset as u32, 3);
         assert_eq!(VeilLendError::InvalidAmount as u32, 4);
         assert_eq!(VeilLendError::InsufficientCollateral as u32, 5);
+    }
+
+    #[test]
+    fn test_initialization_stores_admin_and_ratio() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, (admin.clone(), 16_000u32));
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        assert_eq!(client.admin(), admin);
+        assert_eq!(client.min_collateral_ratio_bps(), 16_000);
+    }
+
+    #[test]
+    fn test_asset_support_reads_before_and_after_configuration() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let asset = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        assert!(!client.is_asset_supported(&asset));
+
+        client.configure_asset(&admin, &asset, &true);
+        assert!(client.is_asset_supported(&asset));
+
+        client.configure_asset(&admin, &asset, &false);
+        assert!(!client.is_asset_supported(&asset));
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_unauthorized_asset_configuration_fails() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let non_admin = Address::generate(&env);
+        let asset = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, (admin, 15_000u32));
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.configure_asset(&non_admin, &asset, &true);
     }
 }
