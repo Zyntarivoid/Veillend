@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { View, StyleSheet, ActivityIndicator } from 'react-native';
 import Toast from './src/utils/toast';
 import { useStore } from './src/store/store';
+import { AppErrorBoundary } from './src/components/AppErrorBoundary';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 export default function App() {
@@ -13,20 +14,22 @@ export default function App() {
   const anyLoading = authLoading || lendingLoading || shieldedLoading;
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <View style={styles.container}>
-        <RootNavigator />
-        <StatusBar style="light" />
+    <AppErrorBoundary>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <View style={styles.container}>
+          <RootNavigator />
+          <StatusBar style="light" />
 
-        {anyLoading && (
-          <View style={styles.loadingOverlay} pointerEvents="none">
-            <ActivityIndicator size="large" color="#fff" />
-          </View>
-        )}
+          {anyLoading && (
+            <View style={styles.loadingOverlay} pointerEvents="none">
+              <ActivityIndicator size="large" color="#fff" />
+            </View>
+          )}
 
-        <Toast />
-      </View>
-    </GestureHandlerRootView>
+          <Toast />
+        </View>
+      </GestureHandlerRootView>
+    </AppErrorBoundary>
   );
 }
 
