@@ -8,6 +8,7 @@ The contract currently provides an initial VeilLend lending scaffold with:
 
 - contract initialization with an admin and minimum collateral ratio
 - supported-asset configuration
+- admin-controlled pause state for emergency recovery
 - position storage per user and asset
 - basic `deposit`, `borrow`, `repay`, and `withdraw` state transitions
 - typed contract events for key lending actions
@@ -59,6 +60,14 @@ stellar contract build
 ```bash
 cargo test
 ```
+
+## Pause Control
+
+The admin can call `set_paused(admin, paused)` to pause or resume user lending
+actions during emergency recovery. When paused, `deposit`, `borrow`, `repay`,
+and `withdraw` reject with `VeilLendError::Paused`; read-only calls and admin
+configuration remain available. Clients can call `is_paused()` to show protocol
+status, and each pause change emits `PauseChanged`.
 
 ## Linting
 

@@ -10,6 +10,7 @@ use soroban_sdk::{
 pub enum DataKey {
     Admin,
     MinCollateralRatioBps,
+    Paused,
     SupportedAsset(Address),
     Position(Address, Address),
     OraclePrice(Address),
@@ -34,6 +35,7 @@ pub enum VeilLendError {
     InsufficientDeposit = 6,
     RepayTooLarge = 7,
     InvalidCollateralRatio = 8,
+    Paused = 9,
 }
 
 #[contractevent(topics = ["veillend", "asset_configured"])]
@@ -86,6 +88,14 @@ pub struct WithdrawEvent {
     pub amount: i128,
 }
 
+#[contractevent(topics = ["veillend", "pause_changed"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PauseChanged {
+    #[topic]
+    pub admin: Address,
+    pub paused: bool,
+}
+
 #[contract]
 pub struct VeilLendContract;
 
@@ -104,6 +114,7 @@ impl VeilLendContract {
         env.storage()
             .instance()
             .set(&DataKey::MinCollateralRatioBps, &min_collateral_ratio_bps);
+        env.storage().instance().set(&DataKey::Paused, &false);
     }
 
     pub fn configure_asset(env: Env, admin: Address, asset: Address, supported: bool) {
@@ -165,6 +176,7 @@ impl VeilLendContract {
     // This scaffold tracks protocol state first; token transfers and privacy proofs
     // can be layered on top once the Stellar asset integrations are finalized.
     pub fn deposit(env: Env, user: Address, asset: Address, amount: i128) {
+        Self::require_not_paused(&env);
         Self::require_supported_asset(&env, &asset);
         Self::require_positive_amount(&env, amount);
         user.require_auth();
@@ -182,6 +194,7 @@ impl VeilLendContract {
     }
 
     pub fn borrow(env: Env, user: Address, asset: Address, amount: i128) {
+        Self::require_not_paused(&env);
         Self::require_supported_asset(&env, &asset);
         Self::require_positive_amount(&env, amount);
         user.require_auth();
@@ -200,6 +213,7 @@ impl VeilLendContract {
     }
 
     pub fn repay(env: Env, user: Address, asset: Address, amount: i128) {
+        Self::require_not_paused(&env);
         Self::require_supported_asset(&env, &asset);
         Self::require_positive_amount(&env, amount);
         user.require_auth();
@@ -221,6 +235,7 @@ impl VeilLendContract {
     }
 
     pub fn withdraw(env: Env, user: Address, asset: Address, amount: i128) {
+        Self::require_not_paused(&env);
         Self::require_supported_asset(&env, &asset);
         Self::require_positive_amount(&env, amount);
         user.require_auth();
@@ -266,9 +281,33 @@ impl VeilLendContract {
             .get(&DataKey::MinCollateralRatioBps)
             .unwrap_or(15_000)
     }
+
+    pub fn set_paused(env: Env, admin: Address, paused: bool) {
+        let stored_admin = Self::admin(env.clone());
+        if admin != stored_admin {
+            panic_with_error!(&env, VeilLendError::Unauthorized);
+        }
+
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::Paused, &paused);
+        PauseChanged { admin, paused }.publish(&env);
+    }
+
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
+    }
 }
 
 impl VeilLendContract {
+    fn require_not_paused(env: &Env) {
+        if Self::is_paused(env.clone()) {
+            panic_with_error!(env, VeilLendError::Paused);
+        }
+    }
+
     fn read_position(env: &Env, user: &Address, asset: &Address) -> Position {
         env.storage()
             .persistent()
@@ -330,6 +369,18 @@ impl VeilLendContract {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use soroban_sdk::{testutils::Address as _, Env};
+
+    fn setup_contract(env: &Env) -> (VeilLendContractClient<'_>, Address, Address) {
+        env.mock_all_auths();
+
+        let admin = Address::generate(env);
+        let asset = Address::generate(env);
+        let contract_id = env.register(VeilLendContract, (&admin, 15_000u32));
+        let client = VeilLendContractClient::new(env, &contract_id);
+
+        (client, admin, asset)
+    }
 
     #[test]
     fn test_position_creation() {
@@ -348,5 +399,42 @@ mod tests {
         assert_eq!(VeilLendError::UnsupportedAsset as u32, 3);
         assert_eq!(VeilLendError::InvalidAmount as u32, 4);
         assert_eq!(VeilLendError::InsufficientCollateral as u32, 5);
+        assert_eq!(VeilLendError::Paused as u32, 9);
+    }
+
+    #[test]
+    fn test_pause_defaults_to_false_and_admin_can_toggle() {
+        let env = Env::default();
+        let (client, admin, _asset) = setup_contract(&env);
+
+        assert!(!client.is_paused());
+
+        client.set_paused(&admin, &true);
+        assert!(client.is_paused());
+
+        client.set_paused(&admin, &false);
+        assert!(!client.is_paused());
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #2)")]
+    fn test_non_admin_cannot_pause() {
+        let env = Env::default();
+        let (client, _admin, _asset) = setup_contract(&env);
+        let non_admin = Address::generate(&env);
+
+        client.set_paused(&non_admin, &true);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #9)")]
+    fn test_pause_blocks_lending_actions() {
+        let env = Env::default();
+        let (client, admin, asset) = setup_contract(&env);
+        let user = Address::generate(&env);
+
+        client.configure_asset(&admin, &asset, &true);
+        client.set_paused(&admin, &true);
+        client.deposit(&user, &asset, &100);
     }
 }
