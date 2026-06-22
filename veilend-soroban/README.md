@@ -54,6 +54,55 @@ cargo build --target wasm32-unknown-unknown --release
 stellar contract build
 ```
 
+Or use the repository script, which runs both build steps and writes Stellar CLI output to `target/stellar`:
+
+```bash
+./scripts/build.sh
+```
+
+## Testnet Deploy And Invoke Scripts
+
+Copy the testnet environment template and fill in the values for your funded Stellar CLI identity and contract addresses:
+
+```bash
+cp .env.testnet.example .env.testnet
+```
+
+Required environment variables:
+
+- `STELLAR_SOURCE`: funded Stellar CLI identity, secret key, or seed phrase used as the transaction source.
+- `VEILLEND_ADMIN`: public address passed to the contract constructor as admin.
+- `VEILLEND_CONTRACT_ID`: deployed contract id, required for invoke flows.
+- `VEILLEND_ASSET`: asset contract id used in asset configuration and lending calls.
+- `VEILLEND_USER`: user public address for position reads and user-authorized actions.
+
+Optional environment variables:
+
+- `STELLAR_NETWORK`: Stellar CLI network name. Defaults to `testnet`.
+- `VEILLEND_MIN_COLLATERAL_RATIO_BPS`: constructor collateral ratio. Defaults to `15000`.
+- `VEILLEND_WASM`: custom path to `veillend_contract.wasm`.
+- `VEILLEND_ENV_FILE`: custom env file path. Defaults to `.env.testnet`.
+
+Build and deploy to Stellar testnet:
+
+```bash
+./scripts/build.sh
+./scripts/deploy-testnet.sh
+```
+
+The deploy script prints the deployed contract id. Save that value as `VEILLEND_CONTRACT_ID` in `.env.testnet`.
+
+Invoke read-only and write flows through the generic wrapper:
+
+```bash
+./scripts/invoke-testnet.sh configure_asset --admin "$VEILLEND_ADMIN" --asset "$VEILLEND_ASSET" --supported true
+./scripts/invoke-testnet.sh set_oracle_price --admin "$VEILLEND_ADMIN" --asset "$VEILLEND_ASSET" --price 1
+./scripts/invoke-testnet.sh deposit --user "$VEILLEND_USER" --asset "$VEILLEND_ASSET" --amount 100
+./scripts/invoke-testnet.sh get_position --user "$VEILLEND_USER" --asset "$VEILLEND_ASSET"
+```
+
+Stellar CLI parses function arguments after the `--` separator from the deployed contract interface, so additional contract functions can be invoked with the same wrapper.
+
 ## Testing
 
 ```bash
