@@ -34,6 +34,7 @@ pub enum VeilLendError {
     InsufficientDeposit = 6,
     RepayTooLarge = 7,
     InvalidCollateralRatio = 8,
+    PositionNotLiquidatable = 9,
 }
 
 #[contractevent(topics = ["veillend", "asset_configured"])]
@@ -84,6 +85,19 @@ pub struct WithdrawEvent {
     #[topic]
     pub asset: Address,
     pub amount: i128,
+}
+
+#[contractevent(topics = ["veillend", "liquidation"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LiquidationEvent {
+    #[topic]
+    pub liquidator: Address,
+    #[topic]
+    pub user: Address,
+    #[topic]
+    pub asset: Address,
+    pub repaid_amount: i128,
+    pub seized_amount: i128,
 }
 
 #[contract]
@@ -242,6 +256,44 @@ impl VeilLendContract {
         .publish(&env);
     }
 
+    pub fn liquidate(env: Env, liquidator: Address, user: Address, asset: Address, amount: i128) {
+        Self::require_supported_asset(&env, &asset);
+        Self::require_positive_amount(&env, amount);
+        liquidator.require_auth();
+
+        let mut position = Self::read_position(&env, &user, &asset);
+        if !Self::is_liquidatable(&env, &asset, &position) {
+            panic_with_error!(&env, VeilLendError::PositionNotLiquidatable);
+        }
+        if amount > position.borrowed {
+            panic_with_error!(&env, VeilLendError::RepayTooLarge);
+        }
+
+        let seized_amount = if amount > position.deposited {
+            position.deposited
+        } else {
+            amount
+        };
+
+        position.borrowed -= amount;
+        position.deposited -= seized_amount;
+        Self::write_position(&env, &user, &asset, &position);
+
+        LiquidationEvent {
+            liquidator,
+            user,
+            asset,
+            repaid_amount: amount,
+            seized_amount,
+        }
+        .publish(&env);
+    }
+
+    pub fn is_position_liquidatable(env: Env, user: Address, asset: Address) -> bool {
+        let position = Self::read_position(&env, &user, &asset);
+        Self::is_liquidatable(&env, &asset, &position)
+    }
+
     pub fn get_position(env: Env, user: Address, asset: Address) -> Position {
         Self::read_position(&env, &user, &asset)
     }
@@ -308,6 +360,16 @@ impl VeilLendContract {
             return;
         }
 
+        if Self::is_liquidatable(env, asset, position) {
+            panic_with_error!(env, VeilLendError::InsufficientCollateral);
+        }
+    }
+
+    fn is_liquidatable(env: &Env, asset: &Address, position: &Position) -> bool {
+        if position.borrowed == 0 {
+            return false;
+        }
+
         let collateral_ratio_bps = Self::min_collateral_ratio_bps(env.clone()) as i128;
 
         // Get oracle price for the asset
@@ -321,15 +383,42 @@ impl VeilLendContract {
         let collateral_value = position.deposited * price;
         let borrowed_value = position.borrowed * price;
 
-        if collateral_value * 10_000 < borrowed_value * collateral_ratio_bps {
-            panic_with_error!(env, VeilLendError::InsufficientCollateral);
-        }
+        collateral_value * 10_000 < borrowed_value * collateral_ratio_bps
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use soroban_sdk::testutils::{Address as _, EnvTestConfig};
+
+    fn test_env() -> Env {
+        Env::new_with_config(EnvTestConfig {
+            capture_snapshot_at_drop: false,
+        })
+    }
+
+    fn create_contract(env: &Env) -> (Address, Address, VeilLendContractClient<'_>) {
+        env.mock_all_auths();
+
+        let admin = Address::generate(env);
+        let contract_id = env.register(VeilLendContract, (&admin, &15_000u32));
+        let client = VeilLendContractClient::new(env, &contract_id);
+
+        (admin, contract_id, client)
+    }
+
+    fn write_test_position(
+        env: &Env,
+        contract_id: &Address,
+        user: &Address,
+        asset: &Address,
+        position: Position,
+    ) {
+        env.as_contract(contract_id, || {
+            VeilLendContract::write_position(env, user, asset, &position);
+        });
+    }
 
     #[test]
     fn test_position_creation() {
@@ -348,5 +437,108 @@ mod tests {
         assert_eq!(VeilLendError::UnsupportedAsset as u32, 3);
         assert_eq!(VeilLendError::InvalidAmount as u32, 4);
         assert_eq!(VeilLendError::InsufficientCollateral as u32, 5);
+        assert_eq!(VeilLendError::PositionNotLiquidatable as u32, 9);
+    }
+
+    #[test]
+    fn test_position_liquidatable_uses_collateral_ratio() {
+        let env = test_env();
+        let (admin, contract_id, client) = create_contract(&env);
+        let user = Address::generate(&env);
+        let asset = Address::generate(&env);
+
+        client.configure_asset(&admin, &asset, &true);
+        write_test_position(
+            &env,
+            &contract_id,
+            &user,
+            &asset,
+            Position {
+                deposited: 100,
+                borrowed: 100,
+            },
+        );
+
+        assert!(client.is_position_liquidatable(&user, &asset));
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #9)")]
+    fn test_healthy_position_cannot_be_liquidated() {
+        let env = test_env();
+        let (admin, contract_id, client) = create_contract(&env);
+        let liquidator = Address::generate(&env);
+        let user = Address::generate(&env);
+        let asset = Address::generate(&env);
+
+        client.configure_asset(&admin, &asset, &true);
+        write_test_position(
+            &env,
+            &contract_id,
+            &user,
+            &asset,
+            Position {
+                deposited: 150,
+                borrowed: 100,
+            },
+        );
+
+        assert!(!client.is_position_liquidatable(&user, &asset));
+        client.liquidate(&liquidator, &user, &asset, &25);
+    }
+
+    #[test]
+    fn test_liquidation_reduces_debt_and_collateral() {
+        let env = test_env();
+        let (admin, contract_id, client) = create_contract(&env);
+        let liquidator = Address::generate(&env);
+        let user = Address::generate(&env);
+        let asset = Address::generate(&env);
+
+        client.configure_asset(&admin, &asset, &true);
+        write_test_position(
+            &env,
+            &contract_id,
+            &user,
+            &asset,
+            Position {
+                deposited: 100,
+                borrowed: 100,
+            },
+        );
+
+        client.liquidate(&liquidator, &user, &asset, &40);
+
+        assert_eq!(
+            client.get_position(&user, &asset),
+            Position {
+                deposited: 60,
+                borrowed: 60,
+            }
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #7)")]
+    fn test_liquidation_rejects_repay_above_debt() {
+        let env = test_env();
+        let (admin, contract_id, client) = create_contract(&env);
+        let liquidator = Address::generate(&env);
+        let user = Address::generate(&env);
+        let asset = Address::generate(&env);
+
+        client.configure_asset(&admin, &asset, &true);
+        write_test_position(
+            &env,
+            &contract_id,
+            &user,
+            &asset,
+            Position {
+                deposited: 100,
+                borrowed: 100,
+            },
+        );
+
+        client.liquidate(&liquidator, &user, &asset, &125);
     }
 }

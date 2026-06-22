@@ -10,6 +10,7 @@ The contract currently provides an initial VeilLend lending scaffold with:
 - supported-asset configuration
 - position storage per user and asset
 - basic `deposit`, `borrow`, `repay`, and `withdraw` state transitions
+- first-pass liquidation state transitions for undercollateralized positions
 - typed contract events for key lending actions
 
 This is a protocol foundation, not the full privacy implementation yet. Token transfers, price oracles, liquidation logic, and shielded proof verification still need to be added in follow-up iterations.
@@ -59,6 +60,19 @@ stellar contract build
 ```bash
 cargo test
 ```
+
+## Liquidation Path
+
+`is_position_liquidatable(user, asset)` applies the configured minimum
+collateral ratio to the stored position and reports whether the position is
+below the protocol threshold.
+
+`liquidate(liquidator, user, asset, amount)` is available only for supported
+assets and only when the target position is below the collateral threshold. The
+liquidator must authorize the call. The current scaffold models liquidation as a
+state transition by reducing the user's borrowed amount by `amount` and seizing
+up to the same amount of deposited collateral. Real Stellar asset transfers and
+liquidation incentives are intentionally left for the token-integration layer.
 
 ## Linting
 
