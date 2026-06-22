@@ -106,12 +106,13 @@ impl VeilLendContract {
             .set(&DataKey::MinCollateralRatioBps, &min_collateral_ratio_bps);
     }
 
+    /// Enable or disable an asset for lending actions.
+    ///
+    /// Only the initialized contract admin can change supported assets. Every
+    /// update emits an `AssetConfigured` typed event so off-chain indexers can
+    /// track the asset allowlist.
     pub fn configure_asset(env: Env, admin: Address, asset: Address, supported: bool) {
-        let stored_admin = Self::admin(env.clone());
-        if admin != stored_admin {
-            panic_with_error!(&env, VeilLendError::Unauthorized);
-        }
-
+        Self::require_admin(&env, &admin);
         admin.require_auth();
         env.storage()
             .persistent()
@@ -134,10 +135,7 @@ impl VeilLendContract {
     /// * `asset` - The asset address to set the price for
     /// * `price` - The oracle price (must be positive, in base units e.g., cents)
     pub fn set_oracle_price(env: Env, admin: Address, asset: Address, price: i128) {
-        let stored_admin = Self::admin(env.clone());
-        if admin != stored_admin {
-            panic_with_error!(&env, VeilLendError::Unauthorized);
-        }
+        Self::require_admin(&env, &admin);
 
         if price <= 0 {
             panic_with_error!(&env, VeilLendError::InvalidAmount);
@@ -269,6 +267,13 @@ impl VeilLendContract {
 }
 
 impl VeilLendContract {
+    fn require_admin(env: &Env, admin: &Address) {
+        let stored_admin = Self::admin(env.clone());
+        if admin != &stored_admin {
+            panic_with_error!(env, VeilLendError::Unauthorized);
+        }
+    }
+
     fn read_position(env: &Env, user: &Address, asset: &Address) -> Position {
         env.storage()
             .persistent()
@@ -330,6 +335,23 @@ impl VeilLendContract {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use soroban_sdk::testutils::{Address as _, EnvTestConfig};
+
+    fn test_env() -> Env {
+        Env::new_with_config(EnvTestConfig {
+            capture_snapshot_at_drop: false,
+        })
+    }
+
+    fn create_contract(env: &Env) -> (Address, VeilLendContractClient<'_>) {
+        env.mock_all_auths();
+
+        let admin = Address::generate(env);
+        let contract_id = env.register(VeilLendContract, (&admin, &15_000u32));
+        let client = VeilLendContractClient::new(env, &contract_id);
+
+        (admin, client)
+    }
 
     #[test]
     fn test_position_creation() {
@@ -348,5 +370,49 @@ mod tests {
         assert_eq!(VeilLendError::UnsupportedAsset as u32, 3);
         assert_eq!(VeilLendError::InvalidAmount as u32, 4);
         assert_eq!(VeilLendError::InsufficientCollateral as u32, 5);
+    }
+
+    #[test]
+    fn test_asset_configuration_defaults_to_unsupported() {
+        let env = test_env();
+        let (_, client) = create_contract(&env);
+        let asset = Address::generate(&env);
+
+        assert!(!client.is_asset_supported(&asset));
+    }
+
+    #[test]
+    fn test_admin_can_configure_asset() {
+        let env = test_env();
+        let (admin, client) = create_contract(&env);
+        let asset = Address::generate(&env);
+
+        client.configure_asset(&admin, &asset, &true);
+
+        assert!(client.is_asset_supported(&asset));
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #2)")]
+    fn test_non_admin_cannot_configure_asset() {
+        let env = test_env();
+        let (_, client) = create_contract(&env);
+        let non_admin = Address::generate(&env);
+        let asset = Address::generate(&env);
+
+        client.configure_asset(&non_admin, &asset, &true);
+    }
+
+    #[test]
+    fn test_admin_can_disable_asset() {
+        let env = test_env();
+        let (admin, client) = create_contract(&env);
+        let asset = Address::generate(&env);
+
+        client.configure_asset(&admin, &asset, &true);
+        assert!(client.is_asset_supported(&asset));
+
+        client.configure_asset(&admin, &asset, &false);
+        assert!(!client.is_asset_supported(&asset));
     }
 }

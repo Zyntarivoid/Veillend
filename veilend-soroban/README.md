@@ -7,7 +7,7 @@ This directory is the active Rust/Soroban contract workspace for VeilLend on Ste
 The contract currently provides an initial VeilLend lending scaffold with:
 
 - contract initialization with an admin and minimum collateral ratio
-- supported-asset configuration
+- admin-only supported-asset configuration with typed events
 - position storage per user and asset
 - basic `deposit`, `borrow`, `repay`, and `withdraw` state transitions
 - typed contract events for key lending actions
@@ -59,6 +59,17 @@ stellar contract build
 ```bash
 cargo test
 ```
+
+## Supported Asset Configuration
+
+Assets are unsupported by default. The initialized admin can call
+`configure_asset(admin, asset, supported)` to enable or disable an asset for
+lending actions. The contract rejects configuration attempts from any other
+address with `VeilLendError::Unauthorized`.
+
+Each successful support change emits the typed `AssetConfigured` contract event
+with the admin address, asset address, and new `supported` value. Indexers can
+use this event stream as the asset allowlist change log.
 
 ## Linting
 
