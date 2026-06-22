@@ -72,6 +72,13 @@ $ npm run start:dev
 $ npm run start:prod
 ```
 
+## Portfolio Dashboard API
+
+Use `GET /portfolios/:walletAddress/dashboard` to read indexed dashboard data
+for a wallet. The response includes per-asset deposited and borrowed balances,
+raw collateral and borrowed values, aggregate totals, health factor basis
+points, and an `empty` status when the wallet has no indexed positions.
+
 ## Run tests
 
 ```bash
