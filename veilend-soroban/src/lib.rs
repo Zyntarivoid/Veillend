@@ -1,8 +1,8 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error, Address,
-    Env,
+    contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error,
+    token::TokenClient, Address, Env,
 };
 
 #[derive(Clone)]
@@ -168,6 +168,7 @@ impl VeilLendContract {
         Self::require_supported_asset(&env, &asset);
         Self::require_positive_amount(&env, amount);
         user.require_auth();
+        Self::transfer_to_contract(&env, &asset, &user, amount);
 
         let mut position = Self::read_position(&env, &user, &asset);
         position.deposited += amount;
@@ -209,6 +210,7 @@ impl VeilLendContract {
             panic_with_error!(&env, VeilLendError::RepayTooLarge);
         }
 
+        Self::transfer_to_contract(&env, &asset, &user, amount);
         position.borrowed -= amount;
         Self::write_position(&env, &user, &asset, &position);
 
@@ -269,6 +271,11 @@ impl VeilLendContract {
 }
 
 impl VeilLendContract {
+    fn transfer_to_contract(env: &Env, asset: &Address, from: &Address, amount: i128) {
+        let token = TokenClient::new(env, asset);
+        token.transfer(from, env.current_contract_address(), &amount);
+    }
+
     fn read_position(env: &Env, user: &Address, asset: &Address) -> Position {
         env.storage()
             .persistent()
@@ -330,6 +337,32 @@ impl VeilLendContract {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use soroban_sdk::{
+        testutils::{Address as _, EnvTestConfig},
+        token::StellarAssetClient,
+    };
+
+    fn test_env() -> Env {
+        Env::new_with_config(EnvTestConfig {
+            capture_snapshot_at_drop: false,
+        })
+    }
+
+    fn create_contract(env: &Env) -> (Address, Address, VeilLendContractClient<'_>) {
+        env.mock_all_auths();
+
+        let admin = Address::generate(env);
+        let contract_id = env.register(VeilLendContract, (&admin, &15_000u32));
+        let client = VeilLendContractClient::new(env, &contract_id);
+
+        (admin, contract_id, client)
+    }
+
+    fn create_asset(env: &Env) -> Address {
+        let token_admin = Address::generate(env);
+        env.register_stellar_asset_contract_v2(token_admin)
+            .address()
+    }
 
     #[test]
     fn test_position_creation() {
@@ -348,5 +381,77 @@ mod tests {
         assert_eq!(VeilLendError::UnsupportedAsset as u32, 3);
         assert_eq!(VeilLendError::InvalidAmount as u32, 4);
         assert_eq!(VeilLendError::InsufficientCollateral as u32, 5);
+    }
+
+    #[test]
+    fn test_deposit_transfers_tokens_to_contract() {
+        let env = test_env();
+        let (admin, contract_id, client) = create_contract(&env);
+        let user = Address::generate(&env);
+        let asset = create_asset(&env);
+        let token = TokenClient::new(&env, &asset);
+        let stellar_asset = StellarAssetClient::new(&env, &asset);
+
+        stellar_asset.mint(&user, &1_000);
+        client.configure_asset(&admin, &asset, &true);
+        client.deposit(&user, &asset, &250);
+
+        assert_eq!(token.balance(&user), 750);
+        assert_eq!(token.balance(&contract_id), 250);
+        assert_eq!(
+            client.get_position(&user, &asset),
+            Position {
+                deposited: 250,
+                borrowed: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn test_repay_transfers_tokens_before_reducing_debt() {
+        let env = test_env();
+        let (admin, contract_id, client) = create_contract(&env);
+        let user = Address::generate(&env);
+        let asset = create_asset(&env);
+        let token = TokenClient::new(&env, &asset);
+        let stellar_asset = StellarAssetClient::new(&env, &asset);
+
+        stellar_asset.mint(&user, &1_000);
+        client.configure_asset(&admin, &asset, &true);
+        client.deposit(&user, &asset, &200);
+        client.borrow(&user, &asset, &100);
+        client.repay(&user, &asset, &40);
+
+        assert_eq!(token.balance(&user), 760);
+        assert_eq!(token.balance(&contract_id), 240);
+        assert_eq!(
+            client.get_position(&user, &asset),
+            Position {
+                deposited: 200,
+                borrowed: 60,
+            }
+        );
+    }
+
+    #[test]
+    fn test_failed_deposit_does_not_update_position() {
+        let env = test_env();
+        let (admin, contract_id, client) = create_contract(&env);
+        let user = Address::generate(&env);
+        let asset = create_asset(&env);
+        let token = TokenClient::new(&env, &asset);
+
+        client.configure_asset(&admin, &asset, &true);
+
+        assert!(client.try_deposit(&user, &asset, &100).is_err());
+        assert_eq!(token.balance(&user), 0);
+        assert_eq!(token.balance(&contract_id), 0);
+        assert_eq!(
+            client.get_position(&user, &asset),
+            Position {
+                deposited: 0,
+                borrowed: 0,
+            }
+        );
     }
 }

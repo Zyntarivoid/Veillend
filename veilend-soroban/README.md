@@ -9,10 +9,11 @@ The contract currently provides an initial VeilLend lending scaffold with:
 - contract initialization with an admin and minimum collateral ratio
 - supported-asset configuration
 - position storage per user and asset
-- basic `deposit`, `borrow`, `repay`, and `withdraw` state transitions
+- Stellar asset transfers for `deposit` and `repay`
+- basic `borrow` and `withdraw` state transitions
 - typed contract events for key lending actions
 
-This is a protocol foundation, not the full privacy implementation yet. Token transfers, price oracles, liquidation logic, and shielded proof verification still need to be added in follow-up iterations.
+This is a protocol foundation, not the full privacy implementation yet. Borrow/withdraw asset transfers, price oracles, liquidation logic, and shielded proof verification still need to be added in follow-up iterations.
 
 ## Prerequisites
 
@@ -59,6 +60,19 @@ stellar contract build
 ```bash
 cargo test
 ```
+
+## Stellar Asset Transfers
+
+`deposit(user, asset, amount)` transfers `amount` from the user to the contract
+address through the configured Stellar asset contract before increasing the
+stored deposit balance.
+
+`repay(user, asset, amount)` validates the repayment amount, transfers `amount`
+from the user to the contract address, and only then reduces the stored debt.
+If the token transfer fails, the position update is not applied.
+
+`borrow` and `withdraw` currently remain state-only scaffolding until the
+contract has reserve accounting and token-outflow rules.
 
 ## Linting
 
