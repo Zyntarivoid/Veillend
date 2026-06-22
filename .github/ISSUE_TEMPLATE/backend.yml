@@ -1,0 +1,69 @@
+name: Backend contribution
+description: Report or propose a backend change for the VeilLend API, indexer, or data layer.
+title: "[Backend]: "
+labels:
+  - backend
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve the VeilLend backend. Please include enough context for maintainers to reproduce, review, and prioritize the work.
+  - type: dropdown
+    id: change-type
+    attributes:
+      label: Change type
+      description: What kind of backend contribution is this?
+      options:
+        - Bug report
+        - Feature request
+        - Documentation update
+        - Refactor or maintenance
+        - Security-sensitive change
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Describe the problem, proposal, or contribution goal.
+      placeholder: Explain what should change and why it matters.
+    validations:
+      required: true
+  - type: textarea
+    id: affected-area
+    attributes:
+      label: Affected backend area
+      description: List the module, route, data model, indexer flow, or configuration involved.
+      placeholder: "Example: src/auth, src/indexer, Prisma schema, transaction simulation, .env.example"
+    validations:
+      required: true
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+      description: What should the backend do after this change?
+      placeholder: Describe the desired response, validation rule, job behavior, or data shape.
+    validations:
+      required: true
+  - type: textarea
+    id: current-behavior
+    attributes:
+      label: Current behavior or context
+      description: For bugs, describe the current behavior and reproduction steps. For features, describe the current gap.
+      placeholder: Include commands, API requests, logs, screenshots, or links when useful.
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation plan
+      description: Which checks should prove the change works?
+      placeholder: "Example: npm run test, npm run test:e2e, npm run test:cov, manual API request"
+    validations:
+      required: true
+  - type: checkboxes
+    id: security
+    attributes:
+      label: Security and data handling
+      options:
+        - label: This does not expose secrets, private keys, wallet signatures, or personal data.
+        - label: This change updates authentication, authorization, signatures, indexing, or financial data handling.
+        - label: I have described any migration, rollback, or deployment impact.
