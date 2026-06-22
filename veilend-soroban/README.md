@@ -54,6 +54,25 @@ cargo build --target wasm32-unknown-unknown --release
 stellar contract build
 ```
 
+## Contract Specs and Client Bindings
+
+Frontend and backend integrations should consume contract specs generated from the current Soroban workspace instead of hand-written interface definitions.
+
+From the repository root, export the contract interface docs, XDR spec entries, and TypeScript bindings:
+
+```bash
+./veilend-soroban/scripts/export-contract-specs.sh
+```
+
+The export writes generated files under `veilend-soroban/specs/`:
+
+- `veillend-contract.interface.xdr.txt` for raw contract spec tooling.
+- `veillend-contract.interface.rs` for a human-readable Rust interface reference.
+- `typescript/` for generated TypeScript bindings.
+- `BUILD_INFO.md` with the source package, WASM artifact, and regeneration command.
+
+Generated spec artifacts are ignored by Git and should be regenerated whenever the contract interface changes. The script and `veilend-soroban/specs/README.md` define the canonical output location for integration files.
+
 ## Testing
 
 ```bash

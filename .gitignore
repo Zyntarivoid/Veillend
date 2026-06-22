@@ -1,6 +1,8 @@
 # Rust build artifacts
 /target/
 /veilend-soroban/target/
+/veilend-soroban/specs/*
+!/veilend-soroban/specs/README.md
 
 # Root planning backlogs
 /backend.md
