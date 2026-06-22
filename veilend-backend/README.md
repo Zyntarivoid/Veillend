@@ -53,6 +53,20 @@ For list-based endpoints, the following conventions apply:
 - **Request**: `PageOptionsDto` defines query options (`page`, `take`, `order`).
 - **Response**: `PageDto<T>` wraps an array of data alongside pagination metadata (`PageMetaDto`).
 
+## Public Configuration Endpoints
+
+The rebuilt backend exposes read-only configuration for frontend and mobile
+clients:
+
+- `GET /assets` lists supported asset metadata, risk factors, and cache hints.
+- `GET /assets/:symbol` returns metadata for a single supported symbol.
+- `GET /protocol/config` returns Stellar network, contract, risk, and
+  collateral configuration.
+- `GET /protocol/risk` returns only protocol risk and collateral rules.
+
+These endpoints set `Cache-Control: public, max-age=60` because the values are
+read-mostly and safe for short-lived client reuse.
+
 ## Project setup
 
 ```bash
