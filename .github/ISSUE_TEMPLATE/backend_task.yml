@@ -1,0 +1,82 @@
+name: Backend task
+about: Plan API, indexing, auth, portfolio, asset, or admin backend work
+labels: [backend]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for VeilLend backend contributions. Include enough context for open-source contributors to verify the change without exposing secrets, wallet private keys, or production-only data.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What backend behavior should change?
+      placeholder: Add a health endpoint, extend the portfolio read model, tighten DTO validation...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Backend area
+      description: Which backend module or workflow is affected?
+      options:
+        - Auth / wallet signatures / RBAC
+        - Portfolios / health factor / position aggregation
+        - Assets / token metadata / reserve configuration
+        - Transactions / Soroban simulation / history
+        - Indexer / Stellar ledger events
+        - Admin configuration / risk controls
+        - API contracts / DTO validation / pagination
+        - CI / tooling / contributor workflow
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: List concrete checks a reviewer can use to decide whether the task is complete.
+      placeholder: |
+        - Endpoint validates required query parameters.
+        - Unit tests cover success and failure cases.
+        - README or API docs describe configuration.
+    validations:
+      required: true
+
+  - type: textarea
+    id: implementation-notes
+    attributes:
+      label: Implementation notes
+      description: Mention relevant files, APIs, DTOs, migrations, queues, or protocol assumptions.
+      placeholder: Reference veilend-backend/src modules, common DTOs, or Stellar/Soroban behavior.
+
+  - type: textarea
+    id: security
+    attributes:
+      label: Security and privacy considerations
+      description: Identify sensitive data, auth boundaries, abuse cases, or rate-limit concerns.
+      placeholder: |
+        - Do not log wallet signatures, JWTs, private keys, API keys, or raw user PII.
+        - Confirm unauthorized callers cannot access other users' portfolio data.
+    validations:
+      required: true
+
+  - type: textarea
+    id: verification
+    attributes:
+      label: Suggested verification
+      description: Commands or manual checks contributors should run.
+      placeholder: |
+        cd veilend-backend
+        npm run lint
+        npm run test
+        npm run build
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Links, screenshots, or related issues. Do not include secrets or production credentials.
