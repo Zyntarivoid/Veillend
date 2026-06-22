@@ -330,6 +330,7 @@ impl VeilLendContract {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use soroban_sdk::testutils::Address as _;
 
     #[test]
     fn test_position_creation() {
@@ -348,5 +349,73 @@ mod tests {
         assert_eq!(VeilLendError::UnsupportedAsset as u32, 3);
         assert_eq!(VeilLendError::InvalidAmount as u32, 4);
         assert_eq!(VeilLendError::InsufficientCollateral as u32, 5);
+    }
+
+    fn setup_lending_client(env: &Env) -> (VeilLendContractClient<'_>, Address, Address, Address) {
+        env.mock_all_auths();
+
+        let admin = Address::generate(env);
+        let user = Address::generate(env);
+        let asset = Address::generate(env);
+        let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+        let client = VeilLendContractClient::new(env, &contract_id);
+
+        client.configure_asset(&admin, &asset, &true);
+
+        (client, admin, user, asset)
+    }
+
+    #[test]
+    fn test_deposit_borrow_repay_withdraw_lifecycle() {
+        let env = Env::default();
+        let (client, _admin, user, asset) = setup_lending_client(&env);
+
+        client.deposit(&user, &asset, &150);
+        assert_eq!(
+            client.get_position(&user, &asset),
+            Position {
+                deposited: 150,
+                borrowed: 0
+            }
+        );
+
+        client.borrow(&user, &asset, &100);
+        assert_eq!(
+            client.get_position(&user, &asset),
+            Position {
+                deposited: 150,
+                borrowed: 100
+            }
+        );
+
+        client.repay(&user, &asset, &40);
+        client.withdraw(&user, &asset, &30);
+
+        assert_eq!(
+            client.get_position(&user, &asset),
+            Position {
+                deposited: 120,
+                borrowed: 60
+            }
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_deposit_rejects_invalid_amount() {
+        let env = Env::default();
+        let (client, _admin, user, asset) = setup_lending_client(&env);
+
+        client.deposit(&user, &asset, &0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_borrow_rejects_insufficient_collateral() {
+        let env = Env::default();
+        let (client, _admin, user, asset) = setup_lending_client(&env);
+
+        client.deposit(&user, &asset, &100);
+        client.borrow(&user, &asset, &67);
     }
 }
