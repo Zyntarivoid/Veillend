@@ -72,6 +72,24 @@ $ npm run start:dev
 $ npm run start:prod
 ```
 
+## Seed Local Data
+
+Create representative local read-model data for dashboard and history testing:
+
+```bash
+$ npm run seed:local
+```
+
+The command writes `veilend-db.json` in the backend directory using the same
+shape consumed by the indexer repository. It includes supported XLM/USDC assets,
+demo positions, and deposit/borrow/repay transactions for this wallet:
+
+```text
+GDEMO7VEILENDLOCALTESTUSER000000000000000000000000000000000
+```
+
+Set `VEILEND_SEED_DB_PATH=/path/to/veilend-db.json` to write somewhere else.
+
 ## Run tests
 
 ```bash

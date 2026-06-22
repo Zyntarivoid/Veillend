@@ -21,6 +21,20 @@ The read models are saved locally in a query-friendly JSON structure:
 
 ## 🔄 Indexer Lifecycle Behaviors
 
+### Local Seed Data
+
+For frontend and contributor testing without waiting for live Soroban events,
+run the backend seed command:
+
+```bash
+npm run seed:local
+```
+
+The command writes `veilend-db.json` in the backend directory with representative
+supported assets, portfolio positions, transaction history, and a checkpoint.
+To write to a custom path, set `VEILEND_SEED_DB_PATH=/path/to/veilend-db.json`
+before running the command.
+
 ### 1. Resume Behavior (Crash & Restart Recovery)
 When the backend starts up:
 1.  The indexer retrieves the last saved ledger sequence from the database checkpoint (`lastIndexedLedger`).
