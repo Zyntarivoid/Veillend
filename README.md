@@ -59,6 +59,32 @@ Located in `/veilend-soroban`, the current Soroban codebase is the new VeilLend 
 
 ---
 
+## ⚠️ Error Reference
+
+All contract errors are typed via `VeilLendError` (`#[contracterror]`, `#[repr(u32)]`). Each variant maps to a unique `u32` code that client integrators can match on.
+
+| Variant | Code | When it fires |
+|---------|------|---------------|
+| `AlreadyInitialized` | 1 | `__constructor` called when admin is already set |
+| `Unauthorized` | 2 | Non-admin caller on admin-only functions (`configure_asset`, `set_oracle_price`) |
+| `UnsupportedAsset` | 3 | Operation on an asset not yet configured via `configure_asset` |
+| `InvalidAmount` | 4 | Negative amount passed to `deposit`, `borrow`, `repay`, `withdraw` |
+| `InsufficientCollateral` | 5 | `borrow` or `withdraw` would push collateral ratio below minimum |
+| `InsufficientDeposit` | 6 | `withdraw` amount exceeds user's deposited balance |
+| `RepayTooLarge` | 7 | `repay` amount exceeds user's outstanding borrowed balance |
+| `InvalidCollateralRatio` | 8 | `__constructor` called with `min_collateral_ratio_bps < 10_000` (< 100%) |
+| `NotInitialized` | 9 | Any function requiring admin called before `__constructor` |
+| `ZeroAmount` | 10 | Zero amount passed to `deposit`, `borrow`, `repay`, `withdraw` |
+| `OraclePriceMissing` | 11 | `borrow` or `withdraw` on an asset without a configured oracle price |
+| `ContractPaused` | 12 | Any state-changing function called while contract is paused |
+
+### Error handling notes
+- Zero and negative amounts produce **different** errors (`ZeroAmount` vs `InvalidAmount`) so clients can distinguish them.
+- Oracle price missing is a **hard error** (not a silent default) — borrow/withdraw will fail explicitly if no price is set.
+- `NotInitialized` and `Unauthorized` are distinct: the first means "contract not set up yet", the second means "you are not the admin".
+
+---
+
 ## 📱 Mobile App Features
 
 ### Core

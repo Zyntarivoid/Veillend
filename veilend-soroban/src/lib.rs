@@ -26,14 +26,30 @@ pub struct Position {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum VeilLendError {
+    /// Contract has already been initialized
     AlreadyInitialized = 1,
+    /// Caller is not the admin
     Unauthorized = 2,
+    /// Asset is not supported by the protocol
     UnsupportedAsset = 3,
+    /// Amount must be positive (non-zero)
     InvalidAmount = 4,
+    /// Collateral ratio below minimum after operation
     InsufficientCollateral = 5,
+    /// Withdraw amount exceeds deposited balance
     InsufficientDeposit = 6,
+    /// Repay amount exceeds outstanding borrowed balance
     RepayTooLarge = 7,
+    /// Minimum collateral ratio is below 100% (10_000 bps)
     InvalidCollateralRatio = 8,
+    /// Contract has not been initialized yet
+    NotInitialized = 9,
+    /// Amount of zero is not allowed
+    ZeroAmount = 10,
+    /// Oracle price not configured for the asset
+    OraclePriceMissing = 11,
+    /// Operation blocked: contract is paused
+    ContractPaused = 12,
 }
 
 #[contractevent(topics = ["veillend", "asset_configured"])]
@@ -257,7 +273,7 @@ impl VeilLendContract {
         env.storage()
             .instance()
             .get(&DataKey::Admin)
-            .unwrap_or_else(|| panic_with_error!(&env, VeilLendError::Unauthorized))
+            .unwrap_or_else(|| panic_with_error!(&env, VeilLendError::NotInitialized))
     }
 
     pub fn min_collateral_ratio_bps(env: Env) -> u32 {
@@ -298,7 +314,10 @@ impl VeilLendContract {
     }
 
     fn require_positive_amount(env: &Env, amount: i128) {
-        if amount <= 0 {
+        if amount == 0 {
+            panic_with_error!(env, VeilLendError::ZeroAmount);
+        }
+        if amount < 0 {
             panic_with_error!(env, VeilLendError::InvalidAmount);
         }
     }
@@ -310,12 +329,12 @@ impl VeilLendContract {
 
         let collateral_ratio_bps = Self::min_collateral_ratio_bps(env.clone()) as i128;
 
-        // Get oracle price for the asset
-        let price = env
+        // Get oracle price for the asset — fail explicitly if not set
+        let price: i128 = env
             .storage()
             .persistent()
             .get(&DataKey::OraclePrice(asset.clone()))
-            .unwrap_or(1); // Default to 1 if no price set (raw amount comparison)
+            .unwrap_or_else(|| panic_with_error!(env, VeilLendError::OraclePriceMissing));
 
         // Calculate collateral value using oracle price
         let collateral_value = position.deposited * price;
@@ -348,5 +367,55 @@ mod tests {
         assert_eq!(VeilLendError::UnsupportedAsset as u32, 3);
         assert_eq!(VeilLendError::InvalidAmount as u32, 4);
         assert_eq!(VeilLendError::InsufficientCollateral as u32, 5);
+        assert_eq!(VeilLendError::InsufficientDeposit as u32, 6);
+        assert_eq!(VeilLendError::RepayTooLarge as u32, 7);
+        assert_eq!(VeilLendError::InvalidCollateralRatio as u32, 8);
+        assert_eq!(VeilLendError::NotInitialized as u32, 9);
+        assert_eq!(VeilLendError::ZeroAmount as u32, 10);
+        assert_eq!(VeilLendError::OraclePriceMissing as u32, 11);
+        assert_eq!(VeilLendError::ContractPaused as u32, 12);
+    }
+
+    #[test]
+    fn test_error_variants_are_unique() {
+        // Ensure no two variants share the same code
+        let codes = [
+            VeilLendError::AlreadyInitialized as u32,
+            VeilLendError::Unauthorized as u32,
+            VeilLendError::UnsupportedAsset as u32,
+            VeilLendError::InvalidAmount as u32,
+            VeilLendError::InsufficientCollateral as u32,
+            VeilLendError::InsufficientDeposit as u32,
+            VeilLendError::RepayTooLarge as u32,
+            VeilLendError::InvalidCollateralRatio as u32,
+            VeilLendError::NotInitialized as u32,
+            VeilLendError::ZeroAmount as u32,
+            VeilLendError::OraclePriceMissing as u32,
+            VeilLendError::ContractPaused as u32,
+        ];
+        let mut sorted = codes.to_vec();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), codes.len(), "Duplicate error codes detected");
+    }
+
+    #[test]
+    fn test_zero_amount_distinct_from_invalid() {
+        // Zero and negative amounts should produce different errors
+        assert_ne!(
+            VeilLendError::ZeroAmount as u32,
+            VeilLendError::InvalidAmount as u32,
+            "ZeroAmount and InvalidAmount must be distinct error codes"
+        );
+    }
+
+    #[test]
+    fn test_not_initialized_distinct_from_unauthorized() {
+        // NotInitialized and Unauthorized serve different purposes
+        assert_ne!(
+            VeilLendError::NotInitialized as u32,
+            VeilLendError::Unauthorized as u32,
+            "NotInitialized and Unauthorized must be distinct error codes"
+        );
     }
 }
