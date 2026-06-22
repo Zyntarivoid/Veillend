@@ -64,6 +64,7 @@ Located in `/veilend-soroban`, the current Soroban codebase is the new VeilLend 
 ### Core
 - **🛡️ X-Ray Privacy Dashboard**: Toggle "Privacy Mode" to mask balances and positions with zero-knowledge proofs.
 - **🔑 Wallet Login**: Authenticate securely using cryptographic signatures and wallet-based onboarding.
+- **Protocol Status Banners**: Surface wallet disconnects, Stellar network mismatches, and stale protocol sync state with clear recovery actions.
 - **⚡ Instant Actions**: One-tap Deposit, Borrow, and Repay flows across multiple blockchains.
 - **🔄 Rebuild-Friendly Architecture**: The app is being prepared for a new Stellar-native backend and contributor-driven implementation.
 
