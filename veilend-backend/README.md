@@ -59,6 +59,12 @@ For list-based endpoints, the following conventions apply:
 $ npm install
 ```
 
+## Database Schema
+
+The Stellar-native read model lives in `prisma/schema.prisma`, with an initial
+PostgreSQL migration under `prisma/migrations/`. Set `DATABASE_URL` and run the
+migration with your Prisma workflow before wiring the API to Postgres.
+
 ## Compile and run the project
 
 ```bash

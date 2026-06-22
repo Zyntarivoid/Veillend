@@ -1,22 +1,114 @@
-model User {
-  id String @id @default(uuid())
-
-  walletAddress String @unique
-
-  createdAt DateTime @default(now())
+generator client {
+  provider = "prisma-client-js"
 }
 
+datasource db {
+  provider = "postgresql"
+}
+
+enum TransactionType {
+  DEPOSIT  @map("deposit")
+  BORROW   @map("borrow")
+  REPAY    @map("repay")
+  WITHDRAW @map("withdraw")
+
+  @@map("transaction_type")
+}
+
+model User {
+  id            String   @id @default(uuid()) @db.Uuid
+  walletAddress String   @unique @map("wallet_address")
+  profileName   String?  @map("profile_name")
+  privacyMode   Boolean  @default(false) @map("privacy_mode")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  walletNonces WalletNonce[]
+  positions    Position[]
+  transactions Transaction[]
+
+  @@map("users")
+}
 
 model WalletNonce {
+  id            String   @id @default(uuid()) @db.Uuid
+  walletAddress String   @map("wallet_address")
+  nonce         String   @unique
+  expiresAt     DateTime @map("expires_at")
+  used          Boolean  @default(false)
+  createdAt     DateTime @default(now()) @map("created_at")
 
-  id String @id @default(uuid())
+  user User? @relation(fields: [walletAddress], references: [walletAddress], onDelete: Cascade)
 
-  walletAddress String
+  @@index([walletAddress])
+  @@index([expiresAt, used])
+  @@map("wallet_nonces")
+}
 
-  nonce String
+model SupportedAsset {
+  id                      String   @id @default(uuid()) @db.Uuid
+  assetAddress            String   @unique @map("asset_address")
+  assetCode               String?  @map("asset_code")
+  assetIssuer             String?  @map("asset_issuer")
+  symbol                  String?
+  decimals                Int      @default(7)
+  supported               Boolean  @default(true)
+  collateralFactorBps     Int      @default(0) @map("collateral_factor_bps")
+  borrowFactorBps         Int      @default(0) @map("borrow_factor_bps")
+  liquidationThresholdBps Int      @default(0) @map("liquidation_threshold_bps")
+  updatedAt               DateTime @updatedAt @map("updated_at")
 
-  expiresAt DateTime
+  positions    Position[]
+  transactions Transaction[]
 
-  used Boolean @default(false)
+  @@index([supported])
+  @@map("supported_assets")
+}
 
+model Position {
+  id           String   @id @default(uuid()) @db.Uuid
+  userAddress  String   @map("user_address")
+  assetAddress String   @map("asset_address")
+  deposited    Decimal  @default(0) @db.Decimal(39, 0)
+  borrowed     Decimal  @default(0) @db.Decimal(39, 0)
+  lastLedger   BigInt   @default(0) @map("last_ledger")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  user  User?           @relation(fields: [userAddress], references: [walletAddress], onDelete: Cascade)
+  asset SupportedAsset? @relation(fields: [assetAddress], references: [assetAddress])
+
+  @@unique([userAddress, assetAddress])
+  @@index([userAddress])
+  @@index([assetAddress])
+  @@map("positions")
+}
+
+model Transaction {
+  id           String          @id
+  userAddress  String          @map("user_address")
+  assetAddress String          @map("asset_address")
+  type         TransactionType
+  amount       Decimal         @db.Decimal(39, 0)
+  ledger       BigInt
+  txHash       String          @unique @map("tx_hash")
+  timestamp    DateTime
+  createdAt    DateTime        @default(now()) @map("created_at")
+
+  user  User?           @relation(fields: [userAddress], references: [walletAddress], onDelete: Cascade)
+  asset SupportedAsset? @relation(fields: [assetAddress], references: [assetAddress])
+
+  @@index([userAddress, timestamp])
+  @@index([assetAddress, timestamp])
+  @@index([type, timestamp])
+  @@map("transactions")
+}
+
+model SyncCheckpoint {
+  id                String   @id @default(uuid()) @db.Uuid
+  source            String   @unique
+  lastIndexedLedger BigInt   @default(0) @map("last_indexed_ledger")
+  cursor            String?
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@map("sync_checkpoints")
 }
