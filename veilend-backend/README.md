@@ -56,31 +56,84 @@ For list-based endpoints, the following conventions apply:
 ## Project setup
 
 ```bash
-$ npm install
+npm install
+cp .env.example .env
+```
+
+The backend reads `.env` through Nest `ConfigModule`. The committed
+`.env.example` currently documents rate-limit defaults; the Stellar/indexer
+settings below are optional because the code has testnet-safe defaults:
+
+```bash
+# Optional server port. Defaults to 3000.
+PORT=3000
+
+# Optional Stellar testnet overrides.
+STELLAR_HORIZON_URL=https://horizon-testnet.stellar.org
+STELLAR_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
+STELLAR_NETWORK_PASSPHRASE="Test SDF Network ; September 2015"
+
+# Optional indexer overrides.
+STELLAR_CONTRACT_ID=
+STELLAR_INDEXER_START_LEDGER=1
+STELLAR_INDEXER_POLL_INTERVAL_MS=5000
 ```
 
 ## Compile and run the project
 
 ```bash
 # development
-$ npm run start
+npm run start
 
 # watch mode
-$ npm run start:dev
+npm run start:dev
 
 # production mode
-$ npm run start:prod
+npm run start:prod
 ```
+
+The development server listens on `PORT` when set, otherwise `3000`.
 
 ## Run tests
 
 ```bash
 # unit tests
-$ npm run test
+npm run test
 
 # e2e tests
-$ npm run test:e2e
+npm run test:e2e
 
 # test coverage
-$ npm run test:cov
+npm run test:cov
 ```
+
+## Contributor quick check
+
+For a fresh backend change, run these commands from `veilend-backend/` before
+opening a pull request:
+
+```bash
+npm run lint
+npm run test
+npm run build
+```
+
+Use `npm run start:dev` for local manual testing after the build and tests pass.
+
+## Troubleshooting
+
+| Problem | Likely cause | Fix |
+| --- | --- | --- |
+| `EADDRINUSE` on startup | Port 3000 is already in use | Set `PORT=3001` in `.env` and restart |
+| Stellar RPC calls fail locally | RPC/Horizon URL override is invalid | Remove the override to use the built-in testnet defaults |
+| Indexer starts too early | `STELLAR_INDEXER_START_LEDGER` is lower than the target contract history | Set a later ledger for local indexing tests |
+| Rate limit tests behave unexpectedly | `.env` overrides throttle settings | Reset `THROTTLE_*` and `AUTH_THROTTLE_*` to `.env.example` values |
+| E2E tests cannot connect | Backend is not running or test config is stale | Start `npm run start:dev` in another shell and review `test/jest-e2e.json` |
+
+## Workspace notes
+
+- Run backend commands from `veilend-backend/`, not the repository root.
+- Contract code lives in `../veilend-soroban/`; backend changes should avoid
+  editing Soroban contracts unless the issue explicitly asks for it.
+- Mobile and web clients live in sibling folders and are not required for
+  backend setup.
