@@ -1,8 +1,8 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { Horizon } from '@stellar/stellar-sdk';
 import { Observable, from, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
+import { RuntimeConfigService } from '../config/runtime-config.service';
 import { ServiceResponse } from './types';
 
 @Injectable()
@@ -12,13 +12,10 @@ export class HorizonService implements OnModuleInit {
   private healthy = false;
   private lastErrorMsg: string | null = null;
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(private readonly runtimeConfig: RuntimeConfigService) {}
 
   onModuleInit() {
-    const horizonUrl = this.configService.get<string>(
-      'stellar.horizonUrl',
-      'https://horizon-testnet.stellar.org',
-    );
+    const horizonUrl = this.runtimeConfig.stellarHorizonUrl;
     this.logger.log(`Initializing Horizon Client with URL: ${horizonUrl}`);
 
     try {

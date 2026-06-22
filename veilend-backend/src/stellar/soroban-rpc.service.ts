@@ -1,8 +1,8 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { rpc } from '@stellar/stellar-sdk';
 import { Observable, from, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
+import { RuntimeConfigService } from '../config/runtime-config.service';
 import { ServiceResponse } from './types';
 
 @Injectable()
@@ -12,13 +12,10 @@ export class SorobanRpcService implements OnModuleInit {
   private healthy = false;
   private lastErrorMsg: string | null = null;
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(private readonly runtimeConfig: RuntimeConfigService) {}
 
   onModuleInit() {
-    const sorobanRpcUrl = this.configService.get<string>(
-      'stellar.sorobanRpcUrl',
-      'https://soroban-testnet.stellar.org',
-    );
+    const sorobanRpcUrl = this.runtimeConfig.stellarSorobanRpcUrl;
     this.logger.log(
       `Initializing Soroban RPC Client with URL: ${sorobanRpcUrl}`,
     );

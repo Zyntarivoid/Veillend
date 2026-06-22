@@ -1,8 +1,8 @@
 /* eslint-disable @typescript-eslint/unbound-method, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConfigService } from '@nestjs/config';
 import { HorizonService } from './horizon.service';
 import { Horizon } from '@stellar/stellar-sdk';
+import { RuntimeConfigService } from '../config/runtime-config.service';
 
 // Mock the Horizon class and its Server constructor
 jest.mock('@stellar/stellar-sdk', () => {
@@ -19,7 +19,7 @@ jest.mock('@stellar/stellar-sdk', () => {
 
 describe('HorizonService', () => {
   let service: HorizonService;
-  let configService: ConfigService;
+  let runtimeConfig: RuntimeConfigService;
   let mockHorizonServerInstance: {
     root: jest.Mock;
   };
@@ -32,18 +32,16 @@ describe('HorizonService', () => {
       providers: [
         HorizonService,
         {
-          provide: ConfigService,
+          provide: RuntimeConfigService,
           useValue: {
-            get: jest
-              .fn()
-              .mockReturnValue('https://horizon-testnet.stellar.org'),
+            stellarHorizonUrl: 'https://horizon-testnet.stellar.org',
           },
         },
       ],
     }).compile();
 
     service = module.get<HorizonService>(HorizonService);
-    configService = module.get<ConfigService>(ConfigService);
+    runtimeConfig = module.get<RuntimeConfigService>(RuntimeConfigService);
   });
 
   it('should be defined', () => {
@@ -51,11 +49,9 @@ describe('HorizonService', () => {
   });
 
   describe('onModuleInit', () => {
-    it('should initialize Horizon client and trigger connection check', () => {
+    it('should initialize Horizon client from typed runtime config and trigger connection check', () => {
       service.onModuleInit();
-      const getSpy = configService.get as jest.Mock;
-      expect(getSpy).toHaveBeenCalledWith(
-        'stellar.horizonUrl',
+      expect(runtimeConfig.stellarHorizonUrl).toBe(
         'https://horizon-testnet.stellar.org',
       );
       expect(Horizon.Server).toHaveBeenCalledWith(

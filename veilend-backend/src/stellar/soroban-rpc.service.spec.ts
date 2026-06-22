@@ -1,8 +1,8 @@
 /* eslint-disable @typescript-eslint/unbound-method, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConfigService } from '@nestjs/config';
 import { SorobanRpcService } from './soroban-rpc.service';
 import { rpc } from '@stellar/stellar-sdk';
+import { RuntimeConfigService } from '../config/runtime-config.service';
 
 // Mock the rpc namespace and Server constructor
 jest.mock('@stellar/stellar-sdk', () => {
@@ -19,7 +19,7 @@ jest.mock('@stellar/stellar-sdk', () => {
 
 describe('SorobanRpcService', () => {
   let service: SorobanRpcService;
-  let configService: ConfigService;
+  let runtimeConfig: RuntimeConfigService;
   let mockRpcServerInstance: {
     getHealth: jest.Mock;
   };
@@ -31,18 +31,16 @@ describe('SorobanRpcService', () => {
       providers: [
         SorobanRpcService,
         {
-          provide: ConfigService,
+          provide: RuntimeConfigService,
           useValue: {
-            get: jest
-              .fn()
-              .mockReturnValue('https://soroban-testnet.stellar.org'),
+            stellarSorobanRpcUrl: 'https://soroban-testnet.stellar.org',
           },
         },
       ],
     }).compile();
 
     service = module.get<SorobanRpcService>(SorobanRpcService);
-    configService = module.get<ConfigService>(ConfigService);
+    runtimeConfig = module.get<RuntimeConfigService>(RuntimeConfigService);
   });
 
   it('should be defined', () => {
@@ -50,11 +48,9 @@ describe('SorobanRpcService', () => {
   });
 
   describe('onModuleInit', () => {
-    it('should initialize Soroban RPC client and trigger connection check', () => {
+    it('should initialize Soroban RPC client from typed runtime config and trigger connection check', () => {
       service.onModuleInit();
-      const getSpy = configService.get as jest.Mock;
-      expect(getSpy).toHaveBeenCalledWith(
-        'stellar.sorobanRpcUrl',
+      expect(runtimeConfig.stellarSorobanRpcUrl).toBe(
         'https://soroban-testnet.stellar.org',
       );
       expect(rpc.Server).toHaveBeenCalledWith(
