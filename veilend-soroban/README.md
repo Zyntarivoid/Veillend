@@ -66,6 +66,23 @@ cargo test
 cargo clippy --locked --all-targets -- -D warnings
 ```
 
+## Contract Error Model
+
+Contract failures use the `VeilLendError` enum. Error codes are stable for client integrations, and clients can call `error_message(code)` to map a numeric code to contributor-facing copy.
+
+| Code | Variant | Main trigger |
+| --- | --- | --- |
+| 1 | `AlreadyInitialized` | Constructor is called after the contract was already initialized. |
+| 2 | `Unauthorized` | Admin-only actions are signed by a non-admin address. |
+| 3 | `UnsupportedAsset` | Lending action references an asset that has not been configured as supported. |
+| 4 | `InvalidAmount` | Amount or oracle price is zero or negative. |
+| 5 | `InsufficientCollateral` | Borrow or withdraw would violate the minimum collateral ratio. |
+| 6 | `InsufficientDeposit` | Withdraw amount is greater than deposited balance. |
+| 7 | `RepayTooLarge` | Repay amount is greater than outstanding borrowed balance. |
+| 8 | `InvalidCollateralRatio` | Constructor collateral ratio is less than `10000` basis points. |
+
+Admin methods use the same authorization helper before mutating state, and lending methods validate asset support and positive amounts before writing positions.
+
 ## Notes
 
 - `rust-toolchain.toml` pins the contract to Rust `1.88.0`.

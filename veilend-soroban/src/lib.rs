@@ -2,7 +2,7 @@
 
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error, Address,
-    Env,
+    Env, String,
 };
 
 #[derive(Clone)]
@@ -34,6 +34,39 @@ pub enum VeilLendError {
     InsufficientDeposit = 6,
     RepayTooLarge = 7,
     InvalidCollateralRatio = 8,
+}
+
+impl VeilLendError {
+    pub const fn message(self) -> &'static str {
+        match self {
+            VeilLendError::AlreadyInitialized => "Contract has already been initialized.",
+            VeilLendError::Unauthorized => "Caller is not authorized for this protocol action.",
+            VeilLendError::UnsupportedAsset => "Asset is not configured as supported.",
+            VeilLendError::InvalidAmount => "Amount must be greater than zero.",
+            VeilLendError::InsufficientCollateral => {
+                "Action would violate the minimum collateral ratio."
+            }
+            VeilLendError::InsufficientDeposit => "Withdraw amount exceeds deposited balance.",
+            VeilLendError::RepayTooLarge => "Repay amount exceeds outstanding debt.",
+            VeilLendError::InvalidCollateralRatio => {
+                "Minimum collateral ratio must be at least 10000 basis points."
+            }
+        }
+    }
+
+    pub const fn message_for_code(code: u32) -> &'static str {
+        match code {
+            1 => VeilLendError::AlreadyInitialized.message(),
+            2 => VeilLendError::Unauthorized.message(),
+            3 => VeilLendError::UnsupportedAsset.message(),
+            4 => VeilLendError::InvalidAmount.message(),
+            5 => VeilLendError::InsufficientCollateral.message(),
+            6 => VeilLendError::InsufficientDeposit.message(),
+            7 => VeilLendError::RepayTooLarge.message(),
+            8 => VeilLendError::InvalidCollateralRatio.message(),
+            _ => "Unknown VeilLend error code.",
+        }
+    }
 }
 
 #[contractevent(topics = ["veillend", "asset_configured"])]
@@ -107,12 +140,7 @@ impl VeilLendContract {
     }
 
     pub fn configure_asset(env: Env, admin: Address, asset: Address, supported: bool) {
-        let stored_admin = Self::admin(env.clone());
-        if admin != stored_admin {
-            panic_with_error!(&env, VeilLendError::Unauthorized);
-        }
-
-        admin.require_auth();
+        Self::require_admin(&env, &admin);
         env.storage()
             .persistent()
             .set(&DataKey::SupportedAsset(asset.clone()), &supported);
@@ -134,16 +162,12 @@ impl VeilLendContract {
     /// * `asset` - The asset address to set the price for
     /// * `price` - The oracle price (must be positive, in base units e.g., cents)
     pub fn set_oracle_price(env: Env, admin: Address, asset: Address, price: i128) {
-        let stored_admin = Self::admin(env.clone());
-        if admin != stored_admin {
-            panic_with_error!(&env, VeilLendError::Unauthorized);
-        }
+        Self::require_admin(&env, &admin);
 
         if price <= 0 {
             panic_with_error!(&env, VeilLendError::InvalidAmount);
         }
 
-        admin.require_auth();
         env.storage()
             .persistent()
             .set(&DataKey::OraclePrice(asset.clone()), &price);
@@ -266,9 +290,22 @@ impl VeilLendContract {
             .get(&DataKey::MinCollateralRatioBps)
             .unwrap_or(15_000)
     }
+
+    pub fn error_message(env: Env, code: u32) -> String {
+        String::from_str(&env, VeilLendError::message_for_code(code))
+    }
 }
 
 impl VeilLendContract {
+    fn require_admin(env: &Env, admin: &Address) {
+        let stored_admin = Self::admin(env.clone());
+        if admin != &stored_admin {
+            panic_with_error!(env, VeilLendError::Unauthorized);
+        }
+
+        admin.require_auth();
+    }
+
     fn read_position(env: &Env, user: &Address, asset: &Address) -> Position {
         env.storage()
             .persistent()
@@ -330,6 +367,7 @@ impl VeilLendContract {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use soroban_sdk::testutils::Address as _;
 
     #[test]
     fn test_position_creation() {
@@ -348,5 +386,40 @@ mod tests {
         assert_eq!(VeilLendError::UnsupportedAsset as u32, 3);
         assert_eq!(VeilLendError::InvalidAmount as u32, 4);
         assert_eq!(VeilLendError::InsufficientCollateral as u32, 5);
+    }
+
+    #[test]
+    fn test_error_messages() {
+        assert_eq!(
+            VeilLendError::UnsupportedAsset.message(),
+            "Asset is not configured as supported."
+        );
+        assert_eq!(
+            VeilLendError::message_for_code(VeilLendError::RepayTooLarge as u32),
+            "Repay amount exceeds outstanding debt."
+        );
+        assert_eq!(
+            VeilLendError::message_for_code(999),
+            "Unknown VeilLend error code."
+        );
+    }
+
+    #[test]
+    fn test_error_message_contract_method() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, (admin, 15_000u32));
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        assert_eq!(
+            client.error_message(&4),
+            String::from_str(&env, "Amount must be greater than zero.")
+        );
+        assert_eq!(
+            client.error_message(&999),
+            String::from_str(&env, "Unknown VeilLend error code.")
+        );
     }
 }
