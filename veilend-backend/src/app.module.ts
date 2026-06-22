@@ -7,6 +7,7 @@ import { AppService } from './app.service';
 import { StellarModule } from './stellar/stellar.module';
 import { IndexerModule } from './indexer/indexer.module';
 import { PortfoliosModule } from './portfolios/portfolios.module';
+import { ProfilesModule } from './profiles/profiles.module';
 import { AssetsModule } from './assets/assets.module';
 import { TransactionsModule } from './transactions/transactions.module';
 import { AdminModule } from './admin/admin.module';
@@ -30,6 +31,7 @@ import { AuthModule } from './auth/auth.module';
     StellarModule,
     IndexerModule,
     PortfoliosModule,
+    ProfilesModule,
     AssetsModule,
     TransactionsModule,
     AdminModule,

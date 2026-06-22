@@ -72,6 +72,16 @@ $ npm run start:dev
 $ npm run start:prod
 ```
 
+## Profile Preferences API
+
+- `GET /profiles/:walletAddress` returns the username, display name, and privacy
+  preferences for a wallet.
+- `PATCH /profiles/:walletAddress` updates `username`, `displayName`, and
+  `privacy.hideBalances`, `privacy.hideActivity`, or
+  `privacy.requirePrivacyMode`.
+
+Malformed profile payloads are rejected with validation errors.
+
 ## Run tests
 
 ```bash
