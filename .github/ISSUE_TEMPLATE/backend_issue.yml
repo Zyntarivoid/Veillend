@@ -1,0 +1,77 @@
+name: Backend issue
+description: Report or propose work for the VeilLend backend rebuild.
+title: "[Backend]: "
+labels: ["backend"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for the planned Stellar-native backend or the archived NestJS backend reference. Do not include private keys, seed phrases, API tokens, or real wallet data.
+  - type: dropdown
+    id: issue_type
+    attributes:
+      label: Issue type
+      options:
+        - Bug
+        - Feature
+        - Documentation
+        - Refactor
+        - Security review
+        - Testing
+    validations:
+      required: true
+  - type: dropdown
+    id: backend_area
+    attributes:
+      label: Backend area
+      options:
+        - Authentication
+        - Portfolios
+        - Assets
+        - Transactions
+        - Indexing
+        - Admin configuration
+        - API contracts / DTOs
+        - Infrastructure
+        - Unsure
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What needs to change?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: What should be true when this is complete?
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: testing
+    attributes:
+      label: Suggested testing
+      description: Include unit, e2e, indexing, or contract-integration checks if known.
+      placeholder: |
+        - npm run test
+        - npm run test:e2e
+  - type: textarea
+    id: security
+    attributes:
+      label: Security or privacy notes
+      description: Mention wallet auth, RBAC, health-factor, liquidation, indexer, or data privacy concerns.
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Reporter checklist
+      options:
+        - label: I searched existing issues first.
+          required: true
+        - label: I removed secrets, seed phrases, private keys, tokens, and real wallet data.
+          required: true
