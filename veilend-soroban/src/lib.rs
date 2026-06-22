@@ -330,6 +330,18 @@ impl VeilLendContract {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use soroban_sdk::testutils::Address as _;
+
+    fn create_client(env: &Env) -> (VeilLendContractClient<'_>, Address, Address) {
+        let admin = Address::generate(env);
+        let asset = Address::generate(env);
+        env.mock_all_auths();
+
+        let contract_id = env.register(VeilLendContract, (&admin, &15_000u32));
+        let client = VeilLendContractClient::new(env, &contract_id);
+
+        (client, admin, asset)
+    }
 
     #[test]
     fn test_position_creation() {
@@ -348,5 +360,38 @@ mod tests {
         assert_eq!(VeilLendError::UnsupportedAsset as u32, 3);
         assert_eq!(VeilLendError::InvalidAmount as u32, 4);
         assert_eq!(VeilLendError::InsufficientCollateral as u32, 5);
+    }
+
+    #[test]
+    fn test_constructor_stores_admin_and_collateral_ratio() {
+        let env = Env::default();
+        let (client, admin, _) = create_client(&env);
+
+        assert_eq!(client.admin(), admin);
+        assert_eq!(client.min_collateral_ratio_bps(), 15_000);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_unauthorized_asset_configuration_fails() {
+        let env = Env::default();
+        let (client, _, asset) = create_client(&env);
+        let intruder = Address::generate(&env);
+
+        client.configure_asset(&intruder, &asset, &true);
+    }
+
+    #[test]
+    fn test_supported_asset_reads_track_admin_configuration() {
+        let env = Env::default();
+        let (client, admin, asset) = create_client(&env);
+
+        assert!(!client.is_asset_supported(&asset));
+
+        client.configure_asset(&admin, &asset, &true);
+        assert!(client.is_asset_supported(&asset));
+
+        client.configure_asset(&admin, &asset, &false);
+        assert!(!client.is_asset_supported(&asset));
     }
 }
