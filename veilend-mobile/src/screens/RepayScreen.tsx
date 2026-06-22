@@ -1,16 +1,38 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { MOCK_POSITIONS } from '../data/mockData';
+import { MOCK_ASSETS, MOCK_POSITIONS } from '../data/mockData';
 import { useStore } from '../store/store';
 import { ActivityIndicator } from 'react-native';
 import Toast from '../utils/toast';
+import FormValidationMessage from '../components/FormValidationMessage';
+import { validateRepayAmount } from '../utils/lendingValidation';
+
+type SelectedLoan = {
+  amount: number;
+  asset: string;
+  healthFactor: number;
+  id: string;
+  value: number;
+} | null;
 
 export default function RepayScreen() {
   const activeLoans = MOCK_POSITIONS.filter(p => p.type === 'Borrowed');
   const [modalVisible, setModalVisible] = useState(false);
-  const [selectedLoan, setSelectedLoan] = useState<any>(null);
+  const [selectedLoan, setSelectedLoan] = useState<SelectedLoan>(null);
   const [amount, setAmount] = useState<string>('');
+  const lendingLoading = useStore((state) => state.lendingLoading);
+  const selectedWalletBalance = selectedLoan
+    ? MOCK_ASSETS.find((asset) => asset.symbol === selectedLoan.asset)?.balance
+    : undefined;
+  const repayValidation = selectedLoan
+    ? validateRepayAmount(amount, {
+        amountOwed: selectedLoan.amount,
+        availableBalance: selectedWalletBalance,
+        symbol: selectedLoan.asset,
+      })
+    : null;
+  const confirmDisabled = lendingLoading || Boolean(repayValidation?.error);
 
   const openRepayModal = (loan: any) => {
     setSelectedLoan(loan);
@@ -20,12 +42,23 @@ export default function RepayScreen() {
 
   const confirmRepay = async () => {
     if (!selectedLoan) return;
+    const validation = validateRepayAmount(amount, {
+      amountOwed: selectedLoan.amount,
+      availableBalance: selectedWalletBalance,
+      symbol: selectedLoan.asset,
+    });
+
+    if (validation.error) {
+      Toast.show({ type: 'error', text1: 'Check amount', text2: validation.error });
+      return;
+    }
+
     try {
-        const res = await useStore.getState().repay({ amount, asset: selectedLoan.asset });
+        const res = await useStore.getState().repay({ amount: validation.normalizedAmount, asset: selectedLoan.asset });
         Toast.show({ type: 'success', text1: 'Repay Submitted', text2: JSON.stringify(res) });
       setModalVisible(false);
     } catch (err: any) {
-      const mockRes = { txHash: 'mock-' + Date.now(), status: 'mock', amount, asset: selectedLoan.asset };
+      const mockRes = { txHash: 'mock-' + Date.now(), status: 'mock', amount: validation.normalizedAmount, asset: selectedLoan.asset };
       useStore.setState({ lastLendingTx: mockRes });
         Toast.show({ type: 'info', text1: 'Offline - Mock Repay', text2: JSON.stringify(mockRes) });
       setModalVisible(false);
@@ -109,16 +142,20 @@ export default function RepayScreen() {
                 value={amount}
                 onChangeText={setAmount}
                 keyboardType="numeric"
-                style={styles.amountInput}
+                style={[styles.amountInput, repayValidation?.error ? styles.amountInputError : null]}
                 placeholder="Amount"
                 placeholderTextColor="#888"
               />
+              <Text style={styles.helperText}>
+                Owed: {selectedLoan?.amount ?? 0} {selectedLoan?.asset} | Wallet: {selectedWalletBalance ?? 0} {selectedLoan?.asset}
+              </Text>
+              <FormValidationMessage error={repayValidation?.error} warning={repayValidation?.warning} />
               <View style={styles.modalButtons}>
                 <TouchableOpacity onPress={() => setModalVisible(false)} style={[styles.modalBtn, { backgroundColor: '#333' }]}>
                   <Text style={styles.buttonText}>Cancel</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={confirmRepay} style={[styles.modalBtn, { backgroundColor: '#A855F7' }]} disabled={useStore.getState().lendingLoading}>
-                  {useStore.getState().lendingLoading ? <ActivityIndicator color="#fff"/> : <Text style={styles.buttonText}>Confirm</Text>}
+                <TouchableOpacity onPress={confirmRepay} style={[styles.modalBtn, { backgroundColor: confirmDisabled ? '#5B3A7A' : '#A855F7' }]} disabled={confirmDisabled}>
+                  {lendingLoading ? <ActivityIndicator color="#fff"/> : <Text style={styles.buttonText}>Confirm</Text>}
                 </TouchableOpacity>
               </View>
             </View>
@@ -266,6 +303,14 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     color: '#FFFFFF',
     fontSize: 16,
+  },
+  amountInputError: {
+    borderColor: '#FF6363',
+  },
+  helperText: {
+    color: '#A1A1A1',
+    fontSize: 13,
+    lineHeight: 18,
   },
   modalButtons: {
     flexDirection: 'row',

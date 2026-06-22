@@ -5,6 +5,8 @@ import { MOCK_ASSETS } from '../data/mockData';
 import { useStore } from '../store/store';
 import { ActivityIndicator } from 'react-native';
 import Toast from '../utils/toast';
+import FormValidationMessage from '../components/FormValidationMessage';
+import { validateDepositAmount } from '../utils/lendingValidation';
 
 type SelectedAsset = { id: string; name: string; symbol: string; balance?: number } | null;
 
@@ -12,6 +14,14 @@ export default function DepositScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<SelectedAsset>(null);
   const [amount, setAmount] = useState<string>('');
+  const lendingLoading = useStore((state) => state.lendingLoading);
+  const depositValidation = selectedAsset
+    ? validateDepositAmount(amount, {
+        availableBalance: selectedAsset.balance,
+        symbol: selectedAsset.symbol,
+      })
+    : null;
+  const confirmDisabled = lendingLoading || Boolean(depositValidation?.error);
 
   const openDepositModal = (asset: any) => {
     setSelectedAsset(asset);
@@ -21,13 +31,23 @@ export default function DepositScreen() {
 
   const confirmDeposit = async () => {
     if (!selectedAsset) return;
-      try {
-      const res = await useStore.getState().deposit({ amount, asset: selectedAsset.symbol });
+    const validation = validateDepositAmount(amount, {
+      availableBalance: selectedAsset.balance,
+      symbol: selectedAsset.symbol,
+    });
+
+    if (validation.error) {
+      Toast.show({ type: 'error', text1: 'Check amount', text2: validation.error });
+      return;
+    }
+
+    try {
+      const res = await useStore.getState().deposit({ amount: validation.normalizedAmount, asset: selectedAsset.symbol });
       Toast.show({ type: 'success', text1: 'Deposit Submitted', text2: JSON.stringify(res) });
       setModalVisible(false);
     } catch (err: any) {
       // Fallback to mock response when offline / API fails
-      const mockRes = { txHash: 'mock-' + Date.now(), status: 'mock', amount, asset: selectedAsset.symbol };
+      const mockRes = { txHash: 'mock-' + Date.now(), status: 'mock', amount: validation.normalizedAmount, asset: selectedAsset.symbol };
       useStore.setState({ lastLendingTx: mockRes });
       Toast.show({ type: 'info', text1: 'Offline - Mock Deposit', text2: JSON.stringify(mockRes) });
       setModalVisible(false);
@@ -98,16 +118,20 @@ export default function DepositScreen() {
                 value={amount}
                 onChangeText={setAmount}
                 keyboardType="numeric"
-                style={styles.amountInput}
+                style={[styles.amountInput, depositValidation?.error ? styles.amountInputError : null]}
                 placeholder="Amount"
                 placeholderTextColor="#888"
               />
+              <Text style={styles.helperText}>
+                Wallet balance: {selectedAsset?.balance ?? 0} {selectedAsset?.symbol}
+              </Text>
+              <FormValidationMessage error={depositValidation?.error} warning={depositValidation?.warning} />
               <View style={styles.modalButtons}>
                 <TouchableOpacity onPress={() => setModalVisible(false)} style={[styles.modalBtn, { backgroundColor: '#333' }]}>
                     <Text style={styles.buttonText}>Cancel</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity onPress={confirmDeposit} style={[styles.modalBtn, { backgroundColor: '#A855F7' }]} disabled={useStore.getState().lendingLoading}>
-                    {useStore.getState().lendingLoading ? <ActivityIndicator color="#fff"/> : <Text style={styles.buttonText}>Confirm</Text>}
+                  <TouchableOpacity onPress={confirmDeposit} style={[styles.modalBtn, { backgroundColor: confirmDisabled ? '#5B3A7A' : '#A855F7' }]} disabled={confirmDisabled}>
+                    {lendingLoading ? <ActivityIndicator color="#fff"/> : <Text style={styles.buttonText}>Confirm</Text>}
                   </TouchableOpacity>
               </View>
             </View>
@@ -249,6 +273,14 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     color: '#FFFFFF',
     fontSize: 16,
+  },
+  amountInputError: {
+    borderColor: '#FF6363',
+  },
+  helperText: {
+    color: '#A1A1A1',
+    fontSize: 13,
+    lineHeight: 18,
   },
   modalButtons: {
     flexDirection: 'row',
