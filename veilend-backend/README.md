@@ -72,6 +72,24 @@ $ npm run start:dev
 $ npm run start:prod
 ```
 
+## Docker
+
+Build and run the backend container from the backend directory:
+
+```bash
+$ docker build -t veillend-backend .
+$ docker run --rm -p 3000:3000 --env-file .env veillend-backend
+```
+
+The image builds the NestJS app in a separate stage and runs `node
+dist/main.js` in the runtime stage.
+
+## CI Checks
+
+Backend pull requests run dependency installation, `npm run lint:check`,
+`npm run test -- --runInBand`, `npm run build`, and a Docker image build through
+`.github/workflows/veilend-backend.yml`.
+
 ## Run tests
 
 ```bash
