@@ -12,11 +12,28 @@ try {
   SecureStore = SecureStoreShim as any;
 }
 
+const STORAGE_KEYS = {
+  address: 'address',
+  authToken: 'authToken',
+  isPrivacyMode: 'isPrivacyMode',
+  profileImage: 'profileImage',
+  profileName: 'profileName',
+  stellarSecretKey: 'stellar_secret_key',
+};
+
+const setStoredValue = (key: string, value: string | null) => {
+  try {
+    const operation = value ? SecureStore.setItemAsync(key, value) : SecureStore.deleteItemAsync(key);
+    void operation.catch(() => {});
+  } catch (e) {}
+};
+
 type Nullable<T> = T | null;
 
 type AuthState = {
   address: Nullable<string>;
   authToken: Nullable<string>;
+  sessionRestored: boolean;
   setAddress: (address: string | null) => void;
   setAuthToken: (token: string | null) => void;
   logout: () => void;
@@ -27,6 +44,10 @@ type AuthState = {
 
 type UiState = {
   isPrivacyMode: boolean;
+  profileImage: Nullable<string>;
+  profileName: Nullable<string>;
+  setProfileImage: (imageUri: string | null) => void;
+  setProfileName: (name: string | null) => void;
   togglePrivacyMode: () => void;
 };
 
@@ -51,30 +72,37 @@ export const useStore = create<AuthState & UiState & LendingState & ShieldedStat
   address: null,
   authToken: null,
   authLoading: false,
+  sessionRestored: false,
   setAddress: (address) => {
     set({ address });
-    try {
-      if (address) SecureStore.setItemAsync('address', address);
-      else SecureStore.deleteItemAsync('address');
-    } catch (e) {}
+    setStoredValue(STORAGE_KEYS.address, address);
   },
   setAuthToken: (token) => {
     set({ authToken: token });
-    try {
-      if (token) SecureStore.setItemAsync('authToken', token);
-      else SecureStore.deleteItemAsync('authToken');
-    } catch (e) {
-      // ignore persistence errors
-    }
+    setStoredValue(STORAGE_KEYS.authToken, token);
   },
   logout: () => {
-    set({ address: null, authToken: null, isPrivacyMode: false });
-    try { SecureStore.deleteItemAsync('authToken'); } catch (e) {}
+    set({ address: null, authToken: null, isPrivacyMode: false, profileImage: null, profileName: null });
+    Object.values(STORAGE_KEYS).forEach((key) => setStoredValue(key, null));
   },
 
   // UI
   isPrivacyMode: false,
-  togglePrivacyMode: () => set((state) => ({ isPrivacyMode: !state.isPrivacyMode })),
+  profileImage: null,
+  profileName: null,
+  setProfileImage: (profileImage) => {
+    set({ profileImage });
+    setStoredValue(STORAGE_KEYS.profileImage, profileImage);
+  },
+  setProfileName: (profileName) => {
+    set({ profileName });
+    setStoredValue(STORAGE_KEYS.profileName, profileName);
+  },
+  togglePrivacyMode: () => set((state) => {
+    const isPrivacyMode = !state.isPrivacyMode;
+    setStoredValue(STORAGE_KEYS.isPrivacyMode, String(isPrivacyMode));
+    return { isPrivacyMode };
+  }),
 
   // Async helpers (Auth)
   requestNonce: async (walletAddress: string) => {
@@ -88,7 +116,8 @@ export const useStore = create<AuthState & UiState & LendingState & ShieldedStat
       const token = res.data?.accessToken || null;
       set({ authLoading: false });
       set({ authToken: token, address: walletAddress });
-      try { if (token) SecureStore.setItemAsync('authToken', token); } catch (e) {}
+      setStoredValue(STORAGE_KEYS.authToken, token);
+      setStoredValue(STORAGE_KEYS.address, walletAddress);
       return token;
     } catch (err) {
       set({ authLoading: false });
@@ -171,18 +200,26 @@ export const useStore = create<AuthState & UiState & LendingState & ShieldedStat
   },
 }));
 
-// Initialize persisted auth token (if any)
+// Restore persisted session and preferences before the navigator chooses a route.
 (async () => {
   try {
-    const token = await SecureStore.getItemAsync('authToken');
-    if (token) {
-      useStore.setState({ authToken: token });
-    }
-    const address = await SecureStore.getItemAsync('address');
-    if (address) {
-      useStore.setState({ address });
-    }
+    const [token, address, privacyMode, profileImage, profileName] = await Promise.all([
+      SecureStore.getItemAsync(STORAGE_KEYS.authToken),
+      SecureStore.getItemAsync(STORAGE_KEYS.address),
+      SecureStore.getItemAsync(STORAGE_KEYS.isPrivacyMode),
+      SecureStore.getItemAsync(STORAGE_KEYS.profileImage),
+      SecureStore.getItemAsync(STORAGE_KEYS.profileName),
+    ]);
+
+    useStore.setState({
+      address,
+      authToken: token,
+      isPrivacyMode: privacyMode === 'true',
+      profileImage,
+      profileName,
+      sessionRestored: true,
+    });
   } catch (e) {
-    // ignore
+    useStore.setState({ sessionRestored: true });
   }
 })();

@@ -11,6 +11,7 @@ import { shortenAddress } from '../utils/helpers';
 const { width } = Dimensions.get('window');
 const isSmallScreen = width < 380;
 const CARD_WIDTH = width - 48; // Padding 24 * 2
+const DEFAULT_PROFILE_IMAGE = 'https://i.pravatar.cc/100?img=5';
 
 
   
@@ -21,24 +22,32 @@ const CARD_WIDTH = width - 48; // Padding 24 * 2
   ];
 
 export default function DashboardScreen({ navigation }: any) {
-  const { address, logout, isPrivacyMode, togglePrivacyMode } = useStore();
+  const {
+    address,
+    logout,
+    isPrivacyMode,
+    profileImage,
+    profileName,
+    setProfileImage,
+    setProfileName,
+    togglePrivacyMode,
+  } = useStore();
   const [data, setData] = useState(null as any);
   const [currentIndex, setCurrentIndex] = useState(0);
   
   // Profile Menu State
   const [profileVisible, setProfileVisible] = useState(false);
-  const [username, setUsername] = useState(address ? shortenAddress(address) : MOCK_USER.name);
+  const [username, setUsername] = useState(profileName ?? (address ? shortenAddress(address) : MOCK_USER.name));
   const [isEditingName, setIsEditingName] = useState(false);
-  const [tempName, setTempName] = useState(address ? shortenAddress(address) : MOCK_USER.name);
-  const [profileImage, setProfileImage] = useState('https://i.pravatar.cc/100?img=5');
+  const [tempName, setTempName] = useState(profileName ?? (address ? shortenAddress(address) : MOCK_USER.name));
+  const currentProfileImage = profileImage ?? DEFAULT_PROFILE_IMAGE;
 
   useEffect(() => {
-    if (address) {
-      const shortAddr = shortenAddress(address);
-      setUsername(shortAddr);
-      setTempName(shortAddr);
-    }
-  }, [address]);
+    const fallbackName = address ? shortenAddress(address) : MOCK_USER.name;
+    const nextName = profileName ?? fallbackName;
+    setUsername(nextName);
+    setTempName(nextName);
+  }, [address, profileName]);
 
   const handleLogout = () => {
     setProfileVisible(false);
@@ -47,7 +56,10 @@ export default function DashboardScreen({ navigation }: any) {
   };
 
   const saveUsername = () => {
-    setUsername(tempName);
+    const nextName = tempName.trim() || (address ? shortenAddress(address) : MOCK_USER.name);
+    setProfileName(nextName);
+    setUsername(nextName);
+    setTempName(nextName);
     setIsEditingName(false);
   };
 
@@ -169,7 +181,7 @@ export default function DashboardScreen({ navigation }: any) {
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setProfileVisible(true)}>
             <Image 
-              source={{ uri: profileImage }} 
+              source={{ uri: currentProfileImage }}
               style={styles.avatar} 
             />
           </TouchableOpacity>

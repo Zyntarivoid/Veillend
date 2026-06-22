@@ -2,6 +2,7 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import ConnectWalletScreen from '../screens/ConnectWalletScreen';
 import DashboardScreen from '../screens/DashboardScreen';
 import DepositScreen from '../screens/DepositScreen';
@@ -44,6 +45,15 @@ function MainTabs() {
 
 export default function RootNavigator() {
   const authToken = useStore((state) => state.authToken);
+  const sessionRestored = useStore((state) => state.sessionRestored);
+
+  if (!sessionRestored) {
+    return (
+      <View style={styles.restoreContainer}>
+        <ActivityIndicator size="large" color="#A855F7" />
+      </View>
+    );
+  }
 
   return (
     <NavigationContainer>
@@ -57,3 +67,12 @@ export default function RootNavigator() {
     </NavigationContainer>
   );
 }
+
+const styles = StyleSheet.create({
+  restoreContainer: {
+    alignItems: 'center',
+    backgroundColor: '#0A0A0A',
+    flex: 1,
+    justifyContent: 'center',
+  },
+});
