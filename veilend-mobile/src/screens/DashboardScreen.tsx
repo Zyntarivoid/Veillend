@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { MOCK_USER, MOCK_TRANSACTIONS } from '../data/mockData';
 import { shortenAddress } from '../utils/helpers';
+import ProtocolStatusBanners from '../components/ProtocolStatusBanners';
 
 const { width } = Dimensions.get('window');
 const isSmallScreen = width < 380;
@@ -21,7 +22,18 @@ const CARD_WIDTH = width - 48; // Padding 24 * 2
   ];
 
 export default function DashboardScreen({ navigation }: any) {
-  const { address, logout, isPrivacyMode, togglePrivacyMode } = useStore();
+  const {
+    address,
+    authToken,
+    logout,
+    isPrivacyMode,
+    togglePrivacyMode,
+    expectedNetwork,
+    currentNetwork,
+    lastProtocolSyncAt,
+    protocolStatusLoading,
+    refreshProtocolStatus,
+  } = useStore();
   const [data, setData] = useState(null as any);
   const [currentIndex, setCurrentIndex] = useState(0);
   
@@ -44,6 +56,10 @@ export default function DashboardScreen({ navigation }: any) {
     setProfileVisible(false);
     logout();
     navigation.replace('ConnectWallet');
+  };
+
+  const handleStatusRetry = () => {
+    refreshProtocolStatus().catch(() => {});
   };
 
   const saveUsername = () => {
@@ -175,6 +191,16 @@ export default function DashboardScreen({ navigation }: any) {
           </TouchableOpacity>
         </View>
       </View>
+
+      <ProtocolStatusBanners
+        expectedNetwork={expectedNetwork}
+        currentNetwork={currentNetwork}
+        walletConnected={Boolean(address && authToken)}
+        lastSyncedAt={lastProtocolSyncAt}
+        isRefreshing={protocolStatusLoading}
+        onReconnect={handleLogout}
+        onRetrySync={handleStatusRetry}
+      />
 
       {/* Profile Menu Modal */}
       <Modal

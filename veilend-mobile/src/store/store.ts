@@ -28,6 +28,12 @@ type AuthState = {
 type UiState = {
   isPrivacyMode: boolean;
   togglePrivacyMode: () => void;
+  expectedNetwork: string;
+  currentNetwork: string | null;
+  lastProtocolSyncAt: number | null;
+  protocolStatusLoading: boolean;
+  protocolStatusError: string | null;
+  refreshProtocolStatus: () => Promise<void>;
 };
 
 type LendingState = {
@@ -75,6 +81,29 @@ export const useStore = create<AuthState & UiState & LendingState & ShieldedStat
   // UI
   isPrivacyMode: false,
   togglePrivacyMode: () => set((state) => ({ isPrivacyMode: !state.isPrivacyMode })),
+  expectedNetwork: 'testnet',
+  currentNetwork: 'testnet',
+  lastProtocolSyncAt: Date.now(),
+  protocolStatusLoading: false,
+  protocolStatusError: null,
+  refreshProtocolStatus: async () => {
+    set({ protocolStatusLoading: true, protocolStatusError: null });
+    try {
+      const res = await api.get('/health');
+      const network = res.data?.network ?? get().currentNetwork ?? get().expectedNetwork;
+      set({
+        currentNetwork: network,
+        lastProtocolSyncAt: Date.now(),
+        protocolStatusLoading: false,
+      });
+    } catch (err: any) {
+      set({
+        protocolStatusError: err?.message ?? 'Unable to refresh protocol status',
+        protocolStatusLoading: false,
+      });
+      throw err;
+    }
+  },
 
   // Async helpers (Auth)
   requestNonce: async (walletAddress: string) => {
