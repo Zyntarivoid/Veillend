@@ -2,7 +2,7 @@
 
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error, Address,
-    Env,
+    BytesN, Env,
 };
 
 #[derive(Clone)]
@@ -13,6 +13,8 @@ pub enum DataKey {
     SupportedAsset(Address),
     Position(Address, Address),
     OraclePrice(Address),
+    ShieldedCommitment(BytesN<32>),
+    UsedNullifier(BytesN<32>),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -34,6 +36,8 @@ pub enum VeilLendError {
     InsufficientDeposit = 6,
     RepayTooLarge = 7,
     InvalidCollateralRatio = 8,
+    DuplicateCommitment = 9,
+    NullifierAlreadyUsed = 10,
 }
 
 #[contractevent(topics = ["veillend", "asset_configured"])]
@@ -84,6 +88,22 @@ pub struct WithdrawEvent {
     #[topic]
     pub asset: Address,
     pub amount: i128,
+}
+
+#[contractevent(topics = ["veillend", "shielded_commitment"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ShieldedCommitmentStored {
+    #[topic]
+    pub admin: Address,
+    pub commitment: BytesN<32>,
+}
+
+#[contractevent(topics = ["veillend", "nullifier_used"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NullifierUsedEvent {
+    #[topic]
+    pub admin: Address,
+    pub nullifier: BytesN<32>,
 }
 
 #[contract]
@@ -160,6 +180,60 @@ impl VeilLendContract {
     /// * `Option<i128>` - The oracle price if set, None otherwise
     pub fn get_oracle_price(env: Env, asset: Address) -> Option<i128> {
         env.storage().persistent().get(&DataKey::OraclePrice(asset))
+    }
+
+    /// Store an opaque shielded commitment for a future privacy proof flow.
+    ///
+    /// This primitive is admin-gated until proof verification is integrated, so
+    /// arbitrary callers cannot reserve commitments without the protocol path.
+    pub fn record_shielded_commitment(env: Env, admin: Address, commitment: BytesN<32>) {
+        let stored_admin = Self::admin(env.clone());
+        if admin != stored_admin {
+            panic_with_error!(&env, VeilLendError::Unauthorized);
+        }
+        if Self::has_shielded_commitment(env.clone(), commitment.clone()) {
+            panic_with_error!(&env, VeilLendError::DuplicateCommitment);
+        }
+
+        admin.require_auth();
+        env.storage()
+            .persistent()
+            .set(&DataKey::ShieldedCommitment(commitment.clone()), &true);
+        ShieldedCommitmentStored { admin, commitment }.publish(&env);
+    }
+
+    pub fn has_shielded_commitment(env: Env, commitment: BytesN<32>) -> bool {
+        env.storage()
+            .persistent()
+            .get(&DataKey::ShieldedCommitment(commitment))
+            .unwrap_or(false)
+    }
+
+    /// Mark a shielded nullifier as consumed.
+    ///
+    /// Future ZK proof verification should call this only after validating the
+    /// proof that reveals the nullifier. The storage check prevents reuse.
+    pub fn mark_nullifier_used(env: Env, admin: Address, nullifier: BytesN<32>) {
+        let stored_admin = Self::admin(env.clone());
+        if admin != stored_admin {
+            panic_with_error!(&env, VeilLendError::Unauthorized);
+        }
+        if Self::is_nullifier_used(env.clone(), nullifier.clone()) {
+            panic_with_error!(&env, VeilLendError::NullifierAlreadyUsed);
+        }
+
+        admin.require_auth();
+        env.storage()
+            .persistent()
+            .set(&DataKey::UsedNullifier(nullifier.clone()), &true);
+        NullifierUsedEvent { admin, nullifier }.publish(&env);
+    }
+
+    pub fn is_nullifier_used(env: Env, nullifier: BytesN<32>) -> bool {
+        env.storage()
+            .persistent()
+            .get(&DataKey::UsedNullifier(nullifier))
+            .unwrap_or(false)
     }
 
     // This scaffold tracks protocol state first; token transfers and privacy proofs
@@ -330,6 +404,27 @@ impl VeilLendContract {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use soroban_sdk::testutils::{Address as _, EnvTestConfig};
+
+    fn test_env() -> Env {
+        Env::new_with_config(EnvTestConfig {
+            capture_snapshot_at_drop: false,
+        })
+    }
+
+    fn create_contract(env: &Env) -> (Address, VeilLendContractClient<'_>) {
+        env.mock_all_auths();
+
+        let admin = Address::generate(env);
+        let contract_id = env.register(VeilLendContract, (&admin, &15_000u32));
+        let client = VeilLendContractClient::new(env, &contract_id);
+
+        (admin, client)
+    }
+
+    fn opaque_id(env: &Env, byte: u8) -> BytesN<32> {
+        BytesN::from_array(env, &[byte; 32])
+    }
 
     #[test]
     fn test_position_creation() {
@@ -348,5 +443,91 @@ mod tests {
         assert_eq!(VeilLendError::UnsupportedAsset as u32, 3);
         assert_eq!(VeilLendError::InvalidAmount as u32, 4);
         assert_eq!(VeilLendError::InsufficientCollateral as u32, 5);
+        assert_eq!(VeilLendError::DuplicateCommitment as u32, 9);
+        assert_eq!(VeilLendError::NullifierAlreadyUsed as u32, 10);
+    }
+
+    #[test]
+    fn test_shielded_commitment_defaults_to_missing() {
+        let env = test_env();
+        let (_, client) = create_contract(&env);
+        let commitment = opaque_id(&env, 1);
+
+        assert!(!client.has_shielded_commitment(&commitment));
+    }
+
+    #[test]
+    fn test_admin_can_record_shielded_commitment() {
+        let env = test_env();
+        let (admin, client) = create_contract(&env);
+        let commitment = opaque_id(&env, 2);
+
+        client.record_shielded_commitment(&admin, &commitment);
+
+        assert!(client.has_shielded_commitment(&commitment));
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #2)")]
+    fn test_non_admin_cannot_record_shielded_commitment() {
+        let env = test_env();
+        let (_, client) = create_contract(&env);
+        let non_admin = Address::generate(&env);
+        let commitment = opaque_id(&env, 3);
+
+        client.record_shielded_commitment(&non_admin, &commitment);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #9)")]
+    fn test_duplicate_shielded_commitment_is_rejected() {
+        let env = test_env();
+        let (admin, client) = create_contract(&env);
+        let commitment = opaque_id(&env, 4);
+
+        client.record_shielded_commitment(&admin, &commitment);
+        client.record_shielded_commitment(&admin, &commitment);
+    }
+
+    #[test]
+    fn test_nullifier_defaults_to_unused() {
+        let env = test_env();
+        let (_, client) = create_contract(&env);
+        let nullifier = opaque_id(&env, 5);
+
+        assert!(!client.is_nullifier_used(&nullifier));
+    }
+
+    #[test]
+    fn test_admin_can_mark_nullifier_used() {
+        let env = test_env();
+        let (admin, client) = create_contract(&env);
+        let nullifier = opaque_id(&env, 6);
+
+        client.mark_nullifier_used(&admin, &nullifier);
+
+        assert!(client.is_nullifier_used(&nullifier));
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #2)")]
+    fn test_non_admin_cannot_mark_nullifier_used() {
+        let env = test_env();
+        let (_, client) = create_contract(&env);
+        let non_admin = Address::generate(&env);
+        let nullifier = opaque_id(&env, 7);
+
+        client.mark_nullifier_used(&non_admin, &nullifier);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #10)")]
+    fn test_nullifier_reuse_is_rejected() {
+        let env = test_env();
+        let (admin, client) = create_contract(&env);
+        let nullifier = opaque_id(&env, 8);
+
+        client.mark_nullifier_used(&admin, &nullifier);
+        client.mark_nullifier_used(&admin, &nullifier);
     }
 }

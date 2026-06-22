@@ -10,6 +10,7 @@ The contract currently provides an initial VeilLend lending scaffold with:
 - supported-asset configuration
 - position storage per user and asset
 - basic `deposit`, `borrow`, `repay`, and `withdraw` state transitions
+- shielded commitment and nullifier storage primitives
 - typed contract events for key lending actions
 
 This is a protocol foundation, not the full privacy implementation yet. Token transfers, price oracles, liquidation logic, and shielded proof verification still need to be added in follow-up iterations.
@@ -59,6 +60,23 @@ stellar contract build
 ```bash
 cargo test
 ```
+
+## Shielded State Primitives
+
+The contract exposes opaque `BytesN<32>` storage primitives for future privacy
+proof integration:
+
+- `record_shielded_commitment(admin, commitment)` stores a commitment once.
+- `has_shielded_commitment(commitment)` reads whether that commitment exists.
+- `mark_nullifier_used(admin, nullifier)` marks a nullifier as consumed.
+- `is_nullifier_used(nullifier)` reads whether a nullifier has already been used.
+
+Commitments and nullifiers are stored as opaque identifiers; the contract does
+not store user addresses, amounts, or proof material in these keys. Mutation is
+admin-gated until the proof verifier is integrated, which prevents arbitrary
+callers from reserving commitments or nullifiers through the raw primitives.
+Future shielded deposit and withdrawal flows should call these methods only
+after validating the corresponding proof inputs.
 
 ## Linting
 
