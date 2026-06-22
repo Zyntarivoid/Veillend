@@ -54,6 +54,22 @@ cargo build --target wasm32-unknown-unknown --release
 stellar contract build
 ```
 
+## Quick Verification Path
+
+For a first-time contributor, this is the shortest confidence check from a
+fresh clone:
+
+```bash
+cd veilend-soroban
+rustup toolchain install 1.88.0
+rustup target add wasm32-unknown-unknown --toolchain 1.88.0
+cargo test
+cargo build --target wasm32-unknown-unknown --release
+```
+
+Run `stellar contract build` after the Rust build is green and the Stellar CLI
+is installed. This keeps Rust setup issues separate from Stellar CLI issues.
+
 ## Testing
 
 ```bash
@@ -69,6 +85,7 @@ cargo clippy --locked --all-targets -- -D warnings
 ## Notes
 
 - `rust-toolchain.toml` pins the contract to Rust `1.88.0`.
+- `Cargo.toml` currently pins `soroban-sdk` to `23.5.3`.
 - The crate is named `veillend-contract` and exposes the `VeilLendContract` Soroban contract.
 - Event emission uses Soroban `#[contractevent]` types rather than the deprecated legacy publish payload pattern.
 - Cargo does not set a default target in `.cargo/config.toml`; use explicit `--target wasm32-unknown-unknown` when building contract WASM artifacts.
@@ -83,13 +100,29 @@ cargo clippy --locked --all-targets -- -D warnings
 4. Build WASM with `cargo build --target wasm32-unknown-unknown --release`
 5. Build Soroban artifacts with `stellar contract build`
 
+## Contributor Review Checklist
+
+Before opening a contract PR, verify:
+
+- [ ] `cargo fmt` leaves no formatting changes
+- [ ] `cargo test` passes
+- [ ] `cargo clippy --locked --all-targets -- -D warnings` passes
+- [ ] `cargo build --target wasm32-unknown-unknown --release` produces a WASM artifact
+- [ ] README or tests are updated when contract behavior changes
+
 ## Next Steps
+
+The current contract is a lending scaffold. Follow-up implementation work should
+stay focused and reviewable:
 
 - wire in Stellar token transfers for deposit and repayment flows
 - add price feeds and enforce collateral health using oracle-backed values
 - introduce liquidation and reserve management logic
 - add shielded commitment/nullifier storage for the privacy layer
 - add Soroban host tests for the lending lifecycle and authorization rules
+
+Do not wire backend, web, or mobile integration into this contract workspace
+unless a future issue explicitly asks for cross-workspace changes.
 
 ## Documentation
 
