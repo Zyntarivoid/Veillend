@@ -37,19 +37,25 @@ The application architecture is organized into distinct domain modules to clearl
 To maintain a consistent API structure, we enforce strict Data Transfer Object (DTO) validation and response formatting.
 
 ### Directory Structure
+
 Shared contracts and common code reside in `src/common`.
 
 ### DTO Validation
+
 - All controllers use NestJS `ValidationPipe`.
 - DTOs strictly define boundaries using `class-validator` decorators (e.g., `@IsString()`, `@IsNumber()`).
 - Data transformation uses `class-transformer` decorators (e.g., `@Type()`).
 
 ### Standardized Responses
+
 We utilize standard API wrapper formats to ensure predictable frontend consumption.
+
 - **Success/Error Wrapper**: `ApiResponseDto<T>` (e.g., `{ success: true, data: { ... } }`)
 
 ### Pagination
+
 For list-based endpoints, the following conventions apply:
+
 - **Request**: `PageOptionsDto` defines query options (`page`, `take`, `order`).
 - **Response**: `PageDto<T>` wraps an array of data alongside pagination metadata (`PageMetaDto`).
 
@@ -70,6 +76,30 @@ $ npm run start:dev
 
 # production mode
 $ npm run start:prod
+```
+
+## Seed local Stellar demo data
+
+The local indexer read models are stored in `veilend-db.json`. To create a
+deterministic dataset for dashboard and history endpoint development, run:
+
+```bash
+$ npm run seed:local
+```
+
+The command writes representative Stellar lending activity to `veilend-db.json`:
+supported assets, user positions, and deposit/borrow/repay/withdraw history.
+After starting the API, the seeded records are available through:
+
+```bash
+$ curl http://localhost:3000/indexer/positions/GDEMOLOCALSTELLARLENDER00000000000000000000000000000001
+$ curl http://localhost:3000/indexer/transactions/GDEMOLOCALSTELLARBORROWER000000000000000000000000000001
+```
+
+To write the seed file somewhere else, pass an output path:
+
+```bash
+$ npm run seed:local -- --output ./tmp/veilend-db.json
 ```
 
 ## Run tests
