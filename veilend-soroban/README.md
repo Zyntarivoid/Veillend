@@ -66,6 +66,22 @@ cargo test
 cargo clippy --locked --all-targets -- -D warnings
 ```
 
+## Storage TTL Strategy
+
+Soroban persistent and instance entries can expire if they are not extended. VeilLend uses a uniform TTL policy for long-lived protocol state:
+
+- `STORAGE_BUMP_THRESHOLD_LEDGERS = 120960`
+- `STORAGE_EXTEND_TO_LEDGERS = 1209600`
+
+When a write path touches long-lived state, the contract extends TTL if the entry is below the threshold:
+
+- contract instance and code TTL are bumped on constructor, admin configuration, oracle price writes, and lending state transitions
+- `SupportedAsset(asset)` TTL is bumped when `configure_asset` writes support flags
+- `OraclePrice(asset)` TTL is bumped when `set_oracle_price` writes prices
+- `Position(user, asset)` TTL is bumped when deposit, borrow, repay, or withdraw writes a user position
+
+Read-only methods such as `get_position`, `get_oracle_price`, `is_asset_supported`, `admin`, and `min_collateral_ratio_bps` do not bump TTL. This keeps simple reads compatible with simulated or non-submitting CLI usage. Contributors adding new persistent records should call the same bump helper immediately after writes and add a storage TTL test when practical.
+
 ## Notes
 
 - `rust-toolchain.toml` pins the contract to Rust `1.88.0`.

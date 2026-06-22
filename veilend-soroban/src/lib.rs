@@ -15,6 +15,9 @@ pub enum DataKey {
     OraclePrice(Address),
 }
 
+pub const STORAGE_BUMP_THRESHOLD_LEDGERS: u32 = 120_960;
+pub const STORAGE_EXTEND_TO_LEDGERS: u32 = 1_209_600;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct Position {
@@ -104,18 +107,20 @@ impl VeilLendContract {
         env.storage()
             .instance()
             .set(&DataKey::MinCollateralRatioBps, &min_collateral_ratio_bps);
+        Self::bump_instance_ttl(&env);
     }
 
     pub fn configure_asset(env: Env, admin: Address, asset: Address, supported: bool) {
+        Self::bump_instance_ttl(&env);
         let stored_admin = Self::admin(env.clone());
         if admin != stored_admin {
             panic_with_error!(&env, VeilLendError::Unauthorized);
         }
 
         admin.require_auth();
-        env.storage()
-            .persistent()
-            .set(&DataKey::SupportedAsset(asset.clone()), &supported);
+        let key = DataKey::SupportedAsset(asset.clone());
+        env.storage().persistent().set(&key, &supported);
+        Self::bump_persistent_ttl(&env, &key);
         AssetConfigured {
             admin,
             asset,
@@ -134,6 +139,7 @@ impl VeilLendContract {
     /// * `asset` - The asset address to set the price for
     /// * `price` - The oracle price (must be positive, in base units e.g., cents)
     pub fn set_oracle_price(env: Env, admin: Address, asset: Address, price: i128) {
+        Self::bump_instance_ttl(&env);
         let stored_admin = Self::admin(env.clone());
         if admin != stored_admin {
             panic_with_error!(&env, VeilLendError::Unauthorized);
@@ -144,9 +150,9 @@ impl VeilLendContract {
         }
 
         admin.require_auth();
-        env.storage()
-            .persistent()
-            .set(&DataKey::OraclePrice(asset.clone()), &price);
+        let key = DataKey::OraclePrice(asset.clone());
+        env.storage().persistent().set(&key, &price);
+        Self::bump_persistent_ttl(&env, &key);
     }
 
     /// Get the oracle price for an asset
@@ -165,6 +171,7 @@ impl VeilLendContract {
     // This scaffold tracks protocol state first; token transfers and privacy proofs
     // can be layered on top once the Stellar asset integrations are finalized.
     pub fn deposit(env: Env, user: Address, asset: Address, amount: i128) {
+        Self::bump_instance_ttl(&env);
         Self::require_supported_asset(&env, &asset);
         Self::require_positive_amount(&env, amount);
         user.require_auth();
@@ -182,6 +189,7 @@ impl VeilLendContract {
     }
 
     pub fn borrow(env: Env, user: Address, asset: Address, amount: i128) {
+        Self::bump_instance_ttl(&env);
         Self::require_supported_asset(&env, &asset);
         Self::require_positive_amount(&env, amount);
         user.require_auth();
@@ -200,6 +208,7 @@ impl VeilLendContract {
     }
 
     pub fn repay(env: Env, user: Address, asset: Address, amount: i128) {
+        Self::bump_instance_ttl(&env);
         Self::require_supported_asset(&env, &asset);
         Self::require_positive_amount(&env, amount);
         user.require_auth();
@@ -221,6 +230,7 @@ impl VeilLendContract {
     }
 
     pub fn withdraw(env: Env, user: Address, asset: Address, amount: i128) {
+        Self::bump_instance_ttl(&env);
         Self::require_supported_asset(&env, &asset);
         Self::require_positive_amount(&env, amount);
         user.require_auth();
@@ -269,6 +279,20 @@ impl VeilLendContract {
 }
 
 impl VeilLendContract {
+    fn bump_instance_ttl(env: &Env) {
+        env.storage()
+            .instance()
+            .extend_ttl(STORAGE_BUMP_THRESHOLD_LEDGERS, STORAGE_EXTEND_TO_LEDGERS);
+    }
+
+    fn bump_persistent_ttl(env: &Env, key: &DataKey) {
+        env.storage().persistent().extend_ttl(
+            key,
+            STORAGE_BUMP_THRESHOLD_LEDGERS,
+            STORAGE_EXTEND_TO_LEDGERS,
+        );
+    }
+
     fn read_position(env: &Env, user: &Address, asset: &Address) -> Position {
         env.storage()
             .persistent()
@@ -280,9 +304,9 @@ impl VeilLendContract {
     }
 
     fn write_position(env: &Env, user: &Address, asset: &Address, position: &Position) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::Position(user.clone(), asset.clone()), position);
+        let key = DataKey::Position(user.clone(), asset.clone());
+        env.storage().persistent().set(&key, position);
+        Self::bump_persistent_ttl(env, &key);
     }
 
     fn require_supported_asset(env: &Env, asset: &Address) {
@@ -330,6 +354,10 @@ impl VeilLendContract {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use soroban_sdk::testutils::{
+        storage::{Instance as _, Persistent as _},
+        Address as _,
+    };
 
     #[test]
     fn test_position_creation() {
@@ -348,5 +376,55 @@ mod tests {
         assert_eq!(VeilLendError::UnsupportedAsset as u32, 3);
         assert_eq!(VeilLendError::InvalidAmount as u32, 4);
         assert_eq!(VeilLendError::InsufficientCollateral as u32, 5);
+    }
+
+    #[test]
+    fn test_ttl_policy_constants() {
+        assert!(STORAGE_BUMP_THRESHOLD_LEDGERS > 0);
+        assert!(STORAGE_EXTEND_TO_LEDGERS > STORAGE_BUMP_THRESHOLD_LEDGERS);
+    }
+
+    #[test]
+    fn test_configure_asset_extends_ttl() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let asset = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.configure_asset(&admin, &asset, &true);
+        client.set_oracle_price(&admin, &asset, &1);
+
+        env.as_contract(&contract_id, || {
+            let supported_key = DataKey::SupportedAsset(asset.clone());
+            let oracle_key = DataKey::OraclePrice(asset.clone());
+            assert!(env.storage().instance().get_ttl() >= STORAGE_EXTEND_TO_LEDGERS);
+            assert!(
+                env.storage().persistent().get_ttl(&supported_key) >= STORAGE_EXTEND_TO_LEDGERS
+            );
+            assert!(env.storage().persistent().get_ttl(&oracle_key) >= STORAGE_EXTEND_TO_LEDGERS);
+        });
+    }
+
+    #[test]
+    fn test_position_write_extends_ttl() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+        let asset = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.configure_asset(&admin, &asset, &true);
+        client.deposit(&user, &asset, &100);
+
+        env.as_contract(&contract_id, || {
+            let key = DataKey::Position(user.clone(), asset.clone());
+            assert!(env.storage().persistent().get_ttl(&key) >= STORAGE_EXTEND_TO_LEDGERS);
+        });
     }
 }
