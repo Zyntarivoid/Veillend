@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Image, Modal, TextInput, TouchableWithoutFeedback, Keyboard, KeyboardAvoidingView, Platform, Dimensions, FlatList } from 'react-native';
-import api from '../utils/api';
+import api, { API_URL } from '../utils/api';
 import { useStore } from '../store/store';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,6 +11,8 @@ import { shortenAddress } from '../utils/helpers';
 const { width } = Dimensions.get('window');
 const isSmallScreen = width < 380;
 const CARD_WIDTH = width - 48; // Padding 24 * 2
+const SYNC_LAG_MS = 5 * 60 * 1000;
+const SYNC_CLOCK_MS = 60 * 1000;
 
 
   
@@ -20,10 +22,55 @@ const CARD_WIDTH = width - 48; // Padding 24 * 2
     { label: 'Borrowed Value', value: 1000.00, icon: 'trending-down-outline' },
   ];
 
+type StatusBannerProps = {
+  actionLabel?: string;
+  icon: string;
+  message: string;
+  onAction?: () => void;
+  title: string;
+  type: 'error' | 'info' | 'warning';
+};
+
+const formatSyncAge = (lastSyncedAt: number, now: number) => {
+  const minutes = Math.max(1, Math.floor((now - lastSyncedAt) / 60000));
+  return minutes === 1 ? '1 minute ago' : `${minutes} minutes ago`;
+};
+
+function StatusBanner({ actionLabel, icon, message, onAction, title, type }: StatusBannerProps) {
+  const isError = type === 'error';
+  const isWarning = type === 'warning';
+
+  return (
+    <View style={[
+      styles.statusBanner,
+      isError ? styles.statusBannerError : isWarning ? styles.statusBannerWarning : styles.statusBannerInfo,
+    ]}>
+      <Ionicons
+        name={icon as any}
+        size={20}
+        color={isError ? '#FF6363' : isWarning ? '#FBBF24' : '#00D1FF'}
+      />
+      <View style={styles.statusTextGroup}>
+        <Text style={styles.statusTitle}>{title}</Text>
+        <Text style={styles.statusMessage}>{message}</Text>
+      </View>
+      {actionLabel && onAction ? (
+        <TouchableOpacity style={styles.statusAction} onPress={onAction}>
+          <Text style={styles.statusActionText}>{actionLabel}</Text>
+        </TouchableOpacity>
+      ) : null}
+    </View>
+  );
+}
+
 export default function DashboardScreen({ navigation }: any) {
-  const { address, logout, isPrivacyMode, togglePrivacyMode } = useStore();
+  const { address, authToken, logout, isPrivacyMode, togglePrivacyMode } = useStore();
   const [data, setData] = useState(null as any);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [now, setNow] = useState(Date.now());
   
   // Profile Menu State
   const [profileVisible, setProfileVisible] = useState(false);
@@ -79,13 +126,31 @@ export default function DashboardScreen({ navigation }: any) {
     fetchData();
   }, []);
 
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), SYNC_CLOCK_MS);
+    return () => clearInterval(interval);
+  }, []);
+
   const fetchData = async () => {
-    // In a real app, you would fetch real data here
-    // For now, we use the hardcoded mock data for UI demo
-    setData({
-      positions: [] 
-    });
+    setIsSyncing(true);
+    try {
+      await api.get('/');
+      setData({
+        positions: []
+      });
+      setLastSyncedAt(Date.now());
+      setSyncError(null);
+    } catch (error) {
+      setData({
+        positions: []
+      });
+      setSyncError(`Cannot reach protocol API at ${API_URL}.`);
+    } finally {
+      setIsSyncing(false);
+    }
   };
+
+  const syncLagged = lastSyncedAt !== null && now - lastSyncedAt > SYNC_LAG_MS;
 
   const ServiceButton = ({ icon, label, onPress }: any) => (
     <TouchableOpacity style={styles.serviceBtn} onPress={onPress}>
@@ -175,6 +240,44 @@ export default function DashboardScreen({ navigation }: any) {
           </TouchableOpacity>
         </View>
       </View>
+
+      {!address || !authToken ? (
+        <StatusBanner
+          actionLabel="Reconnect"
+          icon="wallet-outline"
+          message="Your wallet session is incomplete. Reconnect to continue using protocol actions."
+          onAction={handleLogout}
+          title="Wallet disconnected"
+          type="error"
+        />
+      ) : null}
+
+      {syncError ? (
+        <StatusBanner
+          actionLabel="Retry"
+          icon="cloud-offline-outline"
+          message={syncError}
+          onAction={fetchData}
+          title="Protocol network unavailable"
+          type="warning"
+        />
+      ) : syncLagged && lastSyncedAt ? (
+        <StatusBanner
+          actionLabel="Refresh"
+          icon="time-outline"
+          message={`Last synced ${formatSyncAge(lastSyncedAt, now)}. Refresh before making new protocol actions.`}
+          onAction={fetchData}
+          title="Protocol sync may be stale"
+          type="warning"
+        />
+      ) : isSyncing ? (
+        <StatusBanner
+          icon="sync-outline"
+          message={`Checking protocol API at ${API_URL}.`}
+          title="Syncing protocol status"
+          type="info"
+        />
+      ) : null}
 
       {/* Profile Menu Modal */}
       <Modal
@@ -372,6 +475,53 @@ const styles = StyleSheet.create({
     padding: 8,
     backgroundColor: '#1A1A1A',
     borderRadius: 12,
+  },
+  statusBanner: {
+    alignItems: 'flex-start',
+    borderRadius: 16,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 16,
+    padding: 14,
+  },
+  statusBannerError: {
+    backgroundColor: 'rgba(255, 99, 99, 0.12)',
+    borderColor: 'rgba(255, 99, 99, 0.3)',
+  },
+  statusBannerWarning: {
+    backgroundColor: 'rgba(251, 191, 36, 0.12)',
+    borderColor: 'rgba(251, 191, 36, 0.3)',
+  },
+  statusBannerInfo: {
+    backgroundColor: 'rgba(0, 209, 255, 0.1)',
+    borderColor: 'rgba(0, 209, 255, 0.25)',
+  },
+  statusTextGroup: {
+    flex: 1,
+  },
+  statusTitle: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  statusMessage: {
+    color: '#D1D1D1',
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  statusAction: {
+    alignSelf: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  statusActionText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
   },
   greeting: {
     color: '#A1A1A1',
