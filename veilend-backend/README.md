@@ -53,6 +53,31 @@ For list-based endpoints, the following conventions apply:
 - **Request**: `PageOptionsDto` defines query options (`page`, `take`, `order`).
 - **Response**: `PageDto<T>` wraps an array of data alongside pagination metadata (`PageMetaDto`).
 
+## Transaction History API
+
+The transactions module exposes normalized activity from the Soroban indexer
+read model:
+
+- `GET /transactions/:walletAddress`
+- `GET /transactions/:walletAddress/activity`
+
+Both endpoints accept the shared pagination query parameters:
+
+- `page` - 1-based page number, defaults to `1`
+- `take` - page size, defaults to `10` and is capped at `50`
+- `order` - `ASC` or `DESC`, defaults to newest-first `DESC`
+
+Responses use `PageDto<TransactionActivityDto>`. Each activity item includes:
+
+- `id`
+- `walletAddress`
+- `type` - one of `deposit`, `borrow`, `repay`, or `withdraw`
+- `assetAddress`
+- `amount` - stringified i128 amount
+- `ledger`
+- `txHash`
+- `timestamp` - normalized ISO-8601 timestamp
+
 ## Project setup
 
 ```bash
