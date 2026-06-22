@@ -1,6 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Image, Modal, TextInput, TouchableWithoutFeedback, Keyboard, KeyboardAvoidingView, Platform, Dimensions, FlatList } from 'react-native';
-import api from '../utils/api';
+import {
+  fetchPortfolioDashboard,
+  fetchTransactionActivity,
+  PortfolioDashboardResponse,
+  TransactionActivityResponse,
+} from '../utils/api';
 import { useStore } from '../store/store';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,17 +17,117 @@ const { width } = Dimensions.get('window');
 const isSmallScreen = width < 380;
 const CARD_WIDTH = width - 48; // Padding 24 * 2
 
+type DashboardCard = {
+  label: string;
+  value: number;
+  icon: string;
+};
 
-  
-  const CARDS = [
-    { label: 'Total Balance', value: MOCK_USER.balance, icon: 'wallet-outline' },
-    { label: 'Collateral Value', value: 8000.00, icon: 'shield-checkmark-outline' },
-    { label: 'Borrowed Value', value: 1000.00, icon: 'trending-down-outline' },
-  ];
+type TransactionRow = {
+  id: string;
+  title: string;
+  value: string;
+  date: string;
+  icon: string;
+};
+
+type SyncState = 'idle' | 'loading' | 'live' | 'empty' | 'stale';
+
+const FALLBACK_CARDS: DashboardCard[] = [
+  { label: 'Total Balance', value: MOCK_USER.balance, icon: 'wallet-outline' },
+  { label: 'Collateral Value', value: 8000.0, icon: 'shield-checkmark-outline' },
+  { label: 'Borrowed Value', value: 1000.0, icon: 'trending-down-outline' },
+];
+
+const TRANSACTION_TITLES: Record<TransactionActivityResponse['type'], string> = {
+  deposit: 'Deposited',
+  borrow: 'Borrowed',
+  repay: 'Repaid',
+  withdraw: 'Withdrew',
+};
+
+const TRANSACTION_ICONS: Record<TransactionActivityResponse['type'], string> = {
+  deposit: 'arrow-down',
+  borrow: 'cash',
+  repay: 'arrow-up',
+  withdraw: 'arrow-up',
+};
+
+const readNumber = (value: unknown, fallback: number): number => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return fallback;
+};
+
+const cardsFromDashboard = (
+  dashboard: PortfolioDashboardResponse,
+): DashboardCard[] => [
+  {
+    label: 'Total Balance',
+    value: readNumber(
+      dashboard.totalBalance ?? dashboard.netBalance,
+      MOCK_USER.balance,
+    ),
+    icon: 'wallet-outline',
+  },
+  {
+    label: 'Collateral Value',
+    value: readNumber(
+      dashboard.collateralValue ??
+        dashboard.totalDeposited ??
+        dashboard.deposited,
+      8000.0,
+    ),
+    icon: 'shield-checkmark-outline',
+  },
+  {
+    label: 'Borrowed Value',
+    value: readNumber(
+      dashboard.borrowedValue ?? dashboard.totalBorrowed ?? dashboard.borrowed,
+      1000.0,
+    ),
+    icon: 'trending-down-outline',
+  },
+];
+
+const formatActivityDate = (timestamp: string): string => {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) {
+    return 'Pending timestamp';
+  }
+  return date.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
+
+const transactionFromActivity = (
+  tx: TransactionActivityResponse,
+): TransactionRow => ({
+  id: tx.id,
+  title: `${TRANSACTION_TITLES[tx.type]} asset`,
+  value: tx.amount,
+  date: formatActivityDate(tx.timestamp),
+  icon: TRANSACTION_ICONS[tx.type],
+});
+
+const fallbackTransactions: TransactionRow[] = MOCK_TRANSACTIONS;
 
 export default function DashboardScreen({ navigation }: any) {
   const { address, logout, isPrivacyMode, togglePrivacyMode } = useStore();
-  const [data, setData] = useState(null as any);
+  const [cards, setCards] = useState<DashboardCard[]>(FALLBACK_CARDS);
+  const [transactions, setTransactions] =
+    useState<TransactionRow[]>(fallbackTransactions);
+  const [syncState, setSyncState] = useState<SyncState>('idle');
   const [currentIndex, setCurrentIndex] = useState(0);
   
   // Profile Menu State
@@ -76,16 +181,40 @@ export default function DashboardScreen({ navigation }: any) {
   }).current;
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    void fetchData();
+  }, [address]);
 
   const fetchData = async () => {
-    // In a real app, you would fetch real data here
-    // For now, we use the hardcoded mock data for UI demo
-    setData({
-      positions: [] 
-    });
+    if (!address) {
+      setCards(FALLBACK_CARDS);
+      setTransactions(fallbackTransactions);
+      setSyncState('idle');
+      return;
+    }
+
+    setSyncState('loading');
+    try {
+      const [dashboard, activity] = await Promise.all([
+        fetchPortfolioDashboard(address),
+        fetchTransactionActivity(address),
+      ]);
+      setCards(cardsFromDashboard(dashboard));
+      setTransactions(activity.map(transactionFromActivity));
+      setSyncState(activity.length > 0 ? 'live' : 'empty');
+    } catch (err) {
+      setCards(FALLBACK_CARDS);
+      setTransactions(fallbackTransactions);
+      setSyncState('stale');
+    }
   };
+
+  const syncMessage = {
+    idle: 'Connect a wallet to load live protocol data',
+    loading: 'Syncing live protocol state...',
+    live: 'Live backend data synced',
+    empty: 'Live backend synced with no indexed activity yet',
+    stale: 'Showing demo data until the backend is reachable',
+  }[syncState];
 
   const ServiceButton = ({ icon, label, onPress }: any) => (
     <TouchableOpacity style={styles.serviceBtn} onPress={onPress}>
@@ -278,9 +407,18 @@ export default function DashboardScreen({ navigation }: any) {
       </Modal>
 
       {/* Balance Card Carousel */}
+      <View style={styles.syncBanner}>
+        <Ionicons
+          name={syncState === 'stale' ? 'cloud-offline-outline' : 'pulse'}
+          size={16}
+          color={syncState === 'stale' ? '#FFB020' : '#00D1FF'}
+        />
+        <Text style={styles.syncText}>{syncMessage}</Text>
+      </View>
+
       <View style={styles.balanceCardContainer}>
         <FlatList
-          data={CARDS}
+          data={cards}
           renderItem={renderCard}
           horizontal
           pagingEnabled
@@ -294,7 +432,7 @@ export default function DashboardScreen({ navigation }: any) {
 
       {/* Pagination Dots */}
       <View style={styles.paginationContainer}>
-        {CARDS.map((_, index) => (
+        {cards.map((_, index) => (
           <View 
             key={index} 
             style={[
@@ -333,20 +471,31 @@ export default function DashboardScreen({ navigation }: any) {
       {/* Transactions List */}
       <Text style={styles.sectionTitle}>Transactions</Text>
       <View style={styles.transactionsList}>
-        {MOCK_TRANSACTIONS.map((tx) => (
-          <View key={tx.id} style={styles.txItem}>
-            <View style={styles.txLeft}>
-              <View style={styles.txIconBox}>
-                <Ionicons name={tx.icon as any} size={20} color="#fff" />
+        {transactions.length > 0 ? (
+          transactions.map((tx) => (
+            <View key={tx.id} style={styles.txItem}>
+              <View style={styles.txLeft}>
+                <View style={styles.txIconBox}>
+                  <Ionicons name={tx.icon as any} size={20} color="#fff" />
+                </View>
+                <View>
+                  <Text style={styles.txTitle}>{tx.title}</Text>
+                  <Text style={styles.txDate}>{tx.date}</Text>
+                </View>
               </View>
-              <View>
-                <Text style={styles.txTitle}>{tx.title}</Text>
-                <Text style={styles.txDate}>{tx.date}</Text>
-              </View>
+              <Text style={styles.txValue}>
+                {isPrivacyMode ? '****' : tx.value}
+              </Text>
             </View>
-            <Text style={styles.txValue}>{tx.value}</Text>
+          ))
+        ) : (
+          <View style={styles.emptyTransactions}>
+            <Ionicons name="receipt-outline" size={36} color="#555" />
+            <Text style={styles.emptyTransactionsText}>
+              No indexed transactions yet
+            </Text>
           </View>
-        ))}
+        )}
       </View>
       
       {/* Spacer for bottom tab bar */}
@@ -687,6 +836,36 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 8,
     fontSize: 16,
+  },
+  syncBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#121212',
+    borderWidth: 1,
+    borderColor: '#222',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 16,
+    gap: 8,
+  },
+  syncText: {
+    color: '#A1A1A1',
+    fontSize: 12,
+    flex: 1,
+  },
+  emptyTransactions: {
+    backgroundColor: '#121212',
+    borderRadius: 16,
+    padding: 24,
+    borderWidth: 1,
+    borderColor: '#222',
+    alignItems: 'center',
+    gap: 8,
+  },
+  emptyTransactionsText: {
+    color: '#A1A1A1',
+    fontSize: 14,
   },
   txDate: {
     color: '#666',
