@@ -26,6 +26,9 @@ The application architecture is organized into distinct domain modules to clearl
 - **Transactions (`src/transactions`)**
   - **Responsibility**: Orchestrates the transaction lifecycle (borrowing, lending, liquidations). Simulates Soroban transactions and maintains transaction history.
 
+- **Profiles (`src/profiles`)**
+  - **Responsibility**: Exposes wallet-scoped user profile records, profile settings, and privacy preferences for frontend clients.
+
 - **Indexing (`src/indexer`)**
   - **Responsibility**: Listens to Stellar and Soroban ledger events, parses on-chain activity, and synchronizes the protocol state to the local database.
 
@@ -37,21 +40,64 @@ The application architecture is organized into distinct domain modules to clearl
 To maintain a consistent API structure, we enforce strict Data Transfer Object (DTO) validation and response formatting.
 
 ### Directory Structure
+
 Shared contracts and common code reside in `src/common`.
 
 ### DTO Validation
+
 - All controllers use NestJS `ValidationPipe`.
 - DTOs strictly define boundaries using `class-validator` decorators (e.g., `@IsString()`, `@IsNumber()`).
 - Data transformation uses `class-transformer` decorators (e.g., `@Type()`).
 
 ### Standardized Responses
+
 We utilize standard API wrapper formats to ensure predictable frontend consumption.
+
 - **Success/Error Wrapper**: `ApiResponseDto<T>` (e.g., `{ success: true, data: { ... } }`)
 
 ### Pagination
+
 For list-based endpoints, the following conventions apply:
+
 - **Request**: `PageOptionsDto` defines query options (`page`, `take`, `order`).
 - **Response**: `PageDto<T>` wraps an array of data alongside pagination metadata (`PageMetaDto`).
+
+## Profile API
+
+Profile records are keyed by Stellar wallet address and include safe frontend preferences only. They do not expose wallet secrets, signatures, auth tokens, or private key material.
+
+### Read a profile
+
+```http
+GET /profiles/:walletAddress
+```
+
+The response contains the wallet address, optional `username`, optional display fields, profile `settings`, privacy preferences, and `updatedAt` timestamp. New wallet addresses receive private-by-default preferences.
+
+### Update a profile
+
+```http
+PATCH /profiles/:walletAddress
+Content-Type: application/json
+
+{
+  "username": "stellar_builder",
+  "displayName": "Stellar Builder",
+  "bio": "Building private Stellar lending tools.",
+  "settings": {
+    "locale": "en-US",
+    "theme": "dark",
+    "emailNotifications": true
+  },
+  "privacy": {
+    "showPortfolioValue": true,
+    "showTransactionHistory": false,
+    "allowAnalytics": true
+  }
+}
+```
+
+Validation rejects unknown fields, malformed usernames, unsupported themes, and non-boolean privacy flags. Partial updates merge with existing settings and preserve private defaults for omitted fields.
 
 ## Project setup
 
