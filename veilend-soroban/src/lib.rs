@@ -2,7 +2,7 @@
 
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error, Address,
-    Env,
+    BytesN, Env,
 };
 
 #[derive(Clone)]
@@ -13,6 +13,8 @@ pub enum DataKey {
     SupportedAsset(Address),
     Position(Address, Address),
     OraclePrice(Address),
+    Commitment(BytesN<32>),
+    Nullifier(BytesN<32>),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -50,6 +52,10 @@ pub enum VeilLendError {
     OraclePriceMissing = 11,
     /// Operation blocked: contract is paused
     ContractPaused = 12,
+    /// Commitment has already been inserted
+    CommitmentAlreadyExists = 13,
+    /// Nullifier was already consumed
+    NullifierAlreadyUsed = 14,
 }
 
 #[contractevent(topics = ["veillend", "asset_configured"])]
@@ -100,6 +106,22 @@ pub struct WithdrawEvent {
     #[topic]
     pub asset: Address,
     pub amount: i128,
+}
+
+#[contractevent(topics = ["veillend", "commitment_inserted"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CommitmentInserted {
+    #[topic]
+    pub user: Address,
+    pub commitment: BytesN<32>,
+}
+
+#[contractevent(topics = ["veillend", "nullifier_consumed"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NullifierConsumed {
+    #[topic]
+    pub user: Address,
+    pub nullifier: BytesN<32>,
 }
 
 #[contract]
@@ -262,6 +284,52 @@ impl VeilLendContract {
         Self::read_position(&env, &user, &asset)
     }
 
+    /// Insert a shielded commitment for a future privacy-preserving flow.
+    ///
+    /// The contract stores only the 32-byte commitment digest and rejects
+    /// duplicates so proof integrations can rely on append-only membership.
+    pub fn insert_commitment(env: Env, user: Address, commitment: BytesN<32>) {
+        user.require_auth();
+        let key = DataKey::Commitment(commitment.clone());
+
+        if env.storage().persistent().has(&key) {
+            panic_with_error!(&env, VeilLendError::CommitmentAlreadyExists);
+        }
+
+        env.storage().persistent().set(&key, &true);
+        CommitmentInserted { user, commitment }.publish(&env);
+    }
+
+    /// Consume a nullifier and permanently mark it as used.
+    ///
+    /// This prevents the same private note/nullifier from being spent twice by
+    /// later proof-verification flows while keeping the current scaffold small.
+    pub fn consume_nullifier(env: Env, user: Address, nullifier: BytesN<32>) {
+        user.require_auth();
+        let key = DataKey::Nullifier(nullifier.clone());
+
+        if env.storage().persistent().has(&key) {
+            panic_with_error!(&env, VeilLendError::NullifierAlreadyUsed);
+        }
+
+        env.storage().persistent().set(&key, &true);
+        NullifierConsumed { user, nullifier }.publish(&env);
+    }
+
+    pub fn commitment_exists(env: Env, commitment: BytesN<32>) -> bool {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Commitment(commitment))
+            .unwrap_or(false)
+    }
+
+    pub fn is_nullifier_used(env: Env, nullifier: BytesN<32>) -> bool {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Nullifier(nullifier))
+            .unwrap_or(false)
+    }
+
     pub fn is_asset_supported(env: Env, asset: Address) -> bool {
         env.storage()
             .persistent()
@@ -349,6 +417,17 @@ impl VeilLendContract {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use soroban_sdk::testutils::Address as _;
+
+    fn client(env: &Env) -> VeilLendContractClient<'_> {
+        let admin = Address::generate(env);
+        let contract_id = env.register(VeilLendContract, (&admin, 15_000_u32));
+        VeilLendContractClient::new(env, &contract_id)
+    }
+
+    fn digest(env: &Env, fill: u8) -> BytesN<32> {
+        BytesN::from_array(env, &[fill; 32])
+    }
 
     #[test]
     fn test_position_creation() {
@@ -374,6 +453,8 @@ mod tests {
         assert_eq!(VeilLendError::ZeroAmount as u32, 10);
         assert_eq!(VeilLendError::OraclePriceMissing as u32, 11);
         assert_eq!(VeilLendError::ContractPaused as u32, 12);
+        assert_eq!(VeilLendError::CommitmentAlreadyExists as u32, 13);
+        assert_eq!(VeilLendError::NullifierAlreadyUsed as u32, 14);
     }
 
     #[test]
@@ -392,6 +473,8 @@ mod tests {
             VeilLendError::ZeroAmount as u32,
             VeilLendError::OraclePriceMissing as u32,
             VeilLendError::ContractPaused as u32,
+            VeilLendError::CommitmentAlreadyExists as u32,
+            VeilLendError::NullifierAlreadyUsed as u32,
         ];
         let mut sorted = codes.to_vec();
         sorted.sort();
@@ -417,5 +500,71 @@ mod tests {
             VeilLendError::Unauthorized as u32,
             "NotInitialized and Unauthorized must be distinct error codes"
         );
+    }
+
+    #[test]
+    fn test_nullifier_codes_distinct_from_auth_and_asset_errors() {
+        assert_ne!(
+            VeilLendError::NullifierAlreadyUsed as u32,
+            VeilLendError::Unauthorized as u32,
+            "Nullifier replay must be distinguishable from authorization failure"
+        );
+        assert_ne!(
+            VeilLendError::CommitmentAlreadyExists as u32,
+            VeilLendError::UnsupportedAsset as u32,
+            "Duplicate commitment must be distinguishable from asset configuration failure"
+        );
+    }
+
+    #[test]
+    fn test_insert_commitment_records_membership_once() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let user = Address::generate(&env);
+        let commitment = digest(&env, 7);
+        let client = client(&env);
+
+        assert!(!client.commitment_exists(&commitment));
+        client.insert_commitment(&user, &commitment);
+        assert!(client.commitment_exists(&commitment));
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #13)")]
+    fn test_insert_commitment_rejects_duplicates() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let user = Address::generate(&env);
+        let commitment = digest(&env, 8);
+        let client = client(&env);
+
+        client.insert_commitment(&user, &commitment);
+        client.insert_commitment(&user, &commitment);
+    }
+
+    #[test]
+    fn test_consume_nullifier_marks_it_used_once() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let user = Address::generate(&env);
+        let nullifier = digest(&env, 9);
+        let client = client(&env);
+
+        assert!(!client.is_nullifier_used(&nullifier));
+        client.consume_nullifier(&user, &nullifier);
+        assert!(client.is_nullifier_used(&nullifier));
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #14)")]
+    fn test_consume_nullifier_rejects_reuse() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let user = Address::generate(&env);
+        let nullifier = digest(&env, 10);
+        let client = client(&env);
+
+        client.consume_nullifier(&user, &nullifier);
+        client.consume_nullifier(&user, &nullifier);
     }
 }

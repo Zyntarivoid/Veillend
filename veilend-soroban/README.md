@@ -10,9 +10,10 @@ The contract currently provides an initial VeilLend lending scaffold with:
 - supported-asset configuration
 - position storage per user and asset
 - basic `deposit`, `borrow`, `repay`, and `withdraw` state transitions
-- typed contract events for key lending actions
+- shielded commitment and nullifier storage primitives for future proof integrations
+- typed contract events for key lending and privacy-scaffold actions
 
-This is a protocol foundation, not the full privacy implementation yet. Token transfers, price oracles, liquidation logic, and shielded proof verification still need to be added in follow-up iterations.
+This is a protocol foundation, not the full privacy proof implementation yet. Token transfers, price oracles, liquidation logic, and zero-knowledge proof verification still need to be added in follow-up iterations. The current commitment/nullifier methods intentionally store only 32-byte digests and enforce duplicate/replay guards so future shielded deposit/withdraw flows can build on stable storage keys.
 
 ## Prerequisites
 
@@ -88,7 +89,7 @@ cargo clippy --locked --all-targets -- -D warnings
 - wire in Stellar token transfers for deposit and repayment flows
 - add price feeds and enforce collateral health using oracle-backed values
 - introduce liquidation and reserve management logic
-- add shielded commitment/nullifier storage for the privacy layer
+- add shielded proof verification and note lifecycle wiring on top of the commitment/nullifier primitives
 - add Soroban host tests for the lending lifecycle and authorization rules
 
 ## Documentation
