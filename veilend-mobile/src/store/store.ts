@@ -45,26 +45,22 @@ type LendingState = {
   repay: (params: { amount: string; asset: string }) => Promise<any>;
 };
 
-type ShieldedState = {
-  lastShieldedTx: Nullable<any>;
-  shieldedLoading: boolean;
-  depositShielded: (params: any) => Promise<any>;
-  withdrawShielded: (params: any) => Promise<any>;
-};
-
-export const useStore = create<AuthState & UiState & LendingState & ShieldedState>((set, get) => ({
+export const useStore = create<AuthState & UiState & LendingState>((
+  set: (partial: Partial<AuthState & UiState & LendingState> | ((state: AuthState & UiState & LendingState) => Partial<AuthState & UiState & LendingState>)) => void,
+  get: () => AuthState & UiState & LendingState
+) => ({
   // Auth
   address: null,
   authToken: null,
   authLoading: false,
-  setAddress: (address) => {
+  setAddress: (address: string | null) => {
     set({ address });
     try {
       if (address) SecureStore.setItemAsync('address', address);
       else SecureStore.deleteItemAsync('address');
     } catch (e) {}
   },
-  setAuthToken: (token) => {
+  setAuthToken: (token: string | null) => {
     set({ authToken: token });
     try {
       if (token) SecureStore.setItemAsync('authToken', token);
@@ -80,7 +76,7 @@ export const useStore = create<AuthState & UiState & LendingState & ShieldedStat
 
   // UI
   isPrivacyMode: false,
-  togglePrivacyMode: () => set((state) => ({ isPrivacyMode: !state.isPrivacyMode })),
+  togglePrivacyMode: () => set((state: AuthState & UiState & LendingState) => ({ isPrivacyMode: !state.isPrivacyMode })),
   expectedNetwork: 'testnet',
   currentNetwork: 'testnet',
   lastProtocolSyncAt: Date.now(),
@@ -110,7 +106,7 @@ export const useStore = create<AuthState & UiState & LendingState & ShieldedStat
     const res = await api.post('/auth/nonce', { walletAddress });
     return res.data?.nonce;
   },
-  verify: async ({ walletAddress, nonce, signature }) => {
+  verify: async ({ walletAddress, nonce, signature }: { walletAddress: string; nonce: string; signature: string }) => {
     set({ authLoading: true });
     try {
       const res = await api.post('/auth/verify', { walletAddress, nonce, signature });
@@ -125,76 +121,54 @@ export const useStore = create<AuthState & UiState & LendingState & ShieldedStat
     }
   },
 
-  // Lending
+  // Lending (placeholder implementations until backend is ready)
   lastLendingTx: null,
   lendingLoading: false,
-  deposit: async ({ amount, asset }) => {
+  deposit: async ({ amount, asset }: { amount: string; asset: string }) => {
     set({ lendingLoading: true });
     try {
-      const res = await api.post('/lending-pool/deposit', { amount, asset });
-      set({ lastLendingTx: res.data, lendingLoading: false });
-      return res.data;
+      // TODO: Implement deposit endpoint in backend
+      const mockTx = { txHash: `mock-deposit-${Date.now()}`, amount, asset, status: 'success' };
+      set({ lastLendingTx: mockTx, lendingLoading: false });
+      return mockTx;
     } catch (err) {
       set({ lendingLoading: false });
       throw err;
     }
   },
-  withdraw: async ({ amount, asset }) => {
+  withdraw: async ({ amount, asset }: { amount: string; asset: string }) => {
     set({ lendingLoading: true });
     try {
-      const res = await api.post('/lending-pool/withdraw', { amount, asset });
-      set({ lastLendingTx: res.data, lendingLoading: false });
-      return res.data;
+      // TODO: Implement withdraw endpoint in backend
+      const mockTx = { txHash: `mock-withdraw-${Date.now()}`, amount, asset, status: 'success' };
+      set({ lastLendingTx: mockTx, lendingLoading: false });
+      return mockTx;
     } catch (err) {
       set({ lendingLoading: false });
       throw err;
     }
   },
-  borrow: async ({ amount, asset }) => {
+  borrow: async ({ amount, asset }: { amount: string; asset: string }) => {
     set({ lendingLoading: true });
     try {
-      const res = await api.post('/lending-pool/borrow', { amount, asset });
-      set({ lastLendingTx: res.data, lendingLoading: false });
-      return res.data;
+      // TODO: Implement borrow endpoint in backend
+      const mockTx = { txHash: `mock-borrow-${Date.now()}`, amount, asset, status: 'success' };
+      set({ lastLendingTx: mockTx, lendingLoading: false });
+      return mockTx;
     } catch (err) {
       set({ lendingLoading: false });
       throw err;
     }
   },
-  repay: async ({ amount, asset }) => {
+  repay: async ({ amount, asset }: { amount: string; asset: string }) => {
     set({ lendingLoading: true });
     try {
-      const res = await api.post('/lending-pool/repay', { amount, asset });
-      set({ lastLendingTx: res.data, lendingLoading: false });
-      return res.data;
+      // TODO: Implement repay endpoint in backend
+      const mockTx = { txHash: `mock-repay-${Date.now()}`, amount, asset, status: 'success' };
+      set({ lastLendingTx: mockTx, lendingLoading: false });
+      return mockTx;
     } catch (err) {
       set({ lendingLoading: false });
-      throw err;
-    }
-  },
-
-  // Shielded
-  lastShieldedTx: null,
-  shieldedLoading: false,
-  depositShielded: async (params) => {
-    set({ shieldedLoading: true });
-    try {
-      const res = await api.post('/shielded-pool/deposit_shielded', params);
-      set({ lastShieldedTx: res.data, shieldedLoading: false });
-      return res.data;
-    } catch (err) {
-      set({ shieldedLoading: false });
-      throw err;
-    }
-  },
-  withdrawShielded: async (params) => {
-    set({ shieldedLoading: true });
-    try {
-      const res = await api.post('/shielded-pool/withdraw_shielded', params);
-      set({ lastShieldedTx: res.data, shieldedLoading: false });
-      return res.data;
-    } catch (err) {
-      set({ shieldedLoading: false });
       throw err;
     }
   },
