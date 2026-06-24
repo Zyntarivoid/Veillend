@@ -1,13 +1,13 @@
 import { Container, Flex, Grid, Section } from '@/components/Layout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/Card';
-import { Badge } from '@/components/Badge';
+import { Badge, type BadgeVariant } from '@/components/Badge';
 import { fetchDashboardData } from '@/lib/api/dashboard';
 
 export default async function DashboardPage() {
   const data = await fetchDashboardData();
   const { portfolio, recentActivity } = data;
 
-  const getActionBadgeColor = (action: string) => {
+  const getActionBadgeColor = (action: string): BadgeVariant => {
     switch (action) {
       case 'DEPOSIT':
         return 'success';
@@ -18,7 +18,7 @@ export default async function DashboardPage() {
       case 'WITHDRAW':
         return 'secondary';
       default:
-        return 'outline';
+        return 'default';
     }
   };
 
@@ -178,7 +178,7 @@ export default async function DashboardPage() {
                       <Flex gap="md" align="center">
                         <div>
                           <Flex align="center" gap="sm" className="mb-1">
-                            <Badge variant={getActionBadgeColor(activity.action) as any}>
+                            <Badge variant={getActionBadgeColor(activity.action)}>
                               {activity.action}
                             </Badge>
                             <span className="font-semibold text-text">

@@ -1,5 +1,20 @@
 import { DashboardData, ActivityActionType, AssetBalance } from '../types/dashboard';
 
+interface ApiPosition {
+  assetAddress: string;
+  depositedAmount: string | number;
+  borrowedAmount: string | number;
+}
+
+interface ApiTransaction {
+  id: string | number;
+  type: string;
+  assetAddress: string;
+  amount: string | number;
+  timestamp: string;
+  txHash: string;
+}
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 // For the demo/campaign, we can use a hardcoded or random dummy address if none is provided.
@@ -28,7 +43,7 @@ export async function fetchDashboardData(address: string = DEMO_ADDRESS): Promis
     // Map positions (assuming naive 1:1 USD pricing for demo unless oracle is integrated)
     // The backend returns IndexerPosition: { assetAddress, depositedAmount, borrowedAmount }
     if (Array.isArray(positions)) {
-      positions.forEach((pos: any) => {
+      positions.forEach((pos: ApiPosition) => {
         const deposited = Number(pos.depositedAmount) / 1e7; // Assuming 7 decimals (Stellar standard)
         const borrowed = Number(pos.borrowedAmount) / 1e7;
         
@@ -63,7 +78,7 @@ export async function fetchDashboardData(address: string = DEMO_ADDRESS): Promis
     const totalBalanceUsd = totalDepositedUsd - totalBorrowedUsd;
 
     // Map transactions
-    const recentActivity = Array.isArray(transactions) ? transactions.map((tx: any) => {
+    const recentActivity = Array.isArray(transactions) ? transactions.map((tx: ApiTransaction) => {
       const amount = Number(tx.amount) / 1e7;
       const price = tx.assetAddress.includes('USDC') ? 1.0 : 0.11;
       return {
@@ -76,7 +91,7 @@ export async function fetchDashboardData(address: string = DEMO_ADDRESS): Promis
         status: 'COMPLETED' as const,
         txHash: tx.txHash,
       };
-    }).sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()) : [];
+    }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()) : [];
 
     return {
       portfolio: {

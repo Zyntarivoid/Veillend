@@ -4,13 +4,9 @@ import * as React from "react"
 import Link from "next/link"
 import { 
   Shield, 
-  Layers, 
-  Coins, 
   ArrowRight, 
-  Lock, 
   EyeOff, 
   Cpu, 
-  Users, 
   CheckCircle2, 
   ChevronRight,
   TrendingUp,
@@ -79,11 +75,11 @@ export default function VeilLendLandingPage() {
           <div className="p-4 font-mono text-xs md:text-sm text-slate-400 space-y-1 overflow-x-auto leading-relaxed">
             <p><span className="text-indigo-400">use</span> soroban_sdk::{"{Env, Address, symbol_short};"}</p>
             <p><span className="text-indigo-400">use</span> veillend_zk_proofs::{"{verify_proof, FixedPointMath};"}</p>
-            <p className="text-slate-600">// Initialize shielded vault interface configurations</p>
+            {/* Initialize shielded vault interface configurations */}
             <p><span className="text-emerald-400">pub fn</span> <span className="text-amber-300">execute_shielded_deposit</span>(env: Env, contributor: Address, commitment: i128) {"{"}</p>
             <p className="pl-4">assert_minimum_stroop_threshold!(commitment);</p>
             <p className="pl-4 text-teal-400">let proof_is_valid = verify_proof(&env, &contributor);</p>
-            <p className="pl-4">env.storage().instance().set(&symbol_short!(<span className="text-orange-300">"status"</span>), &proof_is_valid);</p>
+            <p className="pl-4">env.storage().instance().set(&symbol_short!(&quot;status&quot;), &proof_is_valid);</p>
             <p>{"}"}</p>
           </div>
         </div>

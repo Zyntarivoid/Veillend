@@ -2,7 +2,7 @@
 
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error, Address,
-    Env,
+    Env, Vec, Bytes, Val,
 };
 
 #[derive(Clone)]
@@ -13,6 +13,8 @@ pub enum DataKey {
     SupportedAsset(Address),
     Position(Address, Address),
     OraclePrice(Address),
+    // Reserved for private withdrawals
+    PrivateWithdrawalNonce(Address),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -100,6 +102,34 @@ pub struct WithdrawEvent {
     #[topic]
     pub asset: Address,
     pub amount: i128,
+}
+
+// ===== PRIVATE WITHDRAWAL ROADMAP =====
+// Reserved types for future privacy proof verification
+//
+// Private Withdrawal Flow Assumptions:
+// 1. Users will generate zero-knowledge proofs off-chain that prove they are
+//    eligible to withdraw from their position without revealing sensitive details
+// 2. Proofs will be verified on-chain before any state changes
+// 3. Nonces will be used to prevent replay attacks
+// 4. Privacy-preserving versions of deposit/withdraw will use shielded pools
+//
+// These interfaces are reserved for future implementation and will not
+// break the current lending scaffold
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct PrivateWithdrawalProof {
+    pub proof_bytes: Bytes,
+    pub public_inputs: Vec<Val>,
+}
+
+#[contractevent(topics = ["veillend", "private_withdraw"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PrivateWithdrawEvent {
+    #[topic]
+    pub asset: Address,
+    pub amount: i128,
+    pub nonce: u64,
 }
 
 #[contract]
@@ -281,6 +311,24 @@ impl VeilLendContract {
             .instance()
             .get(&DataKey::MinCollateralRatioBps)
             .unwrap_or(15_000)
+    }
+
+    // ===== RESERVED FOR FUTURE PRIVATE WITHDRAWALS =====
+    // Method reserved for future implementation of privacy-preserving withdrawals
+    // Unimplemented and will panic if called currently
+    pub fn private_withdraw(
+        _env: Env,
+        _asset: Address,
+        _amount: i128,
+        _nonce: u64,
+        _proof: PrivateWithdrawalProof,
+    ) {
+        panic!("Private withdrawal not implemented yet - reserved for future privacy roadmap");
+    }
+
+    // Reserved for updating privacy parameters (future use)
+    pub fn set_privacy_params(_env: Env, _admin: Address, _params: Bytes) {
+        panic!("Privacy parameters not implemented yet - reserved for future privacy roadmap");
     }
 }
 
