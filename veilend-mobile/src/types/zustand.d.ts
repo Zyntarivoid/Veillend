@@ -5,11 +5,12 @@ declare module 'zustand' {
     store: any
   ) => T;
 
-  interface UseStore<T> {
+  type UseStore<T> = {
     (): T;
+    <U>(selector: (state: T) => U): U;
     setState: (partial: Partial<T> | ((state: T) => Partial<T>)) => void;
     getState: () => T;
-  }
+  };
 
   export function create<T>(stateCreator: StateCreator<T>): UseStore<T>;
 }
