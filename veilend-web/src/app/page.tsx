@@ -2,16 +2,16 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { 
-  Shield, 
-  Layers, 
-  Coins, 
-  ArrowRight, 
-  Lock, 
-  EyeOff, 
-  Cpu, 
-  Users, 
-  CheckCircle2, 
+import {
+  Shield,
+  Layers,
+  Coins,
+  ArrowRight,
+  Lock,
+  EyeOff,
+  Cpu,
+  Users,
+  CheckCircle2,
   ChevronRight,
   TrendingUp,
   Terminal
@@ -19,11 +19,15 @@ import {
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { WalletConnect } from "@/components/WalletConnect"
+import { WalletStatus } from "@/components/WalletStatus"
+import { useWallet } from "@/context/WalletContext"
 
 export default function VeilLendLandingPage() {
+  const { isConnected, isAuthenticated } = useWallet();
   // Simulated Live Campaign Metrics for the contributor block
   const [totalContributed, setTotalContributed] = React.useState<number>(642850)
-  
+
   React.useEffect(() => {
     const interval = setInterval(() => {
       setTotalContributed(prev => prev + Math.floor(Math.random() * 45) + 5)
@@ -33,7 +37,7 @@ export default function VeilLendLandingPage() {
 
   return (
     <div className="min-h-screen bg-[#030712] text-slate-100 overflow-x-hidden selection:bg-emerald-500/30 selection:text-emerald-300">
-      
+
       {/* Decorative Cyber Grid Background & Radial Ambient Glows */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f293710_1px,transparent_1px),linear-gradient(to_bottom,#1f293710_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)] pointer-events-none" />
       <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-indigo-500/10 rounded-full blur-[120px] pointer-events-none animate-pulse duration-[8s]" />
@@ -57,9 +61,15 @@ export default function VeilLendLandingPage() {
         </p>
 
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
-          <Button asChild size="lg" className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-8 shadow-lg shadow-emerald-600/20 w-full sm:w-auto transition-all duration-200 hover:scale-[1.02]">
-            <Link href="/campaign">Join Campaign <ArrowRight className="ml-2 h-5 w-5" /></Link>
-          </Button>
+          {isConnected && isAuthenticated ? (
+            <Button asChild size="lg" className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-8 shadow-lg shadow-emerald-600/20 w-full sm:w-auto transition-all duration-200 hover:scale-[1.02]">
+              <Link href="/dashboard">Go to Dashboard <ArrowRight className="ml-2 h-5 w-5" /></Link>
+            </Button>
+          ) : (
+            <Button asChild size="lg" className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-8 shadow-lg shadow-emerald-600/20 w-full sm:w-auto transition-all duration-200 hover:scale-[1.02]">
+              <Link href="#connect-wallet">Connect Wallet to Start <ArrowRight className="ml-2 h-5 w-5" /></Link>
+            </Button>
+          )}
           <Button asChild size="lg" variant="outline" className="border-slate-800 bg-slate-900/40 hover:bg-slate-900 text-slate-200 hover:text-white px-8 backdrop-blur-sm w-full sm:w-auto">
             <Link href="#features">Explore Architecture</Link>
           </Button>
@@ -224,9 +234,15 @@ export default function VeilLendLandingPage() {
             Secure early platform allocation status metrics, qualify for priority liquidity distribution brackets, and support privacy-first decentralization.
           </p>
           <div className="pt-4">
-            <Button asChild size="lg" className="bg-slate-100 hover:bg-white text-slate-950 font-bold px-8 shadow-md">
-              <Link href="/campaign">Enter Contributor Dashboard <ChevronRight className="ml-1 h-4 w-4" /></Link>
-            </Button>
+            {isConnected && isAuthenticated ? (
+              <Button asChild size="lg" className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-8 shadow-lg shadow-emerald-600/20">
+                <Link href="/dashboard">Go to Dashboard <ChevronRight className="ml-1 h-4 w-4" /></Link>
+              </Button>
+            ) : (
+              <Button asChild size="lg" className="bg-slate-100 hover:bg-white text-slate-950 font-bold px-8 shadow-md">
+                <Link href="#connect-wallet">Connect Wallet to Start <ChevronRight className="ml-1 h-4 w-4" /></Link>
+              </Button>
+            )}
           </div>
         </div>
       </section>
