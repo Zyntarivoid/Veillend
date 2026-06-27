@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { isWalletAuthenticated, getAuthenticatedWallet, clearAuthSession } from "@/lib/stellar/auth";
+import { isWalletAuthenticated, getAuthenticatedWallet, clearAuthSession, createAuthSession } from "@/lib/stellar/auth";
 import { connectFreighter, isFreighterInstalled, disconnectWallet } from "@/lib/stellar/wallet";
 
 export interface WalletState {
@@ -31,30 +31,24 @@ export function useStellarWallet(): WalletState & WalletActions {
     error: null,
   });
 
-  // Check if Freighter is installed
+  // Check authentication status and Freighter installation on mount
   useEffect(() => {
-    const installed = isFreighterInstalled();
-    setState((prev) => ({ ...prev, isInstalled: installed }));
-  }, []);
-
-  // Check authentication status on mount
-  useEffect(() => {
-    const checkAuth = () => {
+    const initializeWallet = () => {
+      const installed = isFreighterInstalled();
       const isAuth = isWalletAuthenticated();
       const address = getAuthenticatedWallet();
 
-      if (isAuth && address) {
-        setState((prev) => ({
-          ...prev,
-          address,
-          publicKey: address,
-          isConnected: true,
-          isAuthenticated: true,
-        }));
-      }
+      setState((prev) => ({
+        ...prev,
+        isInstalled: installed,
+        address: isAuth ? address : null,
+        publicKey: isAuth ? address : null,
+        isConnected: isAuth && !!address,
+        isAuthenticated: isAuth && !!address,
+      }));
     };
 
-    checkAuth();
+    initializeWallet();
   }, []);
 
   const connect = useCallback(async () => {
@@ -64,6 +58,9 @@ export function useStellarWallet(): WalletState & WalletActions {
 
     try {
       const wallet = await connectFreighter();
+
+      // Create auth session
+      createAuthSession(wallet.address, wallet.publicKey);
 
       setState((prev) => ({
         ...prev,

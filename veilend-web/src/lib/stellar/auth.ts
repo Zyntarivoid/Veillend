@@ -4,7 +4,6 @@
  */
 
 import { Keypair } from "@stellar/stellar-sdk";
-import { getNetworkPassphrase } from "./config";
 
 const AUTH_STORAGE_KEY = "veillend_auth";
 const WALLET_ADDRESS_KEY = "veillend_wallet_address";

@@ -4,13 +4,9 @@ import * as React from "react"
 import Link from "next/link"
 import {
   Shield,
-  Layers,
-  Coins,
   ArrowRight,
-  Lock,
   EyeOff,
   Cpu,
-  Users,
   CheckCircle2,
   ChevronRight,
   TrendingUp,
@@ -19,8 +15,6 @@ import {
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { WalletConnect } from "@/components/WalletConnect"
-import { WalletStatus } from "@/components/WalletStatus"
 import { useWallet } from "@/context/WalletContext"
 
 export default function VeilLendLandingPage() {
@@ -43,7 +37,7 @@ export default function VeilLendLandingPage() {
       <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-indigo-500/10 rounded-full blur-[120px] pointer-events-none animate-pulse duration-[8s]" />
       <div className="absolute top-1/3 right-1/4 w-[600px] h-[600px] bg-emerald-500/5 rounded-full blur-[160px] pointer-events-none animate-pulse duration-[12s]" />
 
-      {/* --- HERO SECTION --- */}
+      {/* HERO SECTION */}
       <header className="relative max-w-7xl mx-auto px-6 pt-24 pb-20 sm:pt-32 sm:pb-28 text-center space-y-8">
         <div className="flex justify-center">
           <Badge variant="outline" className="bg-slate-900/80 border-slate-800 text-slate-300 px-3 py-1 flex items-center gap-2 backdrop-blur-sm shadow-sm">
@@ -89,17 +83,17 @@ export default function VeilLendLandingPage() {
           <div className="p-4 font-mono text-xs md:text-sm text-slate-400 space-y-1 overflow-x-auto leading-relaxed">
             <p><span className="text-indigo-400">use</span> soroban_sdk::{"{Env, Address, symbol_short};"}</p>
             <p><span className="text-indigo-400">use</span> veillend_zk_proofs::{"{verify_proof, FixedPointMath};"}</p>
-            <p className="text-slate-600">// Initialize shielded vault interface configurations</p>
+            <p className="text-slate-600">Initialize shielded vault interface configurations</p>
             <p><span className="text-emerald-400">pub fn</span> <span className="text-amber-300">execute_shielded_deposit</span>(env: Env, contributor: Address, commitment: i128) {"{"}</p>
             <p className="pl-4">assert_minimum_stroop_threshold!(commitment);</p>
             <p className="pl-4 text-teal-400">let proof_is_valid = verify_proof(&env, &contributor);</p>
-            <p className="pl-4">env.storage().instance().set(&symbol_short!(<span className="text-orange-300">"status"</span>), &proof_is_valid);</p>
+            <p className="pl-4">env.storage().instance().set(&symbol_short!(<span className="text-orange-300">&quot;status&quot;</span>), &proof_is_valid);</p>
             <p>{"}"}</p>
           </div>
         </div>
       </header>
 
-      {/* --- LIVE CAMPAIGN METRICS PANEL --- */}
+      {/* LIVE CAMPAIGN METRICS PANEL */}
       <section className="max-w-7xl mx-auto px-6 py-8 relative">
         <div className="bg-gradient-to-r from-slate-950 via-[#0b1329] to-slate-950 border border-slate-800/80 rounded-2xl p-8 shadow-xl grid grid-cols-1 md:grid-cols-3 gap-8 items-center text-center md:text-left">
           <div className="space-y-2">
@@ -120,7 +114,7 @@ export default function VeilLendLandingPage() {
         </div>
       </section>
 
-      {/* --- CORE FEATURES MATRIX --- */}
+      {/* CORE FEATURES MATRIX */}
       <section id="features" className="max-w-7xl mx-auto px-6 py-20 sm:py-28 space-y-16">
         <div className="text-center space-y-4">
           <h2 className="text-3xl sm:text-5xl font-black tracking-tight">Engineered for Absolute Confidentiality</h2>
@@ -171,7 +165,7 @@ export default function VeilLendLandingPage() {
         </div>
       </section>
 
-      {/* --- PROTOCOL ROADMAP MILESTONES --- */}
+      {/* PROTOCOL ROADMAP MILESTONES */}
       <section className="max-w-5xl mx-auto px-6 py-16 sm:py-24 space-y-16">
         <div className="text-center space-y-4">
           <h2 className="text-3xl sm:text-4xl font-black tracking-tight">Development Timeline</h2>
@@ -225,7 +219,7 @@ export default function VeilLendLandingPage() {
         </div>
       </section>
 
-      {/* --- CTA CLOSING SUMMARY --- */}
+      {/* CTA CLOSING SUMMARY */}
       <section className="max-w-6xl mx-auto px-6 py-20 text-center relative">
         <div className="absolute inset-0 bg-gradient-to-t from-emerald-500/5 via-transparent to-transparent rounded-3xl pointer-events-none" />
         <div className="border border-slate-800/80 bg-slate-950/20 backdrop-blur-md rounded-3xl p-12 space-y-6 max-w-4xl mx-auto shadow-xl">
@@ -247,7 +241,7 @@ export default function VeilLendLandingPage() {
         </div>
       </section>
 
-      {/* --- VISUAL FOOTER --- */}
+      {/* VISUAL FOOTER */}
       <footer className="max-w-7xl mx-auto px-6 py-12 border-t border-slate-900 text-center sm:text-left flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 text-xs font-mono text-slate-500">
         <div>&copy; 2026 VeilLend Protocol Ecosystem. All rights reserved.</div>
         <div className="flex justify-center gap-6">

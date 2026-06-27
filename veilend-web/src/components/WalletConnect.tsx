@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { Wallet, X, ExternalLink, CheckCircle2 } from "lucide-react";
+import { Wallet, X, ExternalLink } from "lucide-react";
 import { useWallet } from "@/context/WalletContext";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,6 +13,15 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+
+// Define the Freighter window interface
+interface FreighterWindow extends Window {
+  freighter?: {
+    isConnected: () => Promise<{ isConnected: boolean }>;
+    getAddress: () => Promise<{ address: string }>;
+    signTransaction: (txXdr: string, opts?: { networkPassphrase?: string }) => Promise<{ signedTxXdr: string }>;
+  };
+}
 
 interface WalletConnectProps {
   className?: string;
@@ -155,7 +164,9 @@ export function WalletConnect({ className, size = "default" }: WalletConnectProp
  * This is exported for use in other components
  */
 export const isFreighterInstalled = (): boolean => {
-  return typeof window !== "undefined" && typeof (window as any).freighter !== "undefined";
+  if (typeof window === "undefined") return false;
+  const win = window as FreighterWindow;
+  return typeof win.freighter !== "undefined";
 };
 
 export default WalletConnect;
