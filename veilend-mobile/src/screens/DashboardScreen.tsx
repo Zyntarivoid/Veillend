@@ -1,11 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Image, Modal, TextInput, TouchableWithoutFeedback, Keyboard, KeyboardAvoidingView, Platform, Dimensions, FlatList } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Image, Modal, TextInput, TouchableWithoutFeedback, Keyboard, KeyboardAvoidingView, Platform, Dimensions, FlatList, ActivityIndicator } from 'react-native';
 import api from '../utils/api';
 import { useStore } from '../store/store';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { MOCK_USER, MOCK_TRANSACTIONS } from '../data/mockData';
+import { MOCK_USER } from '../data/mockData';
 import { shortenAddress } from '../utils/helpers';
 import ProtocolStatusBanners from '../components/ProtocolStatusBanners';
 
@@ -16,9 +16,9 @@ const CARD_WIDTH = width - 48; // Padding 24 * 2
 
   
   const CARDS = [
-    { label: 'Total Balance', value: MOCK_USER.balance, icon: 'wallet-outline' },
-    { label: 'Collateral Value', value: 8000.00, icon: 'shield-checkmark-outline' },
-    { label: 'Borrowed Value', value: 1000.00, icon: 'trending-down-outline' },
+    { label: 'Total Balance', value: balance.toFixed(2), icon: 'wallet-outline' },
+    { label: 'Collateral Value', value: collateralValue.toFixed(2), icon: 'shield-checkmark-outline' },
+    { label: 'Borrowed Value', value: borrowedValue.toFixed(2), icon: 'trending-down-outline' },
   ];
 
 export default function DashboardScreen({ navigation }: any) {
@@ -33,12 +33,43 @@ export default function DashboardScreen({ navigation }: any) {
     lastProtocolSyncAt,
     protocolStatusLoading,
     refreshProtocolStatus,
+    balance,
+    collateralValue,
+    borrowedValue,
+    availableToBorrow,
+    healthFactor,
+    portfolioLoading,
+    portfolioError,
+    fetchPortfolio,
+    transactions,
+    transactionsLoading,
+    fetchTransactions,
   } = useStore();
   const [data, setData] = useState<Record<string, unknown> | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   
   // Profile Menu State
   const [profileVisible, setProfileVisible] = useState(false);
+
+  if (portfolioLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0F172A' }}>
+        <ActivityIndicator size="large" color="#A855F7" />
+        <Text style={{ color: '#94A3B8', marginTop: 12 }}>Loading portfolio...</Text>
+      </View>
+    );
+  }
+
+  if (portfolioError) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0F172A', padding: 24 }}>
+        <Text style={{ color: '#EF4444', fontSize: 16, textAlign: 'center' }}>{portfolioError}</Text>
+        <TouchableOpacity style={{ marginTop: 16, padding: 12, backgroundColor: '#1E293B', borderRadius: 8 }} onPress={fetchPortfolio}>
+          <Text style={{ color: '#A855F7' }}>Retry</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
   const [username, setUsername] = useState(address ? shortenAddress(address) : MOCK_USER.name);
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempName, setTempName] = useState(address ? shortenAddress(address) : MOCK_USER.name);
@@ -96,11 +127,11 @@ export default function DashboardScreen({ navigation }: any) {
   }, []);
 
   const fetchData = async () => {
-    // In a real app, you would fetch real data here
-    // For now, we use the hardcoded mock data for UI demo
-    setData({
-      positions: [] 
-    });
+    try {
+      await Promise.all([fetchPortfolio(), fetchTransactions()]);
+    } catch (err) {
+      // Errors handled by store
+    }
   };
 
   const ServiceButton = ({ icon, label, onPress }: any) => (
