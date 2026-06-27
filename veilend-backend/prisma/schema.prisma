@@ -1,22 +1,175 @@
-model User {
-  id String @id @default(uuid())
-
-  walletAddress String @unique
-
-  createdAt DateTime @default(now())
+generator client {
+  provider = "prisma-client-js"
 }
 
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Auth ───────────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(uuid())
+  walletAddress String    @unique
+  createdAt     DateTime  @default(now())
+
+  positions     Position[]
+  transactions  TransactionHistory[]
+  sessions      Session[]
+  syncCheckpoints SyncCheckpoint[]
+}
 
 model WalletNonce {
-
-  id String @id @default(uuid())
-
+  id            String   @id @default(uuid())
   walletAddress String
+  nonce         String
+  expiresAt     DateTime
+  used          Boolean  @default(false)
+}
 
-  nonce String
+model Session {
+  id            String   @id @default(uuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token         String   @unique
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+  lastSeenAt    DateTime @default(now())
 
-  expiresAt DateTime
+  @@index([userId])
+  @@index([token])
+}
 
-  used Boolean @default(false)
+// ─── Stellar Assets ──────────────────────────────────────────────────────────
 
+// Represents a Stellar Classic or Soroban token asset
+model Asset {
+  id            String   @id @default(uuid())
+  code          String                        // e.g. "USDC", "XLM"
+  issuer        String?                       // null for native XLM
+  contractId    String?  @unique              // Soroban token contract address
+  decimals      Int      @default(7)
+  symbol        String                        // display ticker
+  name          String
+  logoUrl       String?
+  isNative      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  positions     Position[]
+  transactions  TransactionHistory[]
+
+  @@unique([code, issuer])
+  @@index([contractId])
+}
+
+// ─── Positions ───────────────────────────────────────────────────────────────
+
+// A user's active lending/borrowing position in the VeilLend protocol
+model Position {
+  id                   String   @id @default(uuid())
+  userId               String
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assetId              String
+  asset                Asset    @relation(fields: [assetId], references: [id])
+
+  // Raw on-chain amounts in the asset's native precision
+  depositedRaw         BigInt   @default(0)   // collateral supplied
+  borrowedRaw          BigInt   @default(0)   // outstanding debt
+  accruedInterestRaw   BigInt   @default(0)
+
+  // Derived USD values cached from last sync (7 decimal places)
+  depositedUsd         Decimal  @default(0) @db.Decimal(28, 7)
+  borrowedUsd          Decimal  @default(0) @db.Decimal(28, 7)
+
+  // Risk metrics
+  collateralFactor     Decimal  @default(0) @db.Decimal(5, 4)   // 0.0000–1.0000
+  liquidationThreshold Decimal  @default(0) @db.Decimal(5, 4)
+  healthFactor         Decimal? @db.Decimal(10, 4)              // null when no debt
+
+  // Privacy mode flag (balances hidden in UI but still tracked)
+  privacyMode          Boolean  @default(false)
+
+  // Sync metadata
+  lastSyncLedger       Int?                                      // Stellar ledger sequence
+  lastSyncAt           DateTime?
+  isStale              Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@unique([userId, assetId])
+  @@index([userId])
+  @@index([assetId])
+  @@index([lastSyncAt])
+}
+
+// ─── Transaction History ─────────────────────────────────────────────────────
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAW
+  BORROW
+  REPAY
+  LIQUIDATION
+}
+
+enum TransactionStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+}
+
+model TransactionHistory {
+  id              String            @id @default(uuid())
+  userId          String
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assetId         String
+  asset           Asset             @relation(fields: [assetId], references: [id])
+
+  type            TransactionType
+  status          TransactionStatus @default(PENDING)
+
+  amountRaw       BigInt                            // in asset native precision
+  amountUsd       Decimal           @db.Decimal(28, 7)
+
+  // Stellar identifiers
+  txHash          String?           @unique         // Stellar transaction hash
+  ledgerSequence  Int?                              // ledger it was included in
+  operationId     String?                           // Stellar operation ID
+
+  // Soroban-specific
+  contractId      String?                           // contract that emitted the event
+  sorobanEventId  String?
+
+  memo            String?
+  createdAt       DateTime          @default(now())
+  confirmedAt     DateTime?
+
+  @@index([userId, createdAt])
+  @@index([assetId])
+  @@index([txHash])
+  @@index([ledgerSequence])
+}
+
+// ─── Sync Checkpoints ────────────────────────────────────────────────────────
+
+// Tracks the last successfully processed ledger per user for incremental sync
+model SyncCheckpoint {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // The Stellar ledger sequence number we've synced up to
+  lastLedger      Int      @default(0)
+  lastLedgerAt    DateTime?
+
+  // Soroban event cursor for resumable event streaming
+  eventCursor     String?
+
+  syncStatus      String   @default("idle")  // idle | running | error
+  lastError       String?
+  updatedAt       DateTime @updatedAt
+
+  @@unique([userId])
+  @@index([userId])
 }
