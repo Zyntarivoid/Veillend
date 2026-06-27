@@ -91,7 +91,7 @@ async function loadReports(): Promise<ErrorReport[]> {
   } catch {
     _memoryCache = [];
   }
-  return _memoryCache;
+  return _memoryCache as ErrorReport[];
 }
 
 async function saveReports(reports: ErrorReport[]): Promise<void> {
