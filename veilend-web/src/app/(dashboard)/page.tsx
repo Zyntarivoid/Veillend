@@ -1,15 +1,15 @@
 'use client'
 
 import * as React from "react"
-import { 
-  Wallet, 
-  ShieldAlert, 
-  ArrowUpRight, 
-  ArrowDownLeft, 
-  Layers, 
-  Coins, 
-  Activity, 
-  RefreshCw, 
+import {
+  Wallet,
+  ShieldAlert,
+  ArrowUpRight,
+  ArrowDownLeft,
+  Layers,
+  Coins,
+  Activity,
+  RefreshCw,
   Info
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -17,8 +17,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useWallet } from "@/context/WalletContext"
+import { WalletConnect } from "@/components/WalletConnect"
+import { WalletStatus } from "@/components/WalletStatus"
 
 export default function VeilLendDashboard() {
+  const { isConnected, isAuthenticated } = useWallet();
   // Global simulation states to demonstrate acceptance criteria loading/empty loops
   const [isLoading, setIsLoading] = React.useState<boolean>(false)
   const [isEmpty, setIsEmpty] = React.useState<boolean>(false)
@@ -28,33 +32,61 @@ export default function VeilLendDashboard() {
     setTimeout(() => setIsLoading(false), 1200)
   }
 
+  // Show wallet connection prompt if not connected
+  if (!isConnected || !isAuthenticated) {
+    return (
+      <div className="p-4 sm:p-8 max-w-7xl mx-auto text-slate-100 min-h-screen flex flex-col items-center justify-center">
+        <Card className="bg-slate-950/40 border-slate-800/80 backdrop-blur-sm max-w-md w-full text-center">
+          <CardHeader>
+            <div className="mx-auto w-16 h-16 rounded-full bg-slate-900 flex items-center justify-center text-slate-600 border border-slate-800">
+              <Wallet className="h-8 w-8 text-slate-500" />
+            </div>
+            <CardTitle className="text-xl font-bold text-slate-200 mt-4">Connect Wallet</CardTitle>
+            <CardDescription className="text-slate-400">
+              Connect your Stellar wallet to access the VeilLend dashboard and manage your shielded assets.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <WalletConnect className="w-full" size="lg" />
+            <p className="text-xs text-slate-500 mt-4">
+              By connecting, you agree to the VeilLend Terms of Service.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
   return (
     <div className="p-4 sm:p-8 space-y-8 max-w-7xl mx-auto text-slate-100 min-h-screen">
-      
+
       {/* Dashboard Top Management Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-800 pb-6">
         <div>
           <h1 className="text-2xl sm:text-3xl font-black tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-200 to-slate-400">
             Privacy Vault Command
           </h1>
-          <p className="text-sm text-slate-400 mt-1">
-            Monitor shield variables, collateral ratios, and active Soroban smart credit allocations.
-          </p>
+          <div className="flex items-center gap-3 mt-1">
+            <p className="text-sm text-slate-400">
+              Monitor shield variables, collateral ratios, and active Soroban smart credit allocations.
+            </p>
+            <WalletStatus showDetails />
+          </div>
         </div>
-        
+
         {/* Interactive Simulation Controls Area */}
         <div className="flex flex-wrap items-center gap-2 bg-slate-950/60 p-1.5 border border-slate-800 rounded-xl backdrop-blur-sm">
-          <Button 
-            variant="ghost" 
-            size="sm" 
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setIsEmpty(!isEmpty)}
             className={`text-xs font-mono transition-colors ${isEmpty ? 'bg-amber-500/10 text-amber-400' : 'text-slate-400'}`}
           >
             Toggle Empty State
           </Button>
-          <Button 
-            variant="outline" 
-            size="sm" 
+          <Button
+            variant="outline"
+            size="sm"
             onClick={handleRefreshSimulation}
             disabled={isLoading}
             className="border-slate-800 bg-slate-900/40 text-xs font-mono h-8"
@@ -80,7 +112,6 @@ export default function VeilLendDashboard() {
               <CardTitle className="text-2xl font-black font-mono text-indigo-400">78.4%</CardTitle>
             </CardHeader>
             <CardContent className="pt-0">
-              {/* Uses arbitrary nested selection [&>div]: to style inner Radix progress indicators directly */}
               <Progress value={78.4} className="h-1.5 bg-slate-900 [&>div]:bg-indigo-500" />
             </CardContent>
           </Card>
@@ -90,7 +121,6 @@ export default function VeilLendDashboard() {
               <CardTitle className="text-2xl font-black font-mono text-amber-500">42.1%</CardTitle>
             </CardHeader>
             <CardContent className="pt-0">
-              {/* Uses arbitrary nested selection [&>div]: to style inner Radix progress indicators directly */}
               <Progress value={42.1} className="h-1.5 bg-slate-900 [&>div]:bg-amber-500" />
             </CardContent>
           </Card>
@@ -99,7 +129,7 @@ export default function VeilLendDashboard() {
 
       {/* --- LAYER 2: PRIMARY DATA GRIDS --- */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        
+
         {/* SECTION A: SHIELDED ASSET BALANCES */}
         <Card className="bg-slate-950/20 border-slate-800 backdrop-blur-sm">
           <CardHeader className="border-b border-slate-900 pb-4">
@@ -201,7 +231,6 @@ export default function VeilLendDashboard() {
                     <span className="font-mono font-bold text-rose-400">85.00% Max Threshold</span>
                   </div>
                   <div className="relative">
-                    {/* Employs a linear gradient across child elements using an arbitrary utility chain */}
                     <Progress value={42.1} className="h-2 bg-slate-900 [&>div]:bg-gradient-to-r [&>div]:from-emerald-500 [&>div]:to-amber-500" />
                     <div className="absolute left-[85%] top-[-4px] h-4 w-[2px] bg-rose-500/80 z-10" title="Liquidation Bar" />
                   </div>
