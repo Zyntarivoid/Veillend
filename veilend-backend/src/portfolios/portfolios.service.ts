@@ -32,14 +32,11 @@ export class PortfoliosService {
       const totalBalance = nativeBalance ? parseFloat(nativeBalance.balance) : 0;
 
       const balances = account.balances.map((b) => {
-        // Horizon SDK BalanceLine types have `any` fields; ESLint strict mode
-        // flags them even with typeof guards. We handle the any values safely.
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        const rawAsset = b.asset_type as unknown as string;
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        const rawAssetCode = b.asset_code as unknown as string | undefined;
+        // Horizon SDK has discriminated unions: BalanceLineNative has asset_type='native'
+        // and no asset_code; BalanceLineAsset has both.
+        const asset = b.asset_type === 'native' ? 'XLM' : (b as { asset_code?: string }).asset_code ?? b.asset_type ?? 'UNKNOWN';
         return {
-          asset: rawAsset === 'native' ? 'XLM' : (rawAssetCode ?? rawAsset ?? 'UNKNOWN'),
+          asset,
           balance: typeof b.balance === 'string' ? parseFloat(b.balance) : 0,
         };
       });
