@@ -14,14 +14,6 @@ try {
 
 type Nullable<T> = T | null;
 
-// Keys used for SecureStore persistence
-const PERSIST_KEYS = {
-  authToken: 'authToken',
-  address: 'address',
-  isPrivacyMode: 'isPrivacyMode',
-  secretKey: 'stellar_secret_key',
-} as const;
-
 type AuthState = {
   address: Nullable<string>;
   authToken: Nullable<string>;
@@ -31,7 +23,6 @@ type AuthState = {
   requestNonce: (walletAddress: string) => Promise<string>;
   verify: (payload: { walletAddress: string; nonce: string; signature: string }) => Promise<string>;
   authLoading: boolean;
-  sessionRestored: boolean;
 };
 
 type UiState = {
@@ -43,7 +34,6 @@ type UiState = {
   protocolStatusLoading: boolean;
   protocolStatusError: string | null;
   refreshProtocolStatus: () => Promise<void>;
-  shieldedLoading: boolean;
 };
 
 type LendingState = {
@@ -55,71 +45,68 @@ type LendingState = {
   repay: (params: { amount: string; asset: string }) => Promise<any>;
 };
 
-export const useStore = create<AuthState & UiState & LendingState>(
-  (set: (partial: Partial<AuthState & UiState & LendingState> | ((state: AuthState & UiState & LendingState) => Partial<AuthState & UiState & LendingState>)) => void, get: () => AuthState & UiState & LendingState) => ({
+type TransactionRecord = {
+  id: string;
+  type: 'deposit' | 'withdraw' | 'borrow' | 'repay' | 'transfer';
+  amount: number;
+  asset: string;
+  timestamp: string;
+  status: string;
+  txHash: string;
+};
+
+type PortfolioState = {
+  balance: number;
+  collateralValue: number;
+  borrowedValue: number;
+  availableToBorrow: number;
+  healthFactor: number;
+  portfolioLoading: boolean;
+  portfolioError: string | null;
+  transactions: TransactionRecord[];
+  transactionsLoading: boolean;
+  transactionsError: string | null;
+  fetchPortfolio: () => Promise<void>;
+  fetchTransactions: () => Promise<void>;
+};
+
+export const useStore = create<AuthState & UiState & LendingState & PortfolioState>((
+  set: (partial: Partial<AuthState & UiState & LendingState & PortfolioState> | ((state: AuthState & UiState & LendingState & PortfolioState) => Partial<AuthState & UiState & LendingState & PortfolioState>)) => void,
+  get: () => AuthState & UiState & LendingState & PortfolioState
+) => ({
   // Auth
   address: null,
   authToken: null,
   authLoading: false,
-  sessionRestored: false,
   setAddress: (address: string | null) => {
     set({ address });
     try {
-      if (address) SecureStore.setItemAsync(PERSIST_KEYS.address, address);
-      else SecureStore.deleteItemAsync(PERSIST_KEYS.address);
-    } catch (e) {
-      // ignore persistence errors
-    }
+      if (address) SecureStore.setItemAsync('address', address);
+      else SecureStore.deleteItemAsync('address');
+    } catch (e) {}
   },
   setAuthToken: (token: string | null) => {
     set({ authToken: token });
     try {
-      if (token) SecureStore.setItemAsync(PERSIST_KEYS.authToken, token);
-      else SecureStore.deleteItemAsync(PERSIST_KEYS.authToken);
+      if (token) SecureStore.setItemAsync('authToken', token);
+      else SecureStore.deleteItemAsync('authToken');
     } catch (e) {
       // ignore persistence errors
     }
   },
   logout: () => {
-    // Clear in-memory state
-    set({
-      address: null,
-      authToken: null,
-      isPrivacyMode: false,
-      sessionRestored: true,
-    });
-    // Clear ALL persisted keys to prevent stale data on next launch
-    try {
-      SecureStore.deleteItemAsync(PERSIST_KEYS.authToken);
-      SecureStore.deleteItemAsync(PERSIST_KEYS.address);
-      SecureStore.deleteItemAsync(PERSIST_KEYS.isPrivacyMode);
-      SecureStore.deleteItemAsync(PERSIST_KEYS.secretKey);
-    } catch (e) {
-      // ignore persistence errors
-    }
+    set({ address: null, authToken: null, isPrivacyMode: false });
+    try { SecureStore.deleteItemAsync('authToken'); } catch (e) {}
   },
 
   // UI
   isPrivacyMode: false,
-  togglePrivacyMode: () => {
-    const next = !get().isPrivacyMode;
-    set({ isPrivacyMode: next });
-    try {
-      if (next) {
-        SecureStore.setItemAsync(PERSIST_KEYS.isPrivacyMode, 'true');
-      } else {
-        SecureStore.deleteItemAsync(PERSIST_KEYS.isPrivacyMode);
-      }
-    } catch (e) {
-      // ignore persistence errors
-    }
-  },
+  togglePrivacyMode: () => set((state: AuthState & UiState & LendingState) => ({ isPrivacyMode: !state.isPrivacyMode })),
   expectedNetwork: 'testnet',
   currentNetwork: 'testnet',
   lastProtocolSyncAt: Date.now(),
   protocolStatusLoading: false,
   protocolStatusError: null,
-  shieldedLoading: false,
   refreshProtocolStatus: async () => {
     set({ protocolStatusLoading: true, protocolStatusError: null });
     try {
@@ -151,9 +138,7 @@ export const useStore = create<AuthState & UiState & LendingState>(
       const token = res.data?.accessToken || null;
       set({ authLoading: false });
       set({ authToken: token, address: walletAddress });
-      try {
-        if (token) SecureStore.setItemAsync(PERSIST_KEYS.authToken, token);
-      } catch (e) {}
+      try { if (token) SecureStore.setItemAsync('authToken', token); } catch (e) {}
       return token;
     } catch (err) {
       set({ authLoading: false });
@@ -214,26 +199,18 @@ export const useStore = create<AuthState & UiState & LendingState>(
   },
 }));
 
-// ──────────────────────────────────────────────
-// Session restore: hydrate Zustand from SecureStore on app launch.
-// Uses `sessionRestored` flag so the UI can show a splash until ready.
-// ──────────────────────────────────────────────
+// Initialize persisted auth token (if any)
 (async () => {
   try {
-    const [token, address, privacyMode] = await Promise.all([
-      SecureStore.getItemAsync(PERSIST_KEYS.authToken),
-      SecureStore.getItemAsync(PERSIST_KEYS.address),
-      SecureStore.getItemAsync(PERSIST_KEYS.isPrivacyMode),
-    ]);
-
-    const patch: Partial<AuthState & UiState> = { sessionRestored: true };
-    if (token) patch.authToken = token;
-    if (address) patch.address = address;
-    if (privacyMode === 'true') patch.isPrivacyMode = true;
-
-    useStore.setState(patch);
+    const token = await SecureStore.getItemAsync('authToken');
+    if (token) {
+      useStore.setState({ authToken: token });
+    }
+    const address = await SecureStore.getItemAsync('address');
+    if (address) {
+      useStore.setState({ address });
+    }
   } catch (e) {
-    // If hydration fails, still mark session as restored so the app doesn't hang
-    useStore.setState({ sessionRestored: true });
+    // ignore
   }
 })();
