@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Image, Modal, TextInput, TouchableWithoutFeedback, Keyboard, KeyboardAvoidingView, Platform, Dimensions, FlatList, ActivityIndicator } from 'react-native';
 import api from '../utils/api';
-import { useStore } from '../store/store';
+import { useStore, TransactionRecord } from '../store/store';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -15,12 +15,6 @@ const CARD_WIDTH = width - 48; // Padding 24 * 2
 
 
   
-  const CARDS = [
-    { label: 'Total Balance', value: balance.toFixed(2), icon: 'wallet-outline' },
-    { label: 'Collateral Value', value: collateralValue.toFixed(2), icon: 'shield-checkmark-outline' },
-    { label: 'Borrowed Value', value: borrowedValue.toFixed(2), icon: 'trending-down-outline' },
-  ];
-
 export default function DashboardScreen({ navigation }: any) {
   const {
     address,
@@ -50,6 +44,12 @@ export default function DashboardScreen({ navigation }: any) {
   
   // Profile Menu State
   const [profileVisible, setProfileVisible] = useState(false);
+
+  const CARDS = [
+    { label: 'Total Balance', value: balance.toFixed(2), icon: 'wallet-outline' },
+    { label: 'Collateral Value', value: collateralValue.toFixed(2), icon: 'shield-checkmark-outline' },
+    { label: 'Borrowed Value', value: borrowedValue.toFixed(2), icon: 'trending-down-outline' },
+  ];
 
   if (portfolioLoading) {
     return (
@@ -390,18 +390,22 @@ export default function DashboardScreen({ navigation }: any) {
       {/* Transactions List */}
       <Text style={styles.sectionTitle}>Transactions</Text>
       <View style={styles.transactionsList}>
-        {transactions.map((tx: { id: string; icon: string; title: string; date: string }) => (
+        {transactions.map((tx: TransactionRecord) => (
           <View key={tx.id} style={styles.txItem}>
             <View style={styles.txLeft}>
               <View style={styles.txIconBox}>
-                <Ionicons name={tx.icon as string} size={20} color="#fff" />
+                <Ionicons
+                  name={(tx.type === 'deposit' ? 'arrow-down' : tx.type === 'withdraw' ? 'arrow-up' : 'swap-horizontal') as any}
+                  size={20}
+                  color="#fff"
+                />
               </View>
               <View>
-                <Text style={styles.txTitle}>{tx.title}</Text>
-                <Text style={styles.txDate}>{tx.date}</Text>
+                <Text style={styles.txTitle}>{tx.type} — {tx.asset}</Text>
+                <Text style={styles.txDate}>{tx.timestamp}</Text>
               </View>
             </View>
-            <Text style={styles.txValue}>{tx.value}</Text>
+            <Text style={styles.txValue}>{tx.amount} {tx.asset}</Text>
           </View>
         ))}
       </View>

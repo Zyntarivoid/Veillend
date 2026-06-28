@@ -15,16 +15,6 @@ export interface PortfolioData {
   }>;
 }
 
-export interface TransactionRecord {
-  id: string;
-  type: 'deposit' | 'withdraw' | 'borrow' | 'repay' | 'transfer';
-  amount: number;
-  asset: string;
-  timestamp: string;
-  status: string;
-  txHash: string;
-}
-
 @Injectable()
 export class PortfoliosService {
   private readonly logger = new Logger(PortfoliosService.name);
@@ -41,9 +31,9 @@ export class PortfoliosService {
       );
       const totalBalance = nativeBalance ? parseFloat(nativeBalance.balance) : 0;
 
-      const balances = account.balances.map((b) => ({
-        asset: b.asset_type === 'native' ? 'XLM' : (b.asset_code || b.asset_type),
-        balance: parseFloat(b.balance),
+      const balances = account.balances.map((b: Record<string, unknown>) => ({
+        asset: b.asset_type === 'native' ? 'XLM' : String(b.asset_code ?? b.asset_type ?? 'UNKNOWN'),
+        balance: parseFloat(String(b.balance)),
       }));
 
       // For now, use balance as collateral placeholder

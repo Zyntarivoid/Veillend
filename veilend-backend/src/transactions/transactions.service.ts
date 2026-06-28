@@ -34,12 +34,16 @@ export class TransactionsService {
           const opType = op.type as string | undefined;
           if (opType === 'payment') {
             type = 'transfer';
-            amount = parseFloat(String(op.amount ?? '')) || 0;
-            asset = String(op.asset_code ?? 'XLM');
+            const rawAmount = op.amount;
+            amount = typeof rawAmount === 'string' ? parseFloat(rawAmount) : 0;
+            const rawAssetCode = op.asset_code;
+            asset = typeof rawAssetCode === 'string' ? rawAssetCode : 'XLM';
           } else if (opType === 'change_trust') {
             type = 'deposit';
-            amount = parseFloat(String(op.limit ?? '')) || 0;
-            asset = String(op.asset_code ?? 'UNKNOWN');
+            const rawLimit = op.limit;
+            amount = typeof rawLimit === 'string' ? parseFloat(rawLimit) : 0;
+            const rawAssetCode = op.asset_code;
+            asset = typeof rawAssetCode === 'string' ? rawAssetCode : 'UNKNOWN';
           }
         }
 
