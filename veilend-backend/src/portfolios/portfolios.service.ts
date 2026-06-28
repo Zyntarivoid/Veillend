@@ -32,17 +32,9 @@ export class PortfoliosService {
       const totalBalance = nativeBalance ? parseFloat(nativeBalance.balance) : 0;
 
       const balances = account.balances.map((b) => {
-        let asset = 'UNKNOWN';
-        if (b.asset_type === 'native') {
-          asset = 'XLM';
-        } else if (b.asset_code) {
-          asset = b.asset_code;
-        } else if (b.asset_type) {
-          asset = b.asset_type;
-        }
         return {
-          asset,
-          balance: parseFloat(b.balance),
+          asset: b.asset_type === 'native' ? 'XLM' : (typeof b.asset_code === 'string' ? b.asset_code : (typeof b.asset_type === 'string' ? b.asset_type : 'UNKNOWN')),
+          balance: typeof b.balance === 'string' ? parseFloat(b.balance) : 0,
         };
       });
 
