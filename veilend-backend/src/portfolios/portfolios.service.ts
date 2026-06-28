@@ -31,22 +31,13 @@ export class PortfoliosService {
       );
       const totalBalance = nativeBalance ? parseFloat(nativeBalance.balance) : 0;
 
-      const balances = account.balances.map((b: Record<string, unknown>) => {
-        const assetType = b.asset_type;
-        const assetCode = b.asset_code;
-        let asset: string;
-        if (assetType === 'native') {
-          asset = 'XLM';
-        } else if (typeof assetCode === 'string') {
-          asset = assetCode;
-        } else if (typeof assetType === 'string') {
-          asset = assetType;
-        } else {
-          asset = 'UNKNOWN';
-        }
+      const balances = account.balances.map((b) => {
+        const asset = b.asset_type === 'native'
+          ? 'XLM'
+          : (b.asset_code ?? b.asset_type ?? 'UNKNOWN');
         return {
-          asset,
-          balance: typeof b.balance === 'string' ? parseFloat(b.balance) : 0,
+          asset: String(asset),
+          balance: parseFloat(b.balance),
         };
       });
 
