@@ -55,164 +55,241 @@ type LendingState = {
   repay: (params: { amount: string; asset: string }) => Promise<any>;
 };
 
-export const useStore = create<AuthState & UiState & LendingState>(
-  (set: (partial: Partial<AuthState & UiState & LendingState> | ((state: AuthState & UiState & LendingState) => Partial<AuthState & UiState & LendingState>)) => void, get: () => AuthState & UiState & LendingState) => ({
-  // Auth
-  address: null,
-  authToken: null,
-  authLoading: false,
-  sessionRestored: false,
-  setAddress: (address: string | null) => {
-    set({ address });
-    try {
-      if (address) SecureStore.setItemAsync(PERSIST_KEYS.address, address);
-      else SecureStore.deleteItemAsync(PERSIST_KEYS.address);
-    } catch (e) {
-      // ignore persistence errors
-    }
-  },
-  setAuthToken: (token: string | null) => {
-    set({ authToken: token });
-    try {
-      if (token) SecureStore.setItemAsync(PERSIST_KEYS.authToken, token);
-      else SecureStore.deleteItemAsync(PERSIST_KEYS.authToken);
-    } catch (e) {
-      // ignore persistence errors
-    }
-  },
-  logout: () => {
-    // Clear in-memory state
-    set({
-      address: null,
-      authToken: null,
-      isPrivacyMode: false,
-      sessionRestored: true,
-    });
-    // Clear ALL persisted keys to prevent stale data on next launch
-    try {
-      SecureStore.deleteItemAsync(PERSIST_KEYS.authToken);
-      SecureStore.deleteItemAsync(PERSIST_KEYS.address);
-      SecureStore.deleteItemAsync(PERSIST_KEYS.isPrivacyMode);
-      SecureStore.deleteItemAsync(PERSIST_KEYS.secretKey);
-    } catch (e) {
-      // ignore persistence errors
-    }
-  },
+export type TransactionRecord = {
+  id: string;
+  type: 'deposit' | 'withdraw' | 'borrow' | 'repay' | 'transfer';
+  amount: number;
+  asset: string;
+  timestamp: string;
+  status: string;
+  txHash: string;
+};
 
-  // UI
-  isPrivacyMode: false,
-  togglePrivacyMode: () => {
-    const next = !get().isPrivacyMode;
-    set({ isPrivacyMode: next });
-    try {
-      if (next) {
-        SecureStore.setItemAsync(PERSIST_KEYS.isPrivacyMode, 'true');
-      } else {
-        SecureStore.deleteItemAsync(PERSIST_KEYS.isPrivacyMode);
+type PortfolioState = {
+  balance: number;
+  collateralValue: number;
+  borrowedValue: number;
+  availableToBorrow: number;
+  healthFactor: number;
+  portfolioLoading: boolean;
+  portfolioError: string | null;
+  transactions: TransactionRecord[];
+  transactionsLoading: boolean;
+  transactionsError: string | null;
+  fetchPortfolio: () => Promise<void>;
+  fetchTransactions: () => Promise<void>;
+};
+
+type StoreState = AuthState & UiState & LendingState & PortfolioState;
+
+export const useStore = create<StoreState>(
+  (set: (partial: Partial<StoreState> | ((state: StoreState) => Partial<StoreState>)) => void, get: () => StoreState) => ({
+    // Auth
+    address: null,
+    authToken: null,
+    authLoading: false,
+    sessionRestored: false,
+    setAddress: (address: string | null) => {
+      set({ address });
+      try {
+        if (address) SecureStore.setItemAsync(PERSIST_KEYS.address, address);
+        else SecureStore.deleteItemAsync(PERSIST_KEYS.address);
+      } catch (e) {
+        // ignore persistence errors
       }
-    } catch (e) {
-      // ignore persistence errors
-    }
-  },
-  expectedNetwork: 'testnet',
-  currentNetwork: 'testnet',
-  lastProtocolSyncAt: Date.now(),
-  protocolStatusLoading: false,
-  protocolStatusError: null,
-  shieldedLoading: false,
-  refreshProtocolStatus: async () => {
-    set({ protocolStatusLoading: true, protocolStatusError: null });
-    try {
-      const res = await api.get('/health');
-      const network = res.data?.network ?? get().currentNetwork ?? get().expectedNetwork;
-      set({
-        currentNetwork: network,
-        lastProtocolSyncAt: Date.now(),
-        protocolStatusLoading: false,
-      });
-    } catch (err: any) {
-      set({
-        protocolStatusError: err?.message ?? 'Unable to refresh protocol status',
-        protocolStatusLoading: false,
-      });
-      throw err;
-    }
-  },
-
-  // Async helpers (Auth)
-  requestNonce: async (walletAddress: string) => {
-    const res = await api.post('/auth/nonce', { walletAddress });
-    return res.data?.nonce;
-  },
-  verify: async ({ walletAddress, nonce, signature }: { walletAddress: string; nonce: string; signature: string }) => {
-    set({ authLoading: true });
-    try {
-      const res = await api.post('/auth/verify', { walletAddress, nonce, signature });
-      const token = res.data?.accessToken || null;
-      set({ authLoading: false });
-      set({ authToken: token, address: walletAddress });
+    },
+    setAuthToken: (token: string | null) => {
+      set({ authToken: token });
       try {
         if (token) SecureStore.setItemAsync(PERSIST_KEYS.authToken, token);
-      } catch (e) {}
-      return token;
-    } catch (err) {
-      set({ authLoading: false });
-      throw err;
-    }
-  },
+        else SecureStore.deleteItemAsync(PERSIST_KEYS.authToken);
+      } catch (e) {
+        // ignore persistence errors
+      }
+    },
+    logout: () => {
+      // Clear in-memory state
+      set({
+        address: null,
+        authToken: null,
+        isPrivacyMode: false,
+        sessionRestored: true,
+      });
+      // Clear ALL persisted keys to prevent stale data on next launch
+      try {
+        SecureStore.deleteItemAsync(PERSIST_KEYS.authToken);
+        SecureStore.deleteItemAsync(PERSIST_KEYS.address);
+        SecureStore.deleteItemAsync(PERSIST_KEYS.isPrivacyMode);
+        SecureStore.deleteItemAsync(PERSIST_KEYS.secretKey);
+      } catch (e) {
+        // ignore persistence errors
+      }
+    },
 
-  // Lending (placeholder implementations until backend is ready)
-  lastLendingTx: null,
-  lendingLoading: false,
-  deposit: async ({ amount, asset }: { amount: string; asset: string }) => {
-    set({ lendingLoading: true });
-    try {
-      // TODO: Implement deposit endpoint in backend
-      const mockTx = { txHash: `mock-deposit-${Date.now()}`, amount, asset, status: 'success' };
-      set({ lastLendingTx: mockTx, lendingLoading: false });
-      return mockTx;
-    } catch (err) {
-      set({ lendingLoading: false });
-      throw err;
-    }
-  },
-  withdraw: async ({ amount, asset }: { amount: string; asset: string }) => {
-    set({ lendingLoading: true });
-    try {
-      // TODO: Implement withdraw endpoint in backend
-      const mockTx = { txHash: `mock-withdraw-${Date.now()}`, amount, asset, status: 'success' };
-      set({ lastLendingTx: mockTx, lendingLoading: false });
-      return mockTx;
-    } catch (err) {
-      set({ lendingLoading: false });
-      throw err;
-    }
-  },
-  borrow: async ({ amount, asset }: { amount: string; asset: string }) => {
-    set({ lendingLoading: true });
-    try {
-      // TODO: Implement borrow endpoint in backend
-      const mockTx = { txHash: `mock-borrow-${Date.now()}`, amount, asset, status: 'success' };
-      set({ lastLendingTx: mockTx, lendingLoading: false });
-      return mockTx;
-    } catch (err) {
-      set({ lendingLoading: false });
-      throw err;
-    }
-  },
-  repay: async ({ amount, asset }: { amount: string; asset: string }) => {
-    set({ lendingLoading: true });
-    try {
-      // TODO: Implement repay endpoint in backend
-      const mockTx = { txHash: `mock-repay-${Date.now()}`, amount, asset, status: 'success' };
-      set({ lastLendingTx: mockTx, lendingLoading: false });
-      return mockTx;
-    } catch (err) {
-      set({ lendingLoading: false });
-      throw err;
-    }
-  },
-}));
+    // UI
+    isPrivacyMode: false,
+    togglePrivacyMode: () => {
+      const next = !get().isPrivacyMode;
+      set({ isPrivacyMode: next });
+      try {
+        if (next) {
+          SecureStore.setItemAsync(PERSIST_KEYS.isPrivacyMode, 'true');
+        } else {
+          SecureStore.deleteItemAsync(PERSIST_KEYS.isPrivacyMode);
+        }
+      } catch (e) {
+        // ignore persistence errors
+      }
+    },
+    expectedNetwork: 'testnet',
+    currentNetwork: 'testnet',
+    lastProtocolSyncAt: Date.now(),
+    protocolStatusLoading: false,
+    protocolStatusError: null,
+    shieldedLoading: false,
+    refreshProtocolStatus: async () => {
+      set({ protocolStatusLoading: true, protocolStatusError: null });
+      try {
+        const res = await api.get('/health');
+        const network = res.data?.network ?? get().currentNetwork ?? get().expectedNetwork;
+        set({
+          currentNetwork: network,
+          lastProtocolSyncAt: Date.now(),
+          protocolStatusLoading: false,
+        });
+      } catch (err: any) {
+        set({
+          protocolStatusError: err?.message ?? 'Unable to refresh protocol status',
+          protocolStatusLoading: false,
+        });
+        throw err;
+      }
+    },
+
+    // Async helpers (Auth)
+    requestNonce: async (walletAddress: string) => {
+      const res = await api.post('/auth/nonce', { walletAddress });
+      return res.data?.nonce;
+    },
+    verify: async ({ walletAddress, nonce, signature }: { walletAddress: string; nonce: string; signature: string }) => {
+      set({ authLoading: true });
+      try {
+        const res = await api.post('/auth/verify', { walletAddress, nonce, signature });
+        const token = res.data?.accessToken || null;
+        set({ authLoading: false });
+        set({ authToken: token, address: walletAddress });
+        try {
+          if (token) SecureStore.setItemAsync(PERSIST_KEYS.authToken, token);
+        } catch (e) {}
+        return token;
+      } catch (err) {
+        set({ authLoading: false });
+        throw err;
+      }
+    },
+
+    // Lending (placeholder implementations until backend is ready)
+    lastLendingTx: null,
+    lendingLoading: false,
+    deposit: async ({ amount, asset }: { amount: string; asset: string }) => {
+      set({ lendingLoading: true });
+      try {
+        const mockTx = { txHash: `mock-deposit-${Date.now()}`, amount, asset, status: 'success' };
+        set({ lastLendingTx: mockTx, lendingLoading: false });
+        return mockTx;
+      } catch (err) {
+        set({ lendingLoading: false });
+        throw err;
+      }
+    },
+    withdraw: async ({ amount, asset }: { amount: string; asset: string }) => {
+      set({ lendingLoading: true });
+      try {
+        const mockTx = { txHash: `mock-withdraw-${Date.now()}`, amount, asset, status: 'success' };
+        set({ lastLendingTx: mockTx, lendingLoading: false });
+        return mockTx;
+      } catch (err) {
+        set({ lendingLoading: false });
+        throw err;
+      }
+    },
+    borrow: async ({ amount, asset }: { amount: string; asset: string }) => {
+      set({ lendingLoading: true });
+      try {
+        const mockTx = { txHash: `mock-borrow-${Date.now()}`, amount, asset, status: 'success' };
+        set({ lastLendingTx: mockTx, lendingLoading: false });
+        return mockTx;
+      } catch (err) {
+        set({ lendingLoading: false });
+        throw err;
+      }
+    },
+    repay: async ({ amount, asset }: { amount: string; asset: string }) => {
+      set({ lendingLoading: true });
+      try {
+        const mockTx = { txHash: `mock-repay-${Date.now()}`, amount, asset, status: 'success' };
+        set({ lastLendingTx: mockTx, lendingLoading: false });
+        return mockTx;
+      } catch (err) {
+        set({ lendingLoading: false });
+        throw err;
+      }
+    },
+
+    // Portfolio state
+    balance: 0,
+    collateralValue: 0,
+    borrowedValue: 0,
+    availableToBorrow: 0,
+    healthFactor: 0,
+    portfolioLoading: false,
+    portfolioError: null,
+    transactions: [],
+    transactionsLoading: false,
+    transactionsError: null,
+    fetchPortfolio: async () => {
+      const addr = get().address;
+      if (!addr) return;
+      set({ portfolioLoading: true, portfolioError: null });
+      try {
+        const res = await api.get(`/portfolios/${addr}`);
+        const data = res.data?.data ?? res.data;
+        set({
+          balance: data?.balance ?? 0,
+          collateralValue: data?.collateralValue ?? 0,
+          borrowedValue: data?.borrowedValue ?? 0,
+          availableToBorrow: data?.availableToBorrow ?? 0,
+          healthFactor: data?.healthFactor ?? 0,
+          portfolioLoading: false,
+        });
+      } catch (err: any) {
+        set({
+          portfolioError: err?.message ?? 'Failed to load portfolio',
+          portfolioLoading: false,
+        });
+        throw err;
+      }
+    },
+    fetchTransactions: async () => {
+      const addr = get().address;
+      if (!addr) return;
+      set({ transactionsLoading: true, transactionsError: null });
+      try {
+        const res = await api.get(`/transactions/${addr}`);
+        const data = res.data?.data ?? res.data;
+        set({
+          transactions: Array.isArray(data) ? data : [],
+          transactionsLoading: false,
+        });
+      } catch (err: any) {
+        set({
+          transactionsError: err?.message ?? 'Failed to load transactions',
+          transactionsLoading: false,
+        });
+        throw err;
+      }
+    },
+  }));
 
 // ──────────────────────────────────────────────
 // Session restore: hydrate Zustand from SecureStore on app launch.
