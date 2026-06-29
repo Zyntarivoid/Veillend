@@ -3,15 +3,16 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/Card';
 import { Badge } from '@/components/Badge';
 import { fetchDashboardData } from '@/lib/api/dashboard';
 
-// Live, per-address portfolio data: render on request instead of prerendering at
-// build time (the indexer isn't reachable during the build).
 export const dynamic = 'force-dynamic';
+
+// Define the BadgeVariant type matching the Badge component
+type BadgeVariant = "default" | "primary" | "secondary" | "success" | "warning" | "error";
 
 export default async function DashboardPage() {
   const data = await fetchDashboardData();
   const { portfolio, recentActivity } = data;
 
-  const getActionBadgeColor = (action: string) => {
+  const getActionBadgeColor = (action: string): BadgeVariant => {
     switch (action) {
       case 'DEPOSIT':
         return 'success';
@@ -22,7 +23,7 @@ export default async function DashboardPage() {
       case 'WITHDRAW':
         return 'secondary';
       default:
-        return 'outline';
+        return 'default';
     }
   };
 
@@ -182,7 +183,7 @@ export default async function DashboardPage() {
                       <Flex gap="md" align="center">
                         <div>
                           <Flex align="center" gap="sm" className="mb-1">
-                            <Badge variant={getActionBadgeColor(activity.action) as "default" | "primary" | "secondary" | "success" | "warning" | "error"}>
+                            <Badge variant={getActionBadgeColor(activity.action)}>
                               {activity.action}
                             </Badge>
                             <span className="font-semibold text-text">
