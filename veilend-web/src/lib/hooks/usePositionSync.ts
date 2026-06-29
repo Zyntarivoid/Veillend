@@ -77,7 +77,7 @@ export function usePositionSync(
       if (!mounted.current) return;
       setError(err instanceof Error ? err.message : 'Failed to sync positions.');
       // Keep stale data visible if we have it; otherwise surface the error.
-      setStatus((prev) => (data ? 'stale' : 'error'));
+      setStatus(data ? 'stale' : 'error');
     } finally {
       inFlight.current = false;
     }
@@ -88,6 +88,9 @@ export function usePositionSync(
     mounted.current = true;
     if (!enabled) return;
 
+    // Intentional fetch-on-mount: load() flips status to 'loading' before the
+    // first await, which the rule flags; that initial transition is the point.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
     const id = setInterval(load, intervalMs);
     return () => {
