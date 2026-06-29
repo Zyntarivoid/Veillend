@@ -6,6 +6,22 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 // In a real app with wallet connect, this would be passed dynamically.
 const DEMO_ADDRESS = 'GCOQ4Z...'; // example stellar pubkey
 
+// Shapes returned by the indexer read endpoints.
+interface IndexerPosition {
+  assetAddress: string;
+  depositedAmount: string | number;
+  borrowedAmount: string | number;
+}
+
+interface IndexerTransaction {
+  id: string;
+  type: string;
+  amount: string | number;
+  assetAddress: string;
+  timestamp: string;
+  txHash: string;
+}
+
 export async function fetchDashboardData(address: string = DEMO_ADDRESS): Promise<DashboardData> {
   try {
     const [positionsRes, transactionsRes] = await Promise.all([
@@ -28,7 +44,7 @@ export async function fetchDashboardData(address: string = DEMO_ADDRESS): Promis
     // Map positions (assuming naive 1:1 USD pricing for demo unless oracle is integrated)
     // The backend returns IndexerPosition: { assetAddress, depositedAmount, borrowedAmount }
     if (Array.isArray(positions)) {
-      positions.forEach((pos: any) => {
+      positions.forEach((pos: IndexerPosition) => {
         const deposited = Number(pos.depositedAmount) / 1e7; // Assuming 7 decimals (Stellar standard)
         const borrowed = Number(pos.borrowedAmount) / 1e7;
         
@@ -63,7 +79,7 @@ export async function fetchDashboardData(address: string = DEMO_ADDRESS): Promis
     const totalBalanceUsd = totalDepositedUsd - totalBorrowedUsd;
 
     // Map transactions
-    const recentActivity = Array.isArray(transactions) ? transactions.map((tx: any) => {
+    const recentActivity = Array.isArray(transactions) ? transactions.map((tx: IndexerTransaction) => {
       const amount = Number(tx.amount) / 1e7;
       const price = tx.assetAddress.includes('USDC') ? 1.0 : 0.11;
       return {
@@ -76,7 +92,7 @@ export async function fetchDashboardData(address: string = DEMO_ADDRESS): Promis
         status: 'COMPLETED' as const,
         txHash: tx.txHash,
       };
-    }).sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()) : [];
+    }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()) : [];
 
     return {
       portfolio: {
