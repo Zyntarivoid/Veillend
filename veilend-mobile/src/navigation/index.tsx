@@ -2,6 +2,7 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import ConnectWalletScreen from '../screens/ConnectWalletScreen';
 import DashboardScreen from '../screens/DashboardScreen';
 import DepositScreen from '../screens/DepositScreen';
@@ -42,8 +43,31 @@ function MainTabs() {
   );
 }
 
+/** Splash shown while session is being restored from SecureStore */
+function SessionRestoreSplash() {
+  return (
+    <View style={styles.splash}>
+      <ActivityIndicator size="large" color="#09cc71" />
+    </View>
+  );
+}
+
 export default function RootNavigator() {
   const authToken = useStore((state) => state.authToken);
+  const sessionRestored = useStore((state) => state.sessionRestored);
+
+  // Wait for session hydration before deciding which screen to show.
+  // Without this, the ConnectWallet screen flashes briefly on every launch
+  // even when the user has a persisted session.
+  if (!sessionRestored) {
+    return (
+      <NavigationContainer>
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="Splash" component={SessionRestoreSplash} />
+        </Stack.Navigator>
+      </NavigationContainer>
+    );
+  }
 
   return (
     <NavigationContainer>
@@ -57,3 +81,12 @@ export default function RootNavigator() {
     </NavigationContainer>
   );
 }
+
+const styles = StyleSheet.create({
+  splash: {
+    flex: 1,
+    backgroundColor: '#0A0A0A',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+});
