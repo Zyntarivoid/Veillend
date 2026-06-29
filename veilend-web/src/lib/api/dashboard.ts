@@ -6,7 +6,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 // In a real app with wallet connect, this would be passed dynamically.
 const DEMO_ADDRESS = 'GCOQ4Z...'; // example stellar pubkey
 
-// Shapes returned by the indexer read endpoints.
+// Define types for API responses
 interface IndexerPosition {
   assetAddress: string;
   depositedAmount: string | number;
@@ -33,8 +33,8 @@ export async function fetchDashboardData(address: string = DEMO_ADDRESS): Promis
       throw new Error('Failed to fetch data from live indexer endpoints');
     }
 
-    const { positions } = await positionsRes.json();
-    const { transactions } = await transactionsRes.json();
+    const { positions } = await positionsRes.json() as { positions: IndexerPosition[] };
+    const { transactions } = await transactionsRes.json() as { transactions: IndexerTransaction[] };
 
     let totalDepositedUsd = 0;
     let totalBorrowedUsd = 0;
