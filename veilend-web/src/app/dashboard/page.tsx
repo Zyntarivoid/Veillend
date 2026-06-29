@@ -3,6 +3,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/Card';
 import { Badge } from '@/components/Badge';
 import { fetchDashboardData } from '@/lib/api/dashboard';
 
+// Live, per-address portfolio data: render on request instead of prerendering at
+// build time (the indexer isn't reachable during the build).
+export const dynamic = 'force-dynamic';
+
 export default async function DashboardPage() {
   const data = await fetchDashboardData();
   const { portfolio, recentActivity } = data;
@@ -178,7 +182,7 @@ export default async function DashboardPage() {
                       <Flex gap="md" align="center">
                         <div>
                           <Flex align="center" gap="sm" className="mb-1">
-                            <Badge variant={getActionBadgeColor(activity.action) as any}>
+                            <Badge variant={getActionBadgeColor(activity.action) as "default" | "primary" | "secondary" | "success" | "warning" | "error"}>
                               {activity.action}
                             </Badge>
                             <span className="font-semibold text-text">
