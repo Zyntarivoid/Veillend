@@ -1,9 +1,23 @@
+import type { Metadata } from 'next';
 import { Container, Flex, Grid, Section } from '@/components/Layout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/Card';
 import { Badge } from '@/components/Badge';
 import { fetchDashboardData } from '@/lib/api/dashboard';
 
 export const dynamic = 'force-dynamic';
+
+export const metadata: Metadata = {
+  title: 'Dashboard',
+  description: 'Monitor your VeilLend portfolio, shielded assets, collateral ratios, and Soroban smart credit allocations on Stellar.',
+  openGraph: {
+    title: 'Dashboard | VeilLend',
+    description: 'Monitor your VeilLend portfolio, shielded assets, and collateral ratios on Stellar.',
+  },
+  twitter: {
+    title: 'Dashboard | VeilLend',
+    description: 'Monitor your VeilLend portfolio, shielded assets, and collateral ratios on Stellar.',
+  },
+};
 
 // Define the BadgeVariant type matching the Badge component
 type BadgeVariant = "default" | "primary" | "secondary" | "success" | "warning" | "error";

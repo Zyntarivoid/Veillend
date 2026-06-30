@@ -29,19 +29,42 @@ export default function VeilLendLandingPage() {
     return () => clearInterval(interval)
   }, [])
 
+  const jsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'WebApplication',
+    name: 'VeilLend',
+    applicationCategory: 'FinanceApplication',
+    description: 'Privacy-first contributor campaign for building VeilLend on Stellar with anonymous first-party analytics.',
+    url: 'https://veillend.org',
+    provider: {
+      '@type': 'Organization',
+      name: 'VeilLend Protocol Ecosystem',
+      url: 'https://veillend.org',
+    },
+    offers: {
+      '@type': 'Offer',
+      price: '0',
+      priceCurrency: 'USD',
+    },
+  };
+
   return (
     <div className="min-h-screen bg-[#030712] text-slate-100 overflow-x-hidden selection:bg-emerald-500/30 selection:text-emerald-300">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
 
       {/* Decorative Cyber Grid Background & Radial Ambient Glows */}
-      <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f293710_1px,transparent_1px),linear-gradient(to_bottom,#1f293710_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)] pointer-events-none" />
-      <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-indigo-500/10 rounded-full blur-[120px] pointer-events-none animate-pulse duration-[8s]" />
-      <div className="absolute top-1/3 right-1/4 w-[600px] h-[600px] bg-emerald-500/5 rounded-full blur-[160px] pointer-events-none animate-pulse duration-[12s]" />
+      <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f293710_1px,transparent_1px),linear-gradient(to_bottom,#1f293710_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)] pointer-events-none" aria-hidden="true" />
+      <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-indigo-500/10 rounded-full blur-[120px] pointer-events-none animate-pulse duration-[8s]" aria-hidden="true" />
+      <div className="absolute top-1/3 right-1/4 w-[600px] h-[600px] bg-emerald-500/5 rounded-full blur-[160px] pointer-events-none animate-pulse duration-[12s]" aria-hidden="true" />
 
       {/* HERO SECTION */}
       <header className="relative max-w-7xl mx-auto px-6 pt-24 pb-20 sm:pt-32 sm:pb-28 text-center space-y-8">
         <div className="flex justify-center">
           <Badge variant="outline" className="bg-slate-900/80 border-slate-800 text-slate-300 px-3 py-1 flex items-center gap-2 backdrop-blur-sm shadow-sm">
-            <span className="flex h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
+            <span className="flex h-2 w-2 rounded-full bg-emerald-500 animate-ping" aria-label="Live indicator" />
             <span className="font-semibold font-mono text-xs text-emerald-400">VeilLend Contributor Campaign Is Live</span>
           </Badge>
         </div>
@@ -54,14 +77,14 @@ export default function VeilLendLandingPage() {
           VeilLend bridges standard Soroban smart contracts with advanced zero-knowledge primitives. Borrow, lend, and deploy capital seamlessly with absolute balance protection and uncompromised regulatory readiness.
         </p>
 
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4" role="group" aria-label="Call to action">
           {isConnected && isAuthenticated ? (
             <Button asChild size="lg" className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-8 shadow-lg shadow-emerald-600/20 w-full sm:w-auto transition-all duration-200 hover:scale-[1.02]">
-              <Link href="/dashboard">Go to Dashboard <ArrowRight className="ml-2 h-5 w-5" /></Link>
+              <Link href="/dashboard">Go to Dashboard <ArrowRight className="ml-2 h-5 w-5" aria-hidden="true" /></Link>
             </Button>
           ) : (
             <Button asChild size="lg" className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-8 shadow-lg shadow-emerald-600/20 w-full sm:w-auto transition-all duration-200 hover:scale-[1.02]">
-              <Link href="#connect-wallet">Connect Wallet to Start <ArrowRight className="ml-2 h-5 w-5" /></Link>
+              <Link href="#connect-wallet">Connect Wallet to Start <ArrowRight className="ml-2 h-5 w-5" aria-hidden="true" /></Link>
             </Button>
           )}
           <Button asChild size="lg" variant="outline" className="border-slate-800 bg-slate-900/40 hover:bg-slate-900 text-slate-200 hover:text-white px-8 backdrop-blur-sm w-full sm:w-auto">
@@ -94,18 +117,18 @@ export default function VeilLendLandingPage() {
       </header>
 
       {/* LIVE CAMPAIGN METRICS PANEL */}
-      <section className="max-w-7xl mx-auto px-6 py-8 relative">
+      <section aria-labelledby="metrics-heading" className="max-w-7xl mx-auto px-6 py-8 relative">
         <div className="bg-gradient-to-r from-slate-950 via-[#0b1329] to-slate-950 border border-slate-800/80 rounded-2xl p-8 shadow-xl grid grid-cols-1 md:grid-cols-3 gap-8 items-center text-center md:text-left">
           <div className="space-y-2">
             <div className="flex items-center justify-center md:justify-start gap-2 text-emerald-400 font-mono text-sm font-bold uppercase tracking-wider">
-              <TrendingUp className="h-4 w-4" /> Live Statistics
+              <TrendingUp className="h-4 w-4" aria-hidden="true" /> Live Statistics
             </div>
-            <h3 className="text-xl font-bold text-slate-200">Contributor Campaign Pool</h3>
+            <h2 id="metrics-heading" className="text-xl font-bold text-slate-200">Contributor Campaign Pool</h2>
             <p className="text-sm text-slate-400">Early participants anchor the root liquidity metrics for matching asset pools.</p>
           </div>
           <div className="space-y-1 md:border-l md:border-slate-800 md:pl-8">
             <span className="text-xs font-semibold text-slate-500 uppercase tracking-widest">Total Seeded Assets</span>
-            <div className="text-3xl font-black text-slate-100 font-mono">${totalContributed.toLocaleString()} <span className="text-sm font-normal text-slate-400">USDC</span></div>
+            <div className="text-3xl font-black text-slate-100 font-mono" aria-live="polite" aria-label={`${totalContributed.toLocaleString()} USDC total contributed`}>${totalContributed.toLocaleString()} <span className="text-sm font-normal text-slate-400">USDC</span></div>
           </div>
           <div className="space-y-1 md:border-l md:border-slate-800 md:pl-8">
             <span className="text-xs font-semibold text-slate-500 uppercase tracking-widest">Active Guard Handshakes</span>
@@ -220,21 +243,21 @@ export default function VeilLendLandingPage() {
       </section>
 
       {/* CTA CLOSING SUMMARY */}
-      <section className="max-w-6xl mx-auto px-6 py-20 text-center relative">
-        <div className="absolute inset-0 bg-gradient-to-t from-emerald-500/5 via-transparent to-transparent rounded-3xl pointer-events-none" />
+      <section aria-labelledby="cta-heading" className="max-w-6xl mx-auto px-6 py-20 text-center relative">
+        <div className="absolute inset-0 bg-gradient-to-t from-emerald-500/5 via-transparent to-transparent rounded-3xl pointer-events-none" aria-hidden="true" />
         <div className="border border-slate-800/80 bg-slate-950/20 backdrop-blur-md rounded-3xl p-12 space-y-6 max-w-4xl mx-auto shadow-xl">
-          <h2 className="text-3xl sm:text-4xl font-black tracking-tight">Ready to Secure Your Yield Pipeline?</h2>
+          <h2 id="cta-heading" className="text-3xl sm:text-4xl font-black tracking-tight">Ready to Secure Your Yield Pipeline?</h2>
           <p className="text-slate-400 max-w-xl mx-auto text-sm sm:text-base">
             Secure early platform allocation status metrics, qualify for priority liquidity distribution brackets, and support privacy-first decentralization.
           </p>
-          <div className="pt-4">
+          <div className="pt-4" role="group" aria-label="Call to action">
             {isConnected && isAuthenticated ? (
               <Button asChild size="lg" className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-8 shadow-lg shadow-emerald-600/20">
-                <Link href="/dashboard">Go to Dashboard <ChevronRight className="ml-1 h-4 w-4" /></Link>
+                <Link href="/dashboard">Go to Dashboard <ChevronRight className="ml-1 h-4 w-4" aria-hidden="true" /></Link>
               </Button>
             ) : (
               <Button asChild size="lg" className="bg-slate-100 hover:bg-white text-slate-950 font-bold px-8 shadow-md">
-                <Link href="#connect-wallet">Connect Wallet to Start <ChevronRight className="ml-1 h-4 w-4" /></Link>
+                <Link href="#connect-wallet">Connect Wallet to Start <ChevronRight className="ml-1 h-4 w-4" aria-hidden="true" /></Link>
               </Button>
             )}
           </div>
@@ -244,11 +267,11 @@ export default function VeilLendLandingPage() {
       {/* VISUAL FOOTER */}
       <footer className="max-w-7xl mx-auto px-6 py-12 border-t border-slate-900 text-center sm:text-left flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 text-xs font-mono text-slate-500">
         <div>&copy; 2026 VeilLend Protocol Ecosystem. All rights reserved.</div>
-        <div className="flex justify-center gap-6">
+        <nav aria-label="Footer navigation" className="flex justify-center gap-6">
           <Link href="#features" className="hover:text-slate-300 transition-colors">Architecture</Link>
           <a href="https://stellar.org" target="_blank" rel="noreferrer" className="hover:text-slate-300 transition-colors">Stellar Foundation</a>
           <Link href="/terms" className="hover:text-slate-300 transition-colors">Security Disclosures</Link>
-        </div>
+        </nav>
       </footer>
     </div>
   )
