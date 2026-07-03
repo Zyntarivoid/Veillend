@@ -11,12 +11,16 @@ import { AssetsModule } from './assets/assets.module';
 import { TransactionsModule } from './transactions/transactions.module';
 import { AdminModule } from './admin/admin.module';
 import { AuthModule } from './auth/auth.module';
+import { validateEnvironment } from './config/env.validation';
+import { RuntimeConfigModule } from './config/runtime-config.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      validate: validateEnvironment,
     }),
+    RuntimeConfigModule,
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
