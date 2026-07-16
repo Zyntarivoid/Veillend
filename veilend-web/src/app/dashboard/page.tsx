@@ -1,29 +1,26 @@
 import { Container, Flex, Grid, Section } from '@/components/Layout';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/Card';
-import { Badge } from '@/components/Badge';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { fetchDashboardData } from '@/lib/api/dashboard';
 
 export const dynamic = 'force-dynamic';
-
-// Define the BadgeVariant type matching the Badge component
-type BadgeVariant = "default" | "primary" | "secondary" | "success" | "warning" | "error";
 
 export default async function DashboardPage() {
   const data = await fetchDashboardData();
   const { portfolio, recentActivity } = data;
 
-  const getActionBadgeColor = (action: string): BadgeVariant => {
+  const getActionBadgeClassName = (action: string) => {
     switch (action) {
       case 'DEPOSIT':
-        return 'success';
+        return 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400';
       case 'BORROW':
-        return 'warning';
+        return 'border-amber-500/20 bg-amber-500/10 text-amber-400';
       case 'REPAY':
-        return 'primary';
+        return 'border-purple-500/20 bg-purple-500/10 text-purple-400';
       case 'WITHDRAW':
-        return 'secondary';
+        return 'border-cyan-500/20 bg-cyan-500/10 text-cyan-400';
       default:
-        return 'default';
+        return undefined;
     }
   };
 
@@ -73,7 +70,10 @@ export default async function DashboardPage() {
               <CardHeader>
                 <Flex justify="between" align="center">
                   <CardTitle>Total Borrowed</CardTitle>
-                  <Badge variant={portfolio.healthFactor < 1.1 ? 'error' : 'success'}>
+                  <Badge
+                    variant={portfolio.healthFactor < 1.1 ? 'destructive' : 'secondary'}
+                    className={portfolio.healthFactor < 1.1 ? undefined : 'bg-emerald-500/10 text-emerald-400'}
+                  >
                     Health: {portfolio.healthFactor.toFixed(2)}
                   </Badge>
                 </Flex>
@@ -183,7 +183,7 @@ export default async function DashboardPage() {
                       <Flex gap="md" align="center">
                         <div>
                           <Flex align="center" gap="sm" className="mb-1">
-                            <Badge variant={getActionBadgeColor(activity.action)}>
+                            <Badge variant="outline" className={getActionBadgeClassName(activity.action)}>
                               {activity.action}
                             </Badge>
                             <span className="font-semibold text-text">

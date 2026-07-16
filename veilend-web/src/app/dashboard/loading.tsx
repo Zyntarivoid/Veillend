@@ -1,7 +1,7 @@
 import { Container, Flex, Grid, Section } from '@/components/Layout';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/Card';
-import { Skeleton } from '@/components/Skeleton';
-import { Spinner } from '@/components/Spinner';
+import { LoaderCircle } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 
 export default function DashboardLoading() {
   return (
@@ -11,7 +11,7 @@ export default function DashboardLoading() {
           <Flex direction="col" gap="lg">
             <Flex align="center" gap="md">
               <h1 className="text-4xl font-bold text-text">Dashboard</h1>
-              <Spinner size="md" />
+              <LoaderCircle className="size-6 animate-spin text-primary" aria-label="Loading dashboard" />
             </Flex>
             <p className="text-lg text-text-secondary">Fetching live portfolio data...</p>
           </Flex>
