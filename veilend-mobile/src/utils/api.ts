@@ -1,11 +1,9 @@
 import axios from 'axios';
 import { useStore } from '../store/store';
-import { Platform } from 'react-native';
 import { reportError } from './errorReporting';
+import { getApiBaseUrl } from './config';
 
-const API_URL = Platform.OS === 'web' 
-  ? 'http://localhost:3000' 
-  : 'http://10.0.2.2:3000';
+const API_URL = getApiBaseUrl();
 
 const api = axios.create({
   baseURL: API_URL,
