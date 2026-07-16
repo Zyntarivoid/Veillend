@@ -2,9 +2,32 @@
 
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error, Address,
-    Env,
+    symbol_short, Env, Symbol,
 };
 
+/// Increment this only when a contract interface change requires consumers to adapt.
+pub const CONTRACT_VERSION: u32 = 1;
+
+/// Increment this only when the serialized `DataKey` or stored value layout changes.
+pub const STORAGE_SCHEMA_VERSION: u32 = 1;
+
+/// A compact, stable identifier for the current `DataKey` storage layout.
+const STORAGE_SCHEMA_ID: Symbol = symbol_short!("VLENDV1");
+
+/// Queryable metadata describing the contract interface and its storage layout.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct ContractMetadata {
+    pub contract_version: u32,
+    pub storage_schema_version: u32,
+    pub storage_schema_id: Symbol,
+}
+
+/// Keys and value shapes that make up storage schema `VLENDV1`.
+///
+/// Instance storage: `Admin: Address`, `MinCollateralRatioBps: u32`.
+/// Persistent storage: `SupportedAsset(Address): bool`,
+/// `Position(Address, Address): Position`, and `OraclePrice(Address): i128`.
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
@@ -107,6 +130,17 @@ pub struct VeilLendContract;
 
 #[contractimpl]
 impl VeilLendContract {
+    /// Returns the interface and storage metadata for this deployed contract shape.
+    ///
+    /// Clients should read this before assuming a storage layout during migrations.
+    pub fn contract_metadata(_env: Env) -> ContractMetadata {
+        ContractMetadata {
+            contract_version: CONTRACT_VERSION,
+            storage_schema_version: STORAGE_SCHEMA_VERSION,
+            storage_schema_id: STORAGE_SCHEMA_ID,
+        }
+    }
+
     pub fn __constructor(env: Env, admin: Address, min_collateral_ratio_bps: u32) {
         if env.storage().instance().has(&DataKey::Admin) {
             panic_with_error!(&env, VeilLendError::AlreadyInitialized);
@@ -374,6 +408,15 @@ mod tests {
         assert_eq!(VeilLendError::ZeroAmount as u32, 10);
         assert_eq!(VeilLendError::OraclePriceMissing as u32, 11);
         assert_eq!(VeilLendError::ContractPaused as u32, 12);
+    }
+
+    #[test]
+    fn test_contract_metadata_identifies_current_storage_shape() {
+        let metadata = VeilLendContract::contract_metadata(Env::default());
+
+        assert_eq!(metadata.contract_version, 1);
+        assert_eq!(metadata.storage_schema_version, 1);
+        assert_eq!(metadata.storage_schema_id, symbol_short!("VLENDV1"));
     }
 
     #[test]
