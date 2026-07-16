@@ -1,6 +1,7 @@
 import { DashboardData, ActivityActionType, AssetBalance } from '../types/dashboard';
+import { publicEnv } from '../env';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const API_BASE_URL = publicEnv.NEXT_PUBLIC_API_URL;
 
 // For the demo/campaign, we can use a hardcoded or random dummy address if none is provided.
 // In a real app with wallet connect, this would be passed dynamically.

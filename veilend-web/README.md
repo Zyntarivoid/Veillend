@@ -15,7 +15,32 @@ The VeilLend web application — a privacy-first decentralized lending interface
 npm install
 ```
 
-### 2. Start the Development Server
+### 2. Configure Environment Variables
+
+Copy the example file and adjust values for your local setup:
+
+```bash
+cp .env.example .env.local
+```
+
+On Windows PowerShell, you can use:
+
+```powershell
+Copy-Item .env.example .env.local
+```
+
+Required variables:
+
+| Variable | Description | Example |
+| :------- | :---------- | :------ |
+| `NEXT_PUBLIC_API_URL` | Base URL for the VeilLend backend API used by the dashboard. | `http://localhost:3000` |
+| `NEXT_PUBLIC_STELLAR_NETWORK` | Stellar network for wallet and protocol interactions. Allowed values: `testnet`, `mainnet`. | `testnet` |
+| `NEXT_PUBLIC_HORIZON_URL` | Horizon endpoint that matches the selected Stellar network. | `https://horizon-testnet.stellar.org` |
+| `NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE` | Network passphrase for the selected Stellar network. | `Test SDF Network ; September 2015` |
+
+The app validates these values during startup. If any value is missing or invalid, `npm run dev` and `npm run build` will fail early with a clear error message.
+
+### 3. Start the Development Server
 
 ```bash
 npm run dev
@@ -131,6 +156,10 @@ Here are common issues and their solutions:
 
 **Solutions**:
 
+- Ensure `.env.local` exists and includes all required `NEXT_PUBLIC_*` values
+- Copy `.env.example` to `.env.local` if you have not created one yet
+- Check that `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_HORIZON_URL` are valid URLs
+- Check that the network passphrase matches the selected Stellar network
 - Check if port 3000 is already in use (use `netstat -ano | findstr :3000` on Windows)
 - Try a different port: `npm run dev -- -p 3001`
 - Ensure dependencies are installed correctly
