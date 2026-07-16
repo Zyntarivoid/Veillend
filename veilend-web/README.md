@@ -17,28 +17,15 @@ npm install
 
 ### 2. Configure Environment Variables
 
-Copy the example file and adjust values for your local setup:
+Copy `.env.example` to `.env.local` and adjust any values you need:
 
 ```bash
 cp .env.example .env.local
 ```
 
-On Windows PowerShell, you can use:
+The app ships with **safe testnet defaults** for every variable, so this step is optional for local development — you can skip it and the app will connect to Stellar testnet automatically.
 
-```powershell
-Copy-Item .env.example .env.local
-```
-
-Required variables:
-
-| Variable | Description | Example |
-| :------- | :---------- | :------ |
-| `NEXT_PUBLIC_API_URL` | Base URL for the VeilLend backend API used by the dashboard. | `http://localhost:3000` |
-| `NEXT_PUBLIC_STELLAR_NETWORK` | Stellar network for wallet and protocol interactions. Allowed values: `testnet`, `mainnet`. | `testnet` |
-| `NEXT_PUBLIC_HORIZON_URL` | Horizon endpoint that matches the selected Stellar network. | `https://horizon-testnet.stellar.org` |
-| `NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE` | Network passphrase for the selected Stellar network. | `Test SDF Network ; September 2015` |
-
-The app validates these values during startup. If any value is missing or invalid, `npm run dev` and `npm run build` will fail early with a clear error message.
+See [Environment Variables](#environment-variables) below for the full reference.
 
 ### 3. Start the Development Server
 
@@ -100,6 +87,101 @@ veilend-web/
 - **src/components/**: Reusable UI primitives (Button, Card, Input, etc.).
 - **package.json**: Lists dependencies, scripts, and project metadata.
 
+## Environment Variables
+
+All configuration is driven by environment variables.  Copy `.env.example` to
+`.env.local` to get started — every variable has a safe testnet default so the
+app works without any extra setup in local development.
+
+```bash
+cp .env.example .env.local
+```
+
+### Variable Reference
+
+| Variable | Required | Default | Description |
+| :--- | :---: | :--- | :--- |
+| `NEXT_PUBLIC_STELLAR_NETWORK` | No | `testnet` | Stellar network to connect to. Accepted values: `testnet`, `mainnet`, `futurenet`. |
+| `NEXT_PUBLIC_HORIZON_URL` | No | `https://horizon-testnet.stellar.org` | Horizon REST API base URL for the chosen network. |
+| `NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE` | No | `Test SDF Network ; September 2015` | Stellar network passphrase — must match the network exactly. |
+| `NEXT_PUBLIC_API_URL` | No | `http://localhost:3001` | Base URL for the VeilLend indexer / backend API. |
+
+### Environment Presets
+
+**Testnet (default — no `.env.local` needed)**
+
+```env
+NEXT_PUBLIC_STELLAR_NETWORK=testnet
+NEXT_PUBLIC_HORIZON_URL=https://horizon-testnet.stellar.org
+NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE=Test SDF Network ; September 2015
+NEXT_PUBLIC_API_URL=http://localhost:3001
+```
+
+**Mainnet**
+
+```env
+NEXT_PUBLIC_STELLAR_NETWORK=mainnet
+NEXT_PUBLIC_HORIZON_URL=https://horizon.stellar.org
+NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE=Public Global Stellar Network ; September 2015
+NEXT_PUBLIC_API_URL=https://api.yourdomain.com
+```
+
+> **Important:** `NEXT_PUBLIC_` variables are inlined into the browser bundle at build time.
+> Never put secrets, private keys, or tokens in these variables.
+
+---
+
+## Startup Config Validation
+
+`src/lib/config-validation.ts` runs **automatically at `next dev` and `next build`** (wired in `next.config.ts`).
+
+It checks all four environment variables and throws a single, formatted error listing every problem found — so you can fix everything in one go instead of discovering issues one at a time at runtime.
+
+### Example output when misconfigured
+
+```
+╔══════════════════════════════════════════════════════════╗
+║   VeilLend — invalid or missing environment variables    ║
+╚══════════════════════════════════════════════════════════╝
+
+The following configuration problems were detected:
+
+  1. NEXT_PUBLIC_STELLAR_NETWORK
+     → Must be one of: testnet, mainnet, futurenet. Got: "prodnet"
+
+  2. NEXT_PUBLIC_HORIZON_URL
+     → Must be a valid http/https URL. Got: "horizon.stellar.org"
+
+Fix these values in .env.local (copy .env.example to get started):
+
+  cp .env.example .env.local
+
+See veilend-web/README.md § Environment Variables for full documentation.
+```
+
+### Using `getConfig()` in application code
+
+Import the typed `AppConfig` anywhere you need config values — validation is guaranteed to have already run at startup:
+
+```typescript
+import { getConfig } from "@/lib/config-validation";
+
+const { horizonUrl, networkPassphrase } = getConfig();
+```
+
+The `AppConfig` type is:
+
+```typescript
+interface AppConfig {
+  stellarNetwork: "testnet" | "mainnet" | "futurenet";
+  horizonUrl: string;
+  networkPassphrase: string;
+  apiUrl: string;
+}
+```
+
+---
+
 ## Campaign Analytics
 
 The GrantFox OSS campaign landing page uses a lightweight first-party analytics flow to measure campaign effectiveness without introducing third-party tracking scripts.
@@ -140,7 +222,19 @@ For more context, see the [root README](../README.md) and the broader VeilLend a
 
 Here are common issues and their solutions:
 
-### 1. Dependency Installation Issues
+### 1. Missing or Invalid Environment Variables
+
+**Problem**: `next dev` or `next build` fails with a VeilLend config error block.
+
+**Solutions**:
+
+- Copy the example file and edit it: `cp .env.example .env.local`
+- Make sure `NEXT_PUBLIC_STELLAR_NETWORK` is one of: `testnet`, `mainnet`, `futurenet`
+- Make sure `NEXT_PUBLIC_HORIZON_URL` and `NEXT_PUBLIC_API_URL` are full `http://` or `https://` URLs
+- Make sure `NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE` is not empty
+- The error output lists every problem at once — fix them all, then restart the server
+
+### 2. Dependency Installation Issues
 
 **Problem**: `npm install` fails with errors.
 
@@ -150,7 +244,7 @@ Here are common issues and their solutions:
 - Delete `node_modules` and `package-lock.json`, then re-run `npm install`
 - Ensure you're using the correct Node.js version (22+)
 
-### 2. Development Server Won't Start
+### 3. Development Server Won't Start
 
 **Problem**: `npm run dev` fails or the server doesn't load.
 
@@ -164,7 +258,7 @@ Here are common issues and their solutions:
 - Try a different port: `npm run dev -- -p 3001`
 - Ensure dependencies are installed correctly
 
-### 3. TypeScript Errors
+### 4. TypeScript Errors
 
 **Problem**: TypeScript type checks fail.
 
@@ -174,7 +268,7 @@ Here are common issues and their solutions:
 - Ensure all type definitions are correctly imported
 - Check for outdated dependencies
 
-### 4. ESLint Errors
+### 5. ESLint Errors
 
 **Problem**: ESLint reports linting issues.
 
@@ -184,7 +278,7 @@ Here are common issues and their solutions:
 - Run `npm run format` to auto-fix formatting issues
 - Check `.eslintrc` (or `eslint.config.mjs`) for linting rules
 
-### 5. Tailwind CSS Styles Not Applying
+### 6. Tailwind CSS Styles Not Applying
 
 **Problem**: Tailwind styles aren't showing up.
 
