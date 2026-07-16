@@ -13,6 +13,21 @@ model User {
   id            String    @id @default(uuid())
   walletAddress String    @unique
   createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // ─── Profile Fields ──────────────────────────────────────────────────────
+  displayName   String?   // Public display name
+  bio           String?   // Short bio (max 500 chars)
+  avatarUrl     String?   // Avatar image URL
+  email         String?   // Contact email (optional)
+  location      String?   // User location (optional)
+  website       String?   // Personal website URL
+
+  // ─── Privacy Preferences ─────────────────────────────────────────────────
+  showPositions     Boolean @default(true)   // Show positions publicly
+  showTransactions  Boolean @default(true)   // Show transaction history
+  showPortfolio     Boolean @default(true)   // Show portfolio value
+  profileVisibility String  @default("public") // public | private | followers
 
   positions     Position[]
   transactions  TransactionHistory[]

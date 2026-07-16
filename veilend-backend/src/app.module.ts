@@ -11,6 +11,8 @@ import { AssetsModule } from './assets/assets.module';
 import { TransactionsModule } from './transactions/transactions.module';
 import { AdminModule } from './admin/admin.module';
 import { AuthModule } from './auth/auth.module';
+import { PrismaModule } from './prisma/prisma.module';
+import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
@@ -34,6 +36,8 @@ import { AuthModule } from './auth/auth.module';
     TransactionsModule,
     AdminModule,
     AuthModule,
+    PrismaModule,
+    UsersModule,
   ],
   controllers: [AppController],
   providers: [
