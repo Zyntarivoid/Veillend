@@ -1,4 +1,0 @@
-# Intentionally left without a default build target.
-# Use explicit `--target wasm32-unknown-unknown` for contract builds so
-# host-target commands like `cargo test` and `cargo clippy --all-targets`
-# continue to work normally.

@@ -1,32 +1,38 @@
+import { HttpStatus, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
-import { ValidationPipe } from '@nestjs/common';
+import { ResponseEnvelopeInterceptor } from './common/response-envelope.interceptor';
+import { ValidationExceptionFilter } from './common/validation-exception.filter';
+import { buildValidationErrorResponse } from './common/validation.util';
+import { BadRequestException, ValidationError } from '@nestjs/common';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  
-  // Enable CORS
+
   app.enableCors();
 
-  // Global validation
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+      errorHttpStatusCode: HttpStatus.BAD_REQUEST,
+      exceptionFactory: (errors: ValidationError[]) =>
+        new BadRequestException({
+          success: false,
+          error: {
+            code: 'VALIDATION_FAILED',
+            message: 'Validation failed',
+            details: buildValidationErrorResponse(errors),
+          },
+        }),
+    }),
+  );
 
-  // Swagger Configuration
-  const config = new DocumentBuilder()
-    .setTitle('VeilLend API')
-    .setDescription('The VeilLend Backend API description')
-    .setVersion('1.0')
-    .addTag('auth')
-    .addTag('users')
-    .addTag('transactions')
-    .addTag('assets')
-    .addTag('positions')
-    .addBearerAuth()
-    .build();
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api', app, document);
+  app.useGlobalInterceptors(new ResponseEnvelopeInterceptor());
+  app.useGlobalFilters(new ValidationExceptionFilter());
 
   await app.listen(process.env.PORT ?? 3000);
 }
+
 bootstrap();
