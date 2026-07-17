@@ -1,11 +1,4 @@
-import {
-  Controller,
-  Get,
-  Param,
-  Query,
-  Req,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Param, Query, Req, UseGuards } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -16,7 +9,11 @@ import {
 import { TransactionsService, TransactionRecord } from './transactions.service';
 import { ServiceResponse } from '../stellar/types';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { TransactionHistoryQueryDto, NormalizedEventType } from './dto/transaction-history-query.dto';
+import { AuthenticatedRequest } from '../auth/authenticated-request';
+import {
+  TransactionHistoryQueryDto,
+  NormalizedEventType,
+} from './dto/transaction-history-query.dto';
 import { TransactionHistoryPageDto } from './dto/transaction-history-response.dto';
 
 /**
@@ -97,7 +94,7 @@ export class TransactionsController {
   @ApiResponse({ status: 400, description: 'Invalid query parameters' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getTransactionHistory(
-    @Req() req: any,
+    @Req() req: AuthenticatedRequest,
     @Query() query: TransactionHistoryQueryDto,
   ): Promise<TransactionHistoryPageDto> {
     return this.transactionsService.getTransactionHistory(
@@ -113,7 +110,8 @@ export class TransactionsController {
   @Get(':walletAddress')
   @ApiOperation({
     summary: 'Get recent transactions (Horizon)',
-    description: 'Legacy endpoint that fetches the 20 most recent Stellar transactions for a wallet address from the Horizon API.',
+    description:
+      'Legacy endpoint that fetches the 20 most recent Stellar transactions for a wallet address from the Horizon API.',
   })
   @ApiResponse({
     status: 200,

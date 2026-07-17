@@ -1,11 +1,4 @@
-import {
-  Controller,
-  Get,
-  Put,
-  Body,
-  UseGuards,
-  Req,
-} from '@nestjs/common';
+import { Controller, Get, Put, Body, UseGuards, Req } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -13,6 +6,7 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AuthenticatedRequest } from '../auth/authenticated-request';
 import { UsersService } from './users.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UpdatePrivacyDto } from './dto/update-privacy.dto';
@@ -37,7 +31,8 @@ export class UsersController {
   @Get('profile')
   @ApiOperation({
     summary: 'Get user profile',
-    description: 'Retrieve the authenticated user\'s profile information including privacy preferences.',
+    description:
+      "Retrieve the authenticated user's profile information including privacy preferences.",
   })
   @ApiResponse({
     status: 200,
@@ -46,7 +41,9 @@ export class UsersController {
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'User not found' })
-  async getProfile(@Req() req: any): Promise<ApiResponseDto<ProfileResponseDto>> {
+  async getProfile(
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ApiResponseDto<ProfileResponseDto>> {
     const profile = await this.usersService.getProfile(req.user.walletAddress);
     return ApiResponseDto.success(profile);
   }
@@ -58,7 +55,8 @@ export class UsersController {
   @Put('profile')
   @ApiOperation({
     summary: 'Update user profile',
-    description: 'Update profile fields (displayName, bio, avatarUrl, email, location, website). Only provided fields are updated.',
+    description:
+      'Update profile fields (displayName, bio, avatarUrl, email, location, website). Only provided fields are updated.',
   })
   @ApiResponse({
     status: 200,
@@ -69,7 +67,7 @@ export class UsersController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'User not found' })
   async updateProfile(
-    @Req() req: any,
+    @Req() req: AuthenticatedRequest,
     @Body() dto: UpdateProfileDto,
   ): Promise<ApiResponseDto<ProfileResponseDto>> {
     const profile = await this.usersService.updateProfile(
@@ -86,7 +84,8 @@ export class UsersController {
   @Put('privacy')
   @ApiOperation({
     summary: 'Update privacy preferences',
-    description: 'Update privacy settings (showPositions, showTransactions, showPortfolio, profileVisibility). Only provided fields are updated.',
+    description:
+      'Update privacy settings (showPositions, showTransactions, showPortfolio, profileVisibility). Only provided fields are updated.',
   })
   @ApiResponse({
     status: 200,
@@ -97,7 +96,7 @@ export class UsersController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'User not found' })
   async updatePrivacy(
-    @Req() req: any,
+    @Req() req: AuthenticatedRequest,
     @Body() dto: UpdatePrivacyDto,
   ): Promise<ApiResponseDto<ProfileResponseDto>> {
     const profile = await this.usersService.updatePrivacy(

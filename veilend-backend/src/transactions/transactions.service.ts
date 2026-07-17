@@ -2,13 +2,17 @@ import { Injectable, Logger } from '@nestjs/common';
 import { HorizonService } from '../stellar/horizon.service';
 import { ServiceResponse } from '../stellar/types';
 import { PrismaService } from '../prisma/prisma.service';
-import { TransactionHistoryQueryDto, NormalizedEventType } from './dto/transaction-history-query.dto';
+import {
+  TransactionHistoryQueryDto,
+  NormalizedEventType,
+} from './dto/transaction-history-query.dto';
 import {
   TransactionEventDto,
   TransactionHistoryPageDto,
   NormalizedStatus,
 } from './dto/transaction-history-response.dto';
 import { PageMetaDto } from '../common/dto/page-meta.dto';
+import { Order } from '../common/dto/page-options.dto';
 
 export interface TransactionRecord {
   id: string;
@@ -84,7 +88,7 @@ export class TransactionsService {
 
     // Determine sort order
     const orderBy: Record<string, string> = {
-      createdAt: query.order === 'ASC' ? 'asc' : 'desc',
+      createdAt: query.order === Order.ASC ? 'asc' : 'desc',
     };
 
     // Execute count + data query in parallel
@@ -139,10 +143,17 @@ export class TransactionsService {
     };
   }
 
-  async getTransactions(walletAddress: string): Promise<ServiceResponse<TransactionRecord[]>> {
+  async getTransactions(
+    walletAddress: string,
+  ): Promise<ServiceResponse<TransactionRecord[]>> {
     try {
       const client = this.horizonService.getClient();
-      const txs = await client.transactions().forAccount(walletAddress).limit(20).order('desc').call();
+      const txs = await client
+        .transactions()
+        .forAccount(walletAddress)
+        .limit(20)
+        .order('desc')
+        .call();
 
       const records: TransactionRecord[] = txs.records.map((tx) => {
         // Determine transaction type from operations
@@ -184,8 +195,11 @@ export class TransactionsService {
         data: records,
       };
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Failed to fetch transactions';
-      this.logger.warn(`Transaction fetch failed for ${walletAddress}: ${message}`);
+      const message =
+        error instanceof Error ? error.message : 'Failed to fetch transactions';
+      this.logger.warn(
+        `Transaction fetch failed for ${walletAddress}: ${message}`,
+      );
       return {
         success: false,
         error: { message, code: 'TRANSACTIONS_FETCH_ERROR', rawError: error },
