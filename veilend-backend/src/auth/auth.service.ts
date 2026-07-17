@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 
 import { JwtService } from '@nestjs/jwt';
 
@@ -8,6 +8,8 @@ import { randomBytes } from 'crypto';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private walletService: WalletService,
     private jwtService: JwtService,
@@ -16,7 +18,7 @@ export class AuthService {
   generateNonce(walletAddress: string) {
     const nonce = randomBytes(32).toString('hex');
 
-    console.log('Nonce created for:', walletAddress);
+    this.logger.log(`Nonce created for: ${walletAddress}`);
 
     return nonce;
   }
