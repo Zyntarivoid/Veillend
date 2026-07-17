@@ -51,6 +51,9 @@ export class ProfileResponseDto {
   @ApiPropertyOptional({ description: 'Personal website URL' })
   website?: string | null;
 
-  @ApiProperty({ description: 'Privacy preferences', type: PrivacyPreferencesDto })
+  @ApiProperty({
+    description: 'Privacy preferences',
+    type: PrivacyPreferencesDto,
+  })
   privacy: PrivacyPreferencesDto;
 }

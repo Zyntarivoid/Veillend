@@ -36,7 +36,8 @@ export class TransactionEventDto {
   status: NormalizedStatus;
 
   @ApiProperty({
-    description: 'Amount in the asset\'s native precision (as string to preserve BigInt)',
+    description:
+      "Amount in the asset's native precision (as string to preserve BigInt)",
     example: '1000000000',
   })
   amountRaw: string;
