@@ -349,6 +349,7 @@ impl VeilLendContract {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use soroban_sdk::testutils::Address as _;
 
     #[test]
     fn test_position_creation() {
@@ -358,6 +359,74 @@ mod tests {
         };
         assert_eq!(position.deposited, 1000);
         assert_eq!(position.borrowed, 500);
+    }
+
+    #[test]
+    fn lending_lifecycle_happy_path_deposit_borrow_repay_and_withdraw() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+        let asset = Address::generate(&env);
+
+        VeilLendContract::__constructor(&env, admin.clone(), 15_000);
+        VeilLendContract::configure_asset(&env, admin.clone(), asset.clone(), true);
+        VeilLendContract::set_oracle_price(&env, admin.clone(), asset.clone(), 1);
+
+        VeilLendContract::deposit(&env, user.clone(), asset.clone(), 1_000);
+        VeilLendContract::borrow(&env, user.clone(), asset.clone(), 500);
+        VeilLendContract::repay(&env, user.clone(), asset.clone(), 200);
+        VeilLendContract::withdraw(&env, user.clone(), asset.clone(), 300);
+
+        let position = VeilLendContract::get_position(&env, user.clone(), asset.clone());
+        assert_eq!(position.deposited, 700);
+        assert_eq!(position.borrowed, 300);
+    }
+
+    #[test]
+    fn deposit_rejects_negative_amounts_with_invalid_amount_error() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+        let asset = Address::generate(&env);
+
+        VeilLendContract::__constructor(&env, admin.clone(), 15_000);
+        VeilLendContract::configure_asset(&env, admin.clone(), asset.clone(), true);
+        VeilLendContract::set_oracle_price(&env, admin.clone(), asset.clone(), 1);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            VeilLendContract::deposit(&env, user.clone(), asset.clone(), -1);
+        }));
+
+        assert!(result.is_err(), "negative deposits should be rejected");
+    }
+
+    #[test]
+    fn borrow_rejects_positions_that_would_fall_below_the_minimum_collateral_ratio() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+        let asset = Address::generate(&env);
+
+        VeilLendContract::__constructor(&env, admin.clone(), 15_000);
+        VeilLendContract::configure_asset(&env, admin.clone(), asset.clone(), true);
+        VeilLendContract::set_oracle_price(&env, admin.clone(), asset.clone(), 1);
+        VeilLendContract::deposit(&env, user.clone(), asset.clone(), 1_000);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            VeilLendContract::borrow(&env, user.clone(), asset.clone(), 800);
+        }));
+
+        assert!(result.is_err(), "borrow should fail when collateral is insufficient");
+
+        let position = VeilLendContract::get_position(&env, user.clone(), asset.clone());
+        assert_eq!(position.deposited, 1_000);
+        assert_eq!(position.borrowed, 0);
     }
 
     #[test]
