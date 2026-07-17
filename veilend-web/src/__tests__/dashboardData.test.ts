@@ -70,6 +70,32 @@ describe('fetchDashboardData', () => {
     expect(dashboard.recentActivity[1].id).toBe('1');
   });
 
+  it('returns a valid dashboard structure when indexer data is empty', async () => {
+    fetchMock.mockImplementation((input: RequestInfo) => {
+      const url = String(input);
+
+      if (url.includes('/indexer/positions/')) {
+        return Promise.resolve(new Response(JSON.stringify({ positions: [] }), { status: 200 }));
+      }
+
+      if (url.includes('/indexer/transactions/')) {
+        return Promise.resolve(new Response(JSON.stringify({ transactions: [] }), { status: 200 }));
+      }
+
+      return Promise.resolve(new Response(null, { status: 404 }));
+    });
+
+    const dashboard = await fetchDashboardData('GEMPTYADDRESS');
+
+    expect(dashboard.portfolio.totalDepositedUsd).toBe(0);
+    expect(dashboard.portfolio.totalBorrowedUsd).toBe(0);
+    expect(dashboard.portfolio.totalBalanceUsd).toBe(0);
+    expect(dashboard.portfolio.healthFactor).toBeCloseTo(99.99, 2);
+    expect(dashboard.portfolio.depositedAssets).toHaveLength(0);
+    expect(dashboard.portfolio.borrowedAssets).toHaveLength(0);
+    expect(dashboard.recentActivity).toHaveLength(0);
+  });
+
   it('throws a helpful error when the indexer returns a failure', async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 500 }));
 

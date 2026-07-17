@@ -46,12 +46,18 @@ export function trackCampaignEvent(event: CampaignEventName, payload: CampaignEv
     return;
   }
 
-  fetch(ANALYTICS_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: serializedBody,
-    keepalive: true,
-  }).catch(() => undefined);
+  const result = typeof fetch === 'function'
+    ? fetch(ANALYTICS_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: serializedBody,
+        keepalive: true,
+      })
+    : undefined;
+
+  if (result && typeof result.catch === 'function') {
+    result.catch(() => undefined);
+  }
 }

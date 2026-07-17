@@ -1,4 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
+import { waitFor } from '@testing-library/react';
 import { trackCampaignEvent } from '@/lib/campaignAnalytics';
 import { POST } from '@/app/api/campaign-events/route';
 
@@ -32,6 +33,33 @@ describe('trackCampaignEvent', () => {
     expect(navigator.sendBeacon).toHaveBeenCalledTimes(1);
     expect(navigator.sendBeacon).toHaveBeenCalledWith('/api/campaign-events', expect.any(Blob));
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('falls back to fetch when navigator.sendBeacon is unavailable', async () => {
+    Object.defineProperty(navigator, 'sendBeacon', {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
+    window.history.pushState({}, '', '/dashboard?utm_source=test-source');
+
+    trackCampaignEvent('campaign_page_visit', { ctaLabel: 'launch' });
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/campaign-events', expect.objectContaining({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: expect.any(String),
+      keepalive: true,
+    }));
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(body.payload.path).toBe('/dashboard');
+    expect(body.payload.source).toBe('test-source');
+    expect(body.payload.ctaLabel).toBe('launch');
   });
 });
 

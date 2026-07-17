@@ -2,7 +2,7 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, afterEach, vi } from 'vitest';
 import { useWallet } from '@/context/WalletContext';
-import { WalletConnect } from '@/components/WalletConnect';
+import { WalletConnect, isFreighterInstalled } from '@/components/WalletConnect';
 import { WalletStatus } from '@/components/WalletStatus';
 
 vi.mock('@/context/WalletContext', () => ({
@@ -180,5 +180,48 @@ describe('WalletConnect', () => {
     await waitFor(() => {
       expect(disconnectMock).toHaveBeenCalled();
     });
+  });
+
+  it('shows install prompt when Freighter is not available', () => {
+    delete (window as any).freighter;
+
+    mockedUseWallet.mockReturnValue({
+      address: null,
+      publicKey: null,
+      isConnected: false,
+      isAuthenticated: false,
+      isInstalled: false,
+      isLoading: false,
+      error: null,
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+      clearError: vi.fn(),
+    });
+
+    render(<WalletConnect />);
+
+    fireEvent.click(screen.getByRole('button', { name: /connect wallet/i }));
+
+    expect(screen.getByText(/Freighter wallet not detected/i)).toBeInTheDocument();
+    expect(isFreighterInstalled()).toBe(false);
+  });
+
+  it('disables connect button while loading', () => {
+    mockedUseWallet.mockReturnValue({
+      address: null,
+      publicKey: null,
+      isConnected: false,
+      isAuthenticated: false,
+      isInstalled: true,
+      isLoading: true,
+      error: null,
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+      clearError: vi.fn(),
+    });
+
+    render(<WalletConnect />);
+
+    expect(screen.getByRole('button', { name: /connecting/i })).toBeDisabled();
   });
 });
