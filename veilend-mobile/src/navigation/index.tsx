@@ -31,14 +31,38 @@ function MainTabs() {
           else if (route.name === 'Deposit') iconName = focused ? 'arrow-down' : 'arrow-down-outline';
           else if (route.name === 'Borrow') iconName = focused ? 'cash' : 'cash-outline';
           else if (route.name === 'Repay') iconName = focused ? 'arrow-up' : 'arrow-up-outline';
-          return <Ionicons name={iconName} size={size} color={color} />;
+          return <Ionicons name={iconName} size={size} color={color} importantForAccessibility="no" />;
         },
       })}
     >
-      <Tab.Screen name="Dashboard" component={DashboardScreen} />
-      <Tab.Screen name="Deposit" component={DepositScreen} />
-      <Tab.Screen name="Borrow" component={BorrowScreen} />
-      <Tab.Screen name="Repay" component={RepayScreen} />
+      <Tab.Screen
+        name="Dashboard"
+        component={DashboardScreen}
+        options={{
+          tabBarAccessibilityLabel: 'Dashboard, home overview',
+        }}
+      />
+      <Tab.Screen
+        name="Deposit"
+        component={DepositScreen}
+        options={{
+          tabBarAccessibilityLabel: 'Deposit, supply assets to the market',
+        }}
+      />
+      <Tab.Screen
+        name="Borrow"
+        component={BorrowScreen}
+        options={{
+          tabBarAccessibilityLabel: 'Borrow, take out a loan from the market',
+        }}
+      />
+      <Tab.Screen
+        name="Repay"
+        component={RepayScreen}
+        options={{
+          tabBarAccessibilityLabel: 'Repay, pay back borrowed assets',
+        }}
+      />
     </Tab.Navigator>
   );
 }
@@ -46,8 +70,14 @@ function MainTabs() {
 /** Splash shown while session is being restored from SecureStore */
 function SessionRestoreSplash() {
   return (
-    <View style={styles.splash}>
-      <ActivityIndicator size="large" color="#09cc71" />
+    <View
+      style={styles.splash}
+      accessible={true}
+      accessibilityRole="progressbar"
+      accessibilityLabel="Restoring your session, please wait"
+      accessibilityLiveRegion="polite"
+    >
+      <ActivityIndicator size="large" color="#09cc71" importantForAccessibility="no" />
     </View>
   );
 }

@@ -25,8 +25,15 @@ export default function App() {
           <StatusBar style="light" />
 
           {anyLoading && (
-            <View style={styles.loadingOverlay} pointerEvents="none">
-              <ActivityIndicator size="large" color="#fff" />
+            <View
+              style={styles.loadingOverlay}
+              pointerEvents="none"
+              accessible={true}
+              accessibilityRole="progressbar"
+              accessibilityLabel="Loading, please wait"
+              accessibilityLiveRegion="polite"
+            >
+              <ActivityIndicator size="large" color="#fff" importantForAccessibility="no" />
             </View>
           )}
 

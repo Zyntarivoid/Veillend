@@ -112,6 +112,10 @@ export default function ConnectWalletScreen() {
                     activeOpacity={0.8}
                     onPress={generateWallet}
                     disabled={loading}
+                    accessibilityRole="button"
+                    accessibilityLabel="Generate new wallet"
+                    accessibilityHint="Creates a new Stellar wallet and connects to the app"
+                    accessibilityState={{ disabled: loading }}
                   >
                     <LinearGradient
                       colors={['#09cc71', '#059652']}
@@ -130,6 +134,10 @@ export default function ConnectWalletScreen() {
                   style={styles.importLink}
                   onPress={() => setMode('import')}
                   disabled={loading}
+                  accessibilityRole="button"
+                  accessibilityLabel="Import existing wallet using secret key"
+                  accessibilityHint="Switch to the import wallet form"
+                  accessibilityState={{ disabled: loading }}
                 >
                   <Text style={styles.importLinkText}>
                     Already have a wallet?{' '}
@@ -151,17 +159,27 @@ export default function ConnectWalletScreen() {
                     autoCapitalize="characters"
                     autoCorrect={false}
                     secureTextEntry={false}
+                    accessibilityLabel="Stellar secret key"
+                    accessibilityHint="Enter your Stellar secret key starting with S to import your wallet"
                   />
                 </View>
 
                 {error ? (
-                  <Text style={styles.errorText}>{error}</Text>
+                  <Text
+                    style={styles.errorText}
+                    accessibilityRole="alert"
+                    accessibilityLiveRegion="assertive"
+                  >{error}</Text>
                 ) : null}
 
                 <TouchableOpacity
                   activeOpacity={0.8}
                   onPress={() => importWallet(secretKey)}
                   disabled={loading || !secretKey.trim()}
+                  accessibilityRole="button"
+                  accessibilityLabel="Connect wallet"
+                  accessibilityHint="Imports and connects your Stellar wallet using the provided secret key"
+                  accessibilityState={{ disabled: loading || !secretKey.trim() }}
                 >
                   <LinearGradient
                     colors={['#09cc71', '#059652']}
@@ -179,6 +197,10 @@ export default function ConnectWalletScreen() {
                   style={styles.importLink}
                   onPress={() => { setMode('choose'); setSecretKey(''); }}
                   disabled={loading}
+                  accessibilityRole="button"
+                  accessibilityLabel="Back to wallet options"
+                  accessibilityHint="Returns to the generate or import wallet choice"
+                  accessibilityState={{ disabled: loading }}
                 >
                   <Text style={styles.importLinkText}>← Back</Text>
                 </TouchableOpacity>

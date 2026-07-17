@@ -39,6 +39,7 @@ export default function ProtocolStatusBanners({
         const isWalletBanner = banner.id === 'wallet-disconnected';
         const onPress = isWalletBanner ? onReconnect : onRetrySync;
         const iconName = isWalletBanner ? 'wallet-outline' : 'warning-outline';
+        const actionLabel = isRefreshing && !isWalletBanner ? 'Checking...' : banner.actionLabel;
 
         return (
           <View
@@ -47,22 +48,27 @@ export default function ProtocolStatusBanners({
               styles.banner,
               banner.severity === 'danger' ? styles.danger : styles.warning,
             ]}
+            // Screen readers announce this as an alert when it appears
+            accessibilityRole="alert"
+            accessibilityLiveRegion="polite"
+            accessibilityLabel={`${banner.title}. ${banner.message}`}
           >
-            <Ionicons name={iconName} size={20} color="#FFFFFF" />
+            <Ionicons name={iconName} size={20} color="#FFFFFF" importantForAccessibility="no" />
             <View style={styles.copy}>
-              <Text style={styles.title}>{banner.title}</Text>
-              <Text style={styles.message}>{banner.message}</Text>
+              {/* Text is included in the parent's accessibilityLabel; hide from individual focus */}
+              <Text style={styles.title} importantForAccessibility="no">{banner.title}</Text>
+              <Text style={styles.message} importantForAccessibility="no">{banner.message}</Text>
             </View>
             <TouchableOpacity
               accessibilityRole="button"
-              accessibilityLabel={banner.actionLabel}
+              accessibilityLabel={actionLabel}
+              accessibilityHint={isWalletBanner ? 'Reconnect your wallet' : 'Retry syncing protocol status'}
               disabled={isRefreshing && !isWalletBanner}
+              accessibilityState={{ disabled: isRefreshing && !isWalletBanner }}
               onPress={onPress}
               style={styles.action}
             >
-              <Text style={styles.actionText}>
-                {isRefreshing && !isWalletBanner ? 'Checking...' : banner.actionLabel}
-              </Text>
+              <Text style={styles.actionText}>{actionLabel}</Text>
             </TouchableOpacity>
           </View>
         );
@@ -113,6 +119,11 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 7,
+    // Ensure minimum touch target
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   actionText: {
     color: '#FFFFFF',

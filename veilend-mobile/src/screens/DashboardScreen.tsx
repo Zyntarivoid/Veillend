@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Image, Modal, TextInput, TouchableWithoutFeedback, Keyboard, KeyboardAvoidingView, Platform, Dimensions, FlatList, ActivityIndicator } from 'react-native';
-import api from '../utils/api';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Image, Modal, TextInput, TouchableWithoutFeedback, Keyboard, FlatList, ActivityIndicator } from 'react-native';
 import { useStore, TransactionRecord } from '../store/store';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,14 +7,15 @@ import * as ImagePicker from 'expo-image-picker';
 import { MOCK_USER } from '../data/mockData';
 import { shortenAddress } from '../utils/helpers';
 import ProtocolStatusBanners from '../components/ProtocolStatusBanners';
-
-const { width } = Dimensions.get('window');
-const isSmallScreen = width < 380;
-const CARD_WIDTH = width - 48; // Padding 24 * 2
+import { useResponsive } from '../hooks/useResponsive';
 
 
   
 export default function DashboardScreen({ navigation }: any) {
+  const { width, isSmallScreen } = useResponsive();
+  const CARD_WIDTH = width - 48; // Padding 24 * 2
+  const styles = makeStyles(isSmallScreen);
+
   const {
     address,
     authToken,
@@ -63,8 +63,13 @@ export default function DashboardScreen({ navigation }: any) {
   if (portfolioError) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0F172A', padding: 24 }}>
-        <Text style={{ color: '#EF4444', fontSize: 16, textAlign: 'center' }}>{portfolioError}</Text>
-        <TouchableOpacity style={{ marginTop: 16, padding: 12, backgroundColor: '#1E293B', borderRadius: 8 }} onPress={fetchPortfolio}>
+        <Text style={{ color: '#EF4444', fontSize: 16, textAlign: 'center' }} accessibilityRole="alert">{portfolioError}</Text>
+        <TouchableOpacity
+          style={{ marginTop: 16, padding: 12, backgroundColor: '#1E293B', borderRadius: 8 }}
+          onPress={fetchPortfolio}
+          accessibilityRole="button"
+          accessibilityLabel="Retry loading portfolio"
+        >
           <Text style={{ color: '#A855F7' }}>Retry</Text>
         </TouchableOpacity>
       </View>
@@ -135,16 +140,35 @@ export default function DashboardScreen({ navigation }: any) {
   };
 
   const ServiceButton = ({ icon, label, onPress }: any) => (
-    <TouchableOpacity style={styles.serviceBtn} onPress={onPress}>
+    <TouchableOpacity
+      style={styles.serviceBtn}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityHint={`Navigate to ${label} screen`}
+    >
       <View style={styles.serviceIconBox}>
-        <Ionicons name={icon} size={24} color="#A855F7" />
+        <Ionicons name={icon} size={24} color="#A855F7" importantForAccessibility="no" />
       </View>
-      <Text style={styles.serviceLabel}>{label}</Text>
+      <Text style={styles.serviceLabel} importantForAccessibility="no-hide-descendants">{label}</Text>
     </TouchableOpacity>
   );
 
-  const renderCard = ({ item }: { item: any }) => (
-    <View style={{ width: CARD_WIDTH }}>
+  const renderCard = ({ item }: { item: any }) => {
+    const displayValue = isPrivacyMode
+      ? '****'
+      : `$${Number(item.value).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+    const cardA11yLabel = isPrivacyMode
+      ? `${item.label}: hidden in privacy mode`
+      : `${item.label}: ${displayValue}`;
+
+    return (
+    <View
+      style={{ width: CARD_WIDTH }}
+      accessible={true}
+      accessibilityRole="text"
+      accessibilityLabel={cardA11yLabel}
+    >
       <LinearGradient
         colors={['#A855F7', '#7C3AED']} // Soft linear gradient (from #A855F7 to #7C3AED)
         start={{ x: 0, y: 0 }}
@@ -164,28 +188,28 @@ export default function DashboardScreen({ navigation }: any) {
 
         <View style={styles.cardHeader}>
           <View>
-            <Text style={styles.cardLabel}>{item.label}</Text>
+            <Text style={styles.cardLabel} importantForAccessibility="no">{item.label}</Text>
             <View style={styles.balanceRow}>
-              <Text style={styles.balanceAmount}>
+              <Text style={styles.balanceAmount} importantForAccessibility="no">
                 {isPrivacyMode 
                   ? '****' 
                   : `$${item.value.toLocaleString('en-US', { minimumFractionDigits: 2 })}`
                 }
               </Text>
-               {/* Masked number eye icon */}
-              <Ionicons name={isPrivacyMode ? "eye-off-outline" : "eye-outline"} size={20} color="rgba(255,255,255,0.6)" style={{marginLeft: 10, marginTop: 12}} />
+               {/* Masked number eye icon - decorative */}
+              <Ionicons name={isPrivacyMode ? "eye-off-outline" : "eye-outline"} size={20} color="rgba(255,255,255,0.6)" style={{marginLeft: 10, marginTop: 12}} importantForAccessibility="no" />
             </View>
           </View>
           
           {/* Added privacy shield top-right */}
-          <View style={styles.privacyBadge}>
-            <Ionicons name={item.icon as string} size={isSmallScreen ? 16 : 20} color="#00D1FF" />
-            <Text style={styles.privacyText}>ZK Shielded</Text>
+          <View style={styles.privacyBadge} importantForAccessibility="no">
+            <Ionicons name={item.icon as string} size={isSmallScreen ? 16 : 20} color="#00D1FF" importantForAccessibility="no" />
+            <Text style={styles.privacyText} importantForAccessibility="no">ZK Shielded</Text>
           </View>
         </View>
         
-        {/* Bottom dots styled as small privacy "veils" with teal glow */}
-         <View style={styles.cardNumberContainer}>
+        {/* Bottom dots styled as small privacy "veils" with teal glow - decorative */}
+         <View style={styles.cardNumberContainer} importantForAccessibility="no">
           <View style={[styles.privacyDot, { opacity: 0.6 }]} />
           <View style={[styles.privacyDot, { opacity: 0.8 }]} />
           <View style={[styles.privacyDot, { opacity: 1.0 }]} />
@@ -193,7 +217,7 @@ export default function DashboardScreen({ navigation }: any) {
         </View>
       </LinearGradient>
     </View>
-  );
+  );};
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -206,18 +230,35 @@ export default function DashboardScreen({ navigation }: any) {
     <ScrollView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.greeting}>{getGreeting()}</Text>
-          <Text style={styles.userName}>{username}</Text>
+        <View
+          accessible={true}
+          accessibilityRole="text"
+          accessibilityLabel={`${getGreeting()} ${username}`}
+        >
+          <Text style={styles.greeting} importantForAccessibility="no">{getGreeting()}</Text>
+          <Text style={styles.userName} importantForAccessibility="no">{username}</Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-          <TouchableOpacity onPress={togglePrivacyMode} style={styles.iconButton}>
-            <Ionicons name={isPrivacyMode ? "eye-off" : "eye"} size={24} color="#A1A1A1" />
+          <TouchableOpacity
+            onPress={togglePrivacyMode}
+            style={styles.iconButton}
+            accessibilityRole="switch"
+            accessibilityLabel={isPrivacyMode ? 'Privacy mode on, balances hidden' : 'Privacy mode off, balances visible'}
+            accessibilityHint="Double tap to toggle privacy mode"
+            accessibilityState={{ checked: isPrivacyMode }}
+          >
+            <Ionicons name={isPrivacyMode ? "eye-off" : "eye"} size={24} color="#A1A1A1" importantForAccessibility="no" />
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => setProfileVisible(true)}>
+          <TouchableOpacity
+            onPress={() => setProfileVisible(true)}
+            accessibilityRole="button"
+            accessibilityLabel={`Profile menu for ${username}`}
+            accessibilityHint="Opens profile and settings"
+          >
             <Image 
               source={{ uri: profileImage }} 
-              style={styles.avatar} 
+              style={styles.avatar}
+              accessibilityIgnoresInvertColors={false}
             />
           </TouchableOpacity>
         </View>
@@ -239,22 +280,27 @@ export default function DashboardScreen({ navigation }: any) {
         transparent={true}
         visible={profileVisible}
         onRequestClose={() => setProfileVisible(false)}
+        accessibilityViewIsModal={true}
       >
-        <TouchableWithoutFeedback onPress={() => setProfileVisible(false)}>
+        <TouchableWithoutFeedback onPress={() => setProfileVisible(false)} accessibilityLabel="Close profile menu">
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
               <View style={styles.modalContent}>
                 <View style={styles.modalHeader}>
                   <Text style={styles.modalTitle}>Profile</Text>
-                  <TouchableOpacity onPress={() => setProfileVisible(false)}>
-                    <Ionicons name="close-circle" size={28} color="#A1A1A1" />
+                  <TouchableOpacity
+                    onPress={() => setProfileVisible(false)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Close profile menu"
+                  >
+                    <Ionicons name="close-circle" size={28} color="#A1A1A1" importantForAccessibility="no" />
                   </TouchableOpacity>
                 </View>
 
                 {/* Profile Setup / Username */}
                 <View style={styles.menuItem}>
                   <View style={styles.menuIconBox}>
-                    <Ionicons name="person" size={20} color="#00D1FF" />
+                    <Ionicons name="person" size={20} color="#00D1FF" importantForAccessibility="no" />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.menuLabel}>Username</Text>
@@ -266,19 +312,32 @@ export default function DashboardScreen({ navigation }: any) {
                           onChangeText={setTempName}
                           autoFocus
                           placeholderTextColor="#555"
+                          accessibilityLabel="Edit username"
+                          accessibilityHint="Enter your new display name"
                         />
-                        <TouchableOpacity onPress={saveUsername} style={styles.saveBtn}>
-                          <Ionicons name="checkmark" size={18} color="#000" />
+                        <TouchableOpacity
+                          onPress={saveUsername}
+                          style={styles.saveBtn}
+                          accessibilityRole="button"
+                          accessibilityLabel="Save username"
+                          accessibilityHint="Confirms and saves your new display name"
+                        >
+                          <Ionicons name="checkmark" size={18} color="#000" importantForAccessibility="no" />
                         </TouchableOpacity>
                       </View>
                     ) : (
                       <View style={styles.nameDisplayRow}>
                         <Text style={styles.menuValue}>{username}</Text>
-                        <TouchableOpacity onPress={() => {
-                          setTempName(username);
-                          setIsEditingName(true);
-                        }}>
-                          <Ionicons name="pencil" size={16} color="#A855F7" style={{ marginLeft: 8 }} />
+                        <TouchableOpacity
+                          onPress={() => {
+                            setTempName(username);
+                            setIsEditingName(true);
+                          }}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Edit username, current name: ${username}`}
+                          accessibilityHint="Opens an editable field to change your display name"
+                        >
+                          <Ionicons name="pencil" size={16} color="#A855F7" style={{ marginLeft: 8 }} importantForAccessibility="no" />
                         </TouchableOpacity>
                       </View>
                     )}
@@ -286,46 +345,46 @@ export default function DashboardScreen({ navigation }: any) {
                 </View>
 
                 {/* Change Profile Picture */}
-                <TouchableOpacity style={styles.menuItem} onPress={pickImage}>
+                <TouchableOpacity style={styles.menuItem} onPress={pickImage} accessibilityRole="button" accessibilityLabel="Change profile picture" accessibilityHint="Opens image library to select a new avatar">
                   <View style={styles.menuIconBox}>
-                    <Ionicons name="camera" size={20} color="#00D1FF" />
+                    <Ionicons name="camera" size={20} color="#00D1FF" importantForAccessibility="no" />
                   </View>
                   <View>
                     <Text style={styles.menuLabel}>Change Profile Picture</Text>
                     <Text style={styles.menuSubLabel}>Update your avatar</Text>
                   </View>
-                  <Ionicons name="chevron-forward" size={20} color="#555" style={{ marginLeft: 'auto' }} />
+                  <Ionicons name="chevron-forward" size={20} color="#555" style={{ marginLeft: 'auto' }} importantForAccessibility="no" />
                 </TouchableOpacity>
 
                 {/* Account Preference */}
-                <TouchableOpacity style={styles.menuItem}>
+                <TouchableOpacity style={styles.menuItem} accessibilityRole="button" accessibilityLabel="Account preferences" accessibilityHint="Manage currency, notifications, and privacy settings">
                   <View style={styles.menuIconBox}>
-                    <Ionicons name="settings" size={20} color="#A855F7" />
+                    <Ionicons name="settings" size={20} color="#A855F7" importantForAccessibility="no" />
                   </View>
                   <View>
                     <Text style={styles.menuLabel}>Account Preferences</Text>
                     <Text style={styles.menuSubLabel}>Currency, Notifications, Privacy</Text>
                   </View>
-                  <Ionicons name="chevron-forward" size={20} color="#555" style={{ marginLeft: 'auto' }} />
+                  <Ionicons name="chevron-forward" size={20} color="#555" style={{ marginLeft: 'auto' }} importantForAccessibility="no" />
                 </TouchableOpacity>
 
                 {/* Profile Setup (Generic) */}
-                 <TouchableOpacity style={styles.menuItem}>
+                 <TouchableOpacity style={styles.menuItem} accessibilityRole="button" accessibilityLabel="Profile setup" accessibilityHint="Complete your KYC and verification">
                   <View style={styles.menuIconBox}>
-                    <Ionicons name="build" size={20} color="#A855F7" />
+                    <Ionicons name="build" size={20} color="#A855F7" importantForAccessibility="no" />
                   </View>
                   <View>
                     <Text style={styles.menuLabel}>Profile Setup</Text>
                     <Text style={styles.menuSubLabel}>Complete your KYC/Verification</Text>
                   </View>
-                  <Ionicons name="chevron-forward" size={20} color="#555" style={{ marginLeft: 'auto' }} />
+                  <Ionicons name="chevron-forward" size={20} color="#555" style={{ marginLeft: 'auto' }} importantForAccessibility="no" />
                 </TouchableOpacity>
 
                 <View style={styles.divider} />
 
                 {/* Log Out */}
-                <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-                  <Ionicons name="log-out-outline" size={20} color="#FF4D4D" />
+                <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout} accessibilityRole="button" accessibilityLabel="Log out">
+                  <Ionicons name="log-out-outline" size={20} color="#FF4D4D" importantForAccessibility="no" />
                   <Text style={styles.logoutText}>Log Out</Text>
                 </TouchableOpacity>
               </View>
@@ -346,18 +405,26 @@ export default function DashboardScreen({ navigation }: any) {
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
           extraData={isPrivacyMode}
+          accessibilityLabel="Balance cards carousel"
+          accessibilityHint={`Swipe left or right to view ${CARDS.length} balance cards`}
         />
       </View>
 
       {/* Pagination Dots */}
-      <View style={styles.paginationContainer}>
-        {CARDS.map((_, index) => (
+      <View
+        style={styles.paginationContainer}
+        accessibilityLabel={`Card ${currentIndex + 1} of ${CARDS.length}: ${CARDS[currentIndex]?.label}`}
+        accessible={true}
+        accessibilityRole="adjustable"
+      >
+        {CARDS.map((card, index) => (
           <View 
             key={index} 
             style={[
               styles.dot, 
               currentIndex === index ? styles.activeDot : styles.inactiveDot
-            ]} 
+            ]}
+            importantForAccessibility="no"
           />
         ))}
       </View>
@@ -388,26 +455,54 @@ export default function DashboardScreen({ navigation }: any) {
       </View>
 
       {/* Transactions List */}
-      <Text style={styles.sectionTitle}>Transactions</Text>
+      <Text style={styles.sectionTitle} accessibilityRole="header">Transactions</Text>
       <View style={styles.transactionsList}>
-        {transactions.map((tx: TransactionRecord) => (
-          <View key={tx.id} style={styles.txItem}>
-            <View style={styles.txLeft}>
-              <View style={styles.txIconBox}>
-                <Ionicons
-                  name={(tx.type === 'deposit' ? 'arrow-down' : tx.type === 'withdraw' ? 'arrow-up' : 'swap-horizontal') as any}
-                  size={20}
-                  color="#fff"
-                />
+        {transactions.length === 0 && (
+          <Text
+            style={[styles.txDate, { textAlign: 'center', paddingVertical: 24 }]}
+            accessibilityRole="text"
+          >
+            No transactions yet.
+          </Text>
+        )}
+        {transactions.map((tx: TransactionRecord) => {
+          const txTypeLabel =
+            tx.type === 'deposit' ? 'Deposited' :
+            tx.type === 'withdraw' ? 'Withdrew' :
+            tx.type === 'borrow' ? 'Borrowed' :
+            tx.type === 'repay' ? 'Repaid' : tx.type;
+          const txA11yLabel = isPrivacyMode
+            ? `${txTypeLabel} ${tx.asset}, amount hidden in privacy mode, ${tx.timestamp}, status: ${tx.status}`
+            : `${txTypeLabel} ${tx.amount} ${tx.asset}, ${tx.timestamp}, status: ${tx.status}`;
+
+          return (
+            <View
+              key={tx.id}
+              style={styles.txItem}
+              accessible={true}
+              accessibilityRole="text"
+              accessibilityLabel={txA11yLabel}
+            >
+              <View style={styles.txLeft}>
+                <View style={styles.txIconBox} importantForAccessibility="no">
+                  <Ionicons
+                    name={(tx.type === 'deposit' ? 'arrow-down' : tx.type === 'withdraw' ? 'arrow-up' : 'swap-horizontal') as any}
+                    size={20}
+                    color="#fff"
+                    importantForAccessibility="no"
+                  />
+                </View>
+                <View importantForAccessibility="no">
+                  <Text style={styles.txTitle} importantForAccessibility="no">{tx.type} — {tx.asset}</Text>
+                  <Text style={styles.txDate} importantForAccessibility="no">{tx.timestamp}</Text>
+                </View>
               </View>
-              <View>
-                <Text style={styles.txTitle}>{tx.type} — {tx.asset}</Text>
-                <Text style={styles.txDate}>{tx.timestamp}</Text>
-              </View>
+              <Text style={styles.txValue} importantForAccessibility="no">
+                {isPrivacyMode ? '****' : `${tx.amount} ${tx.asset}`}
+              </Text>
             </View>
-            <Text style={styles.txValue}>{tx.amount} {tx.asset}</Text>
-          </View>
-        ))}
+          );
+        })}
       </View>
       
       {/* Spacer for bottom tab bar */}
@@ -416,7 +511,8 @@ export default function DashboardScreen({ navigation }: any) {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(s: boolean) {
+  return StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0A0A0A',
@@ -503,8 +599,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.2)',
-    paddingHorizontal: isSmallScreen ? 8 : 10,
-    paddingVertical: isSmallScreen ? 4 : 6,
+    paddingHorizontal: s ? 8 : 10,
+    paddingVertical: s ? 4 : 6,
     borderRadius: 20,
     borderWidth: 1,
     borderColor: 'rgba(0, 209, 255, 0.3)', // Teal border
@@ -515,9 +611,9 @@ const styles = StyleSheet.create({
   },
   privacyText: {
     color: '#D1D1D1',
-    fontSize: isSmallScreen ? 10 : 12,
+    fontSize: s ? 10 : 12,
     fontWeight: '600',
-    marginLeft: isSmallScreen ? 4 : 6,
+    marginLeft: s ? 4 : 6,
   },
   cardNumberContainer: {
     flexDirection: 'row',
@@ -575,10 +671,12 @@ const styles = StyleSheet.create({
   },
   serviceBtn: {
     alignItems: 'center',
+    minWidth: 64,
+    padding: 4,
   },
   serviceIconBox: {
-    width: 56,
-    height: 56,
+    width: s ? 52 : 56,
+    height: s ? 52 : 56,
     backgroundColor: '#1A1A1A',
     borderRadius: 16,
     justifyContent: 'center',
@@ -758,4 +856,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
-});
+  });
+}
