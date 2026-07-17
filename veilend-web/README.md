@@ -261,6 +261,10 @@ Here are common issues and their solutions:
 
 **Solutions**:
 
+- Ensure `.env.local` exists and includes all required `NEXT_PUBLIC_*` values
+- Copy `.env.example` to `.env.local` if you have not created one yet
+- Check that `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_HORIZON_URL` are valid URLs
+- Check that the network passphrase matches the selected Stellar network
 - Check if port 3000 is already in use (use `netstat -ano | findstr :3000` on Windows)
 - Try a different port: `npm run dev -- -p 3001`
 - Ensure dependencies are installed correctly

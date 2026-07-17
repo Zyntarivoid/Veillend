@@ -2,10 +2,12 @@
  * Stellar network configuration for VeilLend
  */
 
+import { publicEnv } from "../env";
+
 export const STELLAR_CONFIG = {
-  network: process.env.NEXT_PUBLIC_STELLAR_NETWORK || "testnet",
-  horizonUrl: process.env.NEXT_PUBLIC_HORIZON_URL || "https://horizon-testnet.stellar.org",
-  networkPassphrase: process.env.NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE || "Test SDF Network ; September 2015",
+  network: publicEnv.NEXT_PUBLIC_STELLAR_NETWORK,
+  horizonUrl: publicEnv.NEXT_PUBLIC_HORIZON_URL,
+  networkPassphrase: publicEnv.NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE,
   appName: "VeilLend",
 };
 
