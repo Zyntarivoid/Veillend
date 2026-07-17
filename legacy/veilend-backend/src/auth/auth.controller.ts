@@ -1,12 +1,22 @@
-import { Controller, Post, Body, Query, Get, UseGuards, Request, UsePipes, ValidationPipe } from '@nestjs/common';
-import { AuthService } from './auth.service';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Query,
+  Request,
+  UseGuards,
+  UsePipes,
+  ValidationPipe,
+} from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import { VerifyDto } from './dto/verify.dto';
 import { Throttle } from '@nestjs/throttler';
+import { AuthService } from './auth.service';
+import { VerifyDto } from './dto/verify.dto';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(private readonly authService: AuthService) {}
 
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('nonce')
@@ -17,17 +27,22 @@ export class AuthController {
 
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('verify')
-  @UsePipes(new ValidationPipe({ whitelist: true }))
+  @UsePipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }))
   async verify(@Body() body: VerifyDto) {
-    const user = await this.authService.verifySignature(body.address, body.signature, body.typedData, body.publicKey);
+    const user = await this.authService.verifySignature(
+      body.address,
+      body.signature,
+      body.typedData,
+      body.publicKey,
+    );
+
     return this.authService.login(user);
   }
 
   @Post('logout')
   @UseGuards(AuthGuard('jwt'))
   async logout(@Request() req) {
-    // Stateless JWTs: client can drop token. For server-side revoke, implement blacklist.
-    return { success: true };
+    return { success: true, data: { message: 'Logged out' } };
   }
 
   @UseGuards(AuthGuard('jwt'))

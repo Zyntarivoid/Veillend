@@ -1,4 +1,4 @@
-import { IsArray, IsNotEmpty, IsString, IsObject } from 'class-validator';
+import { IsArray, IsNotEmpty, IsObject, IsString } from 'class-validator';
 
 export class VerifyDto {
   @IsString()
@@ -11,7 +11,7 @@ export class VerifyDto {
 
   @IsObject()
   @IsNotEmpty()
-  typedData: any;
+  typedData: Record<string, any>;
 
   @IsString()
   @IsNotEmpty()
