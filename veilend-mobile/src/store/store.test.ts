@@ -1,3 +1,5 @@
+import assert from 'node:assert/strict';
+import { beforeEach, describe, it } from 'node:test';
 import { useStore } from '../store/store';
 import * as SecureStoreShim from '../utils/secureStoreShim';
 
@@ -31,7 +33,7 @@ describe('Auth persistence (issue #59)', () => {
     const { setAddress } = useStore.getState();
     setAddress('GBOYEE_WALLET_ADDRESS');
 
-    expect(useStore.getState().address).toBe('GBOYEE_WALLET_ADDRESS');
+    assert.equal(useStore.getState().address, 'GBOYEE_WALLET_ADDRESS');
   });
 
   it('should clear address from store when set to null', () => {
@@ -39,14 +41,14 @@ describe('Auth persistence (issue #59)', () => {
     const { setAddress } = useStore.getState();
     setAddress(null);
 
-    expect(useStore.getState().address).toBeNull();
+    assert.equal(useStore.getState().address, null);
   });
 
   it('should persist authToken when set', () => {
     const { setAuthToken } = useStore.getState();
     setAuthToken('my-jwt-token');
 
-    expect(useStore.getState().authToken).toBe('my-jwt-token');
+    assert.equal(useStore.getState().authToken, 'my-jwt-token');
   });
 
   it('should clear authToken when set to null', () => {
@@ -54,7 +56,7 @@ describe('Auth persistence (issue #59)', () => {
     const { setAuthToken } = useStore.getState();
     setAuthToken(null);
 
-    expect(useStore.getState().authToken).toBeNull();
+    assert.equal(useStore.getState().authToken, null);
   });
 
   it('logout should clear address, authToken, and isPrivacyMode', () => {
@@ -67,10 +69,10 @@ describe('Auth persistence (issue #59)', () => {
     const { logout } = useStore.getState();
     logout();
 
-    expect(useStore.getState().address).toBeNull();
-    expect(useStore.getState().authToken).toBeNull();
-    expect(useStore.getState().isPrivacyMode).toBe(false);
-    expect(useStore.getState().sessionRestored).toBe(true);
+    assert.equal(useStore.getState().address, null);
+    assert.equal(useStore.getState().authToken, null);
+    assert.equal(useStore.getState().isPrivacyMode, false);
+    assert.equal(useStore.getState().sessionRestored, true);
   });
 });
 
@@ -111,12 +113,12 @@ describe('Profile customization persistence (issue #60)', () => {
 
 describe('Privacy mode persistence (issue #59)', () => {
   it('should toggle privacy mode on', () => {
-    expect(useStore.getState().isPrivacyMode).toBe(false);
+    assert.equal(useStore.getState().isPrivacyMode, false);
 
     const { togglePrivacyMode } = useStore.getState();
     togglePrivacyMode();
 
-    expect(useStore.getState().isPrivacyMode).toBe(true);
+    assert.equal(useStore.getState().isPrivacyMode, true);
   });
 
   it('should toggle privacy mode off after being on', () => {
@@ -125,25 +127,25 @@ describe('Privacy mode persistence (issue #59)', () => {
     const { togglePrivacyMode } = useStore.getState();
     togglePrivacyMode();
 
-    expect(useStore.getState().isPrivacyMode).toBe(false);
+    assert.equal(useStore.getState().isPrivacyMode, false);
   });
 });
 
 describe('Session restore (issue #59)', () => {
   it('should have sessionRestored flag', () => {
-    expect(typeof useStore.getState().sessionRestored).toBe('boolean');
+    assert.equal(typeof useStore.getState().sessionRestored, 'boolean');
   });
 
   it('should start with sessionRestored = true after hydration', () => {
     // The IIFE at bottom of store.ts sets sessionRestored = true
     // For this test we just verify the flag exists and is boolean
-    expect([true, false]).toContain(useStore.getState().sessionRestored);
+    assert.ok([true, false].includes(useStore.getState().sessionRestored));
   });
 });
 
 describe('shieldedLoading state (issue #59)', () => {
   it('should have shieldedLoading in store for App.tsx', () => {
-    expect(typeof useStore.getState().shieldedLoading).toBe('boolean');
-    expect(useStore.getState().shieldedLoading).toBe(false);
+    assert.equal(typeof useStore.getState().shieldedLoading, 'boolean');
+    assert.equal(useStore.getState().shieldedLoading, false);
   });
 });
