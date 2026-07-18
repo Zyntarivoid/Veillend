@@ -1,11 +1,19 @@
 import { useStore } from '../store/store';
+import * as SecureStoreShim from '../utils/secureStoreShim';
+
+const flushPersistence = async () => {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+};
 
 // Helper to reset store between tests
-beforeEach(() => {
+beforeEach(async () => {
+  await SecureStoreShim.clearAllAsync();
   useStore.setState({
     address: null,
     authToken: null,
     isPrivacyMode: false,
+    profileName: null,
+    profileImage: null,
     authLoading: false,
     sessionRestored: true,
     lendingLoading: false,
@@ -63,6 +71,41 @@ describe('Auth persistence (issue #59)', () => {
     expect(useStore.getState().authToken).toBeNull();
     expect(useStore.getState().isPrivacyMode).toBe(false);
     expect(useStore.getState().sessionRestored).toBe(true);
+  });
+});
+
+describe('Profile customization persistence (issue #60)', () => {
+  it('should persist profile name when set', async () => {
+    const { setProfileName } = useStore.getState();
+    setProfileName('Veil User');
+    await flushPersistence();
+
+    expect(useStore.getState().profileName).toBe('Veil User');
+    await expect(SecureStoreShim.getItemAsync('profileName')).resolves.toBe('Veil User');
+  });
+
+  it('should persist profile image when set', async () => {
+    const { setProfileImage } = useStore.getState();
+    setProfileImage('file:///avatar.png');
+    await flushPersistence();
+
+    expect(useStore.getState().profileImage).toBe('file:///avatar.png');
+    await expect(SecureStoreShim.getItemAsync('profileImage')).resolves.toBe('file:///avatar.png');
+  });
+
+  it('logout should clear persisted profile customization', async () => {
+    const { setProfileName, setProfileImage, logout } = useStore.getState();
+    setProfileName('Veil User');
+    setProfileImage('file:///avatar.png');
+    await flushPersistence();
+
+    logout();
+    await flushPersistence();
+
+    expect(useStore.getState().profileName).toBeNull();
+    expect(useStore.getState().profileImage).toBeNull();
+    await expect(SecureStoreShim.getItemAsync('profileName')).resolves.toBeNull();
+    await expect(SecureStoreShim.getItemAsync('profileImage')).resolves.toBeNull();
   });
 });
 
