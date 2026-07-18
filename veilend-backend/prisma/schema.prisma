@@ -173,3 +173,11 @@ model SyncCheckpoint {
   @@unique([userId])
   @@index([userId])
 }
+
+model Admin {
+  id             String   @id @default(uuid())
+  walletAddress  String   @unique
+  createdAt      DateTime @default(now())
+
+  @@index([walletAddress])
+}
