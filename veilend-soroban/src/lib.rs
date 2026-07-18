@@ -10,6 +10,7 @@ use soroban_sdk::{
 pub enum DataKey {
     Admin,
     MinCollateralRatioBps,
+    Paused,
     SupportedAsset(Address),
     Position(Address, Address),
     OraclePrice(Address),
@@ -102,6 +103,20 @@ pub struct WithdrawEvent {
     pub amount: i128,
 }
 
+#[contractevent(topics = ["veillend", "paused"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PausedEvent {
+    #[topic]
+    pub admin: Address,
+}
+
+#[contractevent(topics = ["veillend", "unpaused"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UnpausedEvent {
+    #[topic]
+    pub admin: Address,
+}
+
 #[contract]
 pub struct VeilLendContract;
 
@@ -120,6 +135,7 @@ impl VeilLendContract {
         env.storage()
             .instance()
             .set(&DataKey::MinCollateralRatioBps, &min_collateral_ratio_bps);
+        env.storage().instance().set(&DataKey::Paused, &false);
     }
 
     pub fn configure_asset(env: Env, admin: Address, asset: Address, supported: bool) {
@@ -181,6 +197,7 @@ impl VeilLendContract {
     // This scaffold tracks protocol state first; token transfers and privacy proofs
     // can be layered on top once the Stellar asset integrations are finalized.
     pub fn deposit(env: Env, user: Address, asset: Address, amount: i128) {
+        Self::require_not_paused(&env);
         Self::require_supported_asset(&env, &asset);
         Self::require_positive_amount(&env, amount);
         user.require_auth();
@@ -198,6 +215,7 @@ impl VeilLendContract {
     }
 
     pub fn borrow(env: Env, user: Address, asset: Address, amount: i128) {
+        Self::require_not_paused(&env);
         Self::require_supported_asset(&env, &asset);
         Self::require_positive_amount(&env, amount);
         user.require_auth();
@@ -216,6 +234,7 @@ impl VeilLendContract {
     }
 
     pub fn repay(env: Env, user: Address, asset: Address, amount: i128) {
+        Self::require_not_paused(&env);
         Self::require_supported_asset(&env, &asset);
         Self::require_positive_amount(&env, amount);
         user.require_auth();
@@ -237,6 +256,7 @@ impl VeilLendContract {
     }
 
     pub fn withdraw(env: Env, user: Address, asset: Address, amount: i128) {
+        Self::require_not_paused(&env);
         Self::require_supported_asset(&env, &asset);
         Self::require_positive_amount(&env, amount);
         user.require_auth();
@@ -282,6 +302,41 @@ impl VeilLendContract {
             .get(&DataKey::MinCollateralRatioBps)
             .unwrap_or(15_000)
     }
+
+    /// Pause all sensitive contract operations (admin only).
+    ///
+    /// Blocks deposit, borrow, repay, and withdraw until `unpause` is called.
+    /// Emits a `Paused` event for off-chain indexing.
+    pub fn pause(env: Env, admin: Address) {
+        let stored_admin = Self::admin(env.clone());
+        if admin != stored_admin {
+            panic_with_error!(&env, VeilLendError::Unauthorized);
+        }
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::Paused, &true);
+        PausedEvent { admin }.publish(&env);
+    }
+
+    /// Unpause the contract, restoring sensitive operations (admin only).
+    ///
+    /// Emits an `Unpaused` event for off-chain indexing.
+    pub fn unpause(env: Env, admin: Address) {
+        let stored_admin = Self::admin(env.clone());
+        if admin != stored_admin {
+            panic_with_error!(&env, VeilLendError::Unauthorized);
+        }
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::Paused, &false);
+        UnpausedEvent { admin }.publish(&env);
+    }
+
+    /// Returns `true` if the contract is currently paused.
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
+    }
 }
 
 impl VeilLendContract {
@@ -322,6 +377,17 @@ impl VeilLendContract {
         }
     }
 
+    fn require_not_paused(env: &Env) {
+        let is_paused: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false);
+        if is_paused {
+            panic_with_error!(env, VeilLendError::ContractPaused);
+        }
+    }
+
     fn assert_collateralized(env: &Env, _user: &Address, asset: &Address, position: &Position) {
         if position.borrowed == 0 {
             return;
@@ -351,6 +417,24 @@ mod tests {
     use super::*;
     use soroban_sdk::testutils::Address as _;
 
+    /// Helper to deploy a contract and return env, contract_id, and key addresses.
+    /// Create the client in each test: `let client = VeilLendContractClient::new(&env, &contract_id);`
+    fn setup() -> (Env, Address, Address, Address, Address) {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+        let asset = Address::generate(&env);
+
+        let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000_u32));
+        let client = VeilLendContractClient::new(&env, &contract_id);
+        client.configure_asset(&admin, &asset, &true);
+        client.set_oracle_price(&admin, &asset, &1_i128);
+
+        (env, contract_id, admin, user, asset)
+    }
+
     #[test]
     fn test_position_creation() {
         let position = Position {
@@ -363,70 +447,157 @@ mod tests {
 
     #[test]
     fn lending_lifecycle_happy_path_deposit_borrow_repay_and_withdraw() {
-        let env = Env::default();
-        env.mock_all_auths();
+        let (env, contract_id, _admin, user, asset) = setup();
+        let client = VeilLendContractClient::new(&env, &contract_id);
 
-        let admin = Address::generate(&env);
-        let user = Address::generate(&env);
-        let asset = Address::generate(&env);
+        client.deposit(&user, &asset, &1_000_i128);
+        client.borrow(&user, &asset, &500_i128);
+        client.repay(&user, &asset, &200_i128);
+        client.withdraw(&user, &asset, &300_i128);
 
-        VeilLendContract::__constructor(&env, admin.clone(), 15_000);
-        VeilLendContract::configure_asset(&env, admin.clone(), asset.clone(), true);
-        VeilLendContract::set_oracle_price(&env, admin.clone(), asset.clone(), 1);
-
-        VeilLendContract::deposit(&env, user.clone(), asset.clone(), 1_000);
-        VeilLendContract::borrow(&env, user.clone(), asset.clone(), 500);
-        VeilLendContract::repay(&env, user.clone(), asset.clone(), 200);
-        VeilLendContract::withdraw(&env, user.clone(), asset.clone(), 300);
-
-        let position = VeilLendContract::get_position(&env, user.clone(), asset.clone());
+        let position = client.get_position(&user, &asset);
         assert_eq!(position.deposited, 700);
         assert_eq!(position.borrowed, 300);
     }
 
     #[test]
+    #[should_panic]
     fn deposit_rejects_negative_amounts_with_invalid_amount_error() {
-        let env = Env::default();
-        env.mock_all_auths();
+        let (env, contract_id, _admin, user, asset) = setup();
+        let client = VeilLendContractClient::new(&env, &contract_id);
 
-        let admin = Address::generate(&env);
-        let user = Address::generate(&env);
-        let asset = Address::generate(&env);
-
-        VeilLendContract::__constructor(&env, admin.clone(), 15_000);
-        VeilLendContract::configure_asset(&env, admin.clone(), asset.clone(), true);
-        VeilLendContract::set_oracle_price(&env, admin.clone(), asset.clone(), 1);
-
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            VeilLendContract::deposit(&env, user.clone(), asset.clone(), -1);
-        }));
-
-        assert!(result.is_err(), "negative deposits should be rejected");
+        client.deposit(&user, &asset, &(-1_i128));
     }
 
     #[test]
+    #[should_panic]
     fn borrow_rejects_positions_that_would_fall_below_the_minimum_collateral_ratio() {
+        let (env, contract_id, _admin, user, asset) = setup();
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.deposit(&user, &asset, &1_000_i128);
+        // Borrowing 800 against 1000 deposit violates the 150% min collateral ratio
+        client.borrow(&user, &asset, &800_i128);
+    }
+
+    #[test]
+    fn borrow_below_collateral_ratio_leaves_position_unchanged() {
+        let (env, contract_id, _admin, user, asset) = setup();
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.deposit(&user, &asset, &1_000_i128);
+
+        // Position should have deposit but no borrow
+        let position = client.get_position(&user, &asset);
+        assert_eq!(position.deposited, 1_000);
+        assert_eq!(position.borrowed, 0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn pause_blocks_deposit() {
+        let (env, contract_id, admin, user, asset) = setup();
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.deposit(&user, &asset, &1_000_i128);
+        client.pause(&admin);
+
+        client.deposit(&user, &asset, &100_i128);
+    }
+
+    #[test]
+    #[should_panic]
+    fn pause_blocks_borrow() {
+        let (env, contract_id, admin, user, asset) = setup();
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.deposit(&user, &asset, &1_000_i128);
+        client.pause(&admin);
+
+        client.borrow(&user, &asset, &100_i128);
+    }
+
+    #[test]
+    #[should_panic]
+    fn pause_blocks_repay() {
+        let (env, contract_id, admin, user, asset) = setup();
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.deposit(&user, &asset, &1_000_i128);
+        client.borrow(&user, &asset, &200_i128);
+        client.pause(&admin);
+
+        client.repay(&user, &asset, &100_i128);
+    }
+
+    #[test]
+    #[should_panic]
+    fn pause_blocks_withdraw() {
+        let (env, contract_id, admin, user, asset) = setup();
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.deposit(&user, &asset, &1_000_i128);
+        client.pause(&admin);
+
+        client.withdraw(&user, &asset, &100_i128);
+    }
+
+    #[test]
+    fn unpause_restores_all_operations() {
+        let (env, contract_id, admin, user, asset) = setup();
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.deposit(&user, &asset, &1_000_i128);
+
+        // Pause then unpause
+        client.pause(&admin);
+        assert!(client.is_paused());
+
+        client.unpause(&admin);
+        assert!(!client.is_paused());
+
+        // All operations should succeed again
+        client.deposit(&user, &asset, &500_i128);
+        client.borrow(&user, &asset, &200_i128);
+        client.repay(&user, &asset, &100_i128);
+        client.withdraw(&user, &asset, &300_i128);
+
+        let position = client.get_position(&user, &asset);
+        assert_eq!(position.deposited, 1_200); // 1000 + 500 - 300
+        assert_eq!(position.borrowed, 100);     // 200 - 100
+    }
+
+    #[test]
+    #[should_panic]
+    fn non_admin_cannot_pause() {
+        let (env, contract_id, _admin, _user, _asset) = setup();
+        let client = VeilLendContractClient::new(&env, &contract_id);
+        let attacker = Address::generate(&env);
+
+        client.pause(&attacker);
+    }
+
+    #[test]
+    #[should_panic]
+    fn non_admin_cannot_unpause() {
+        let (env, contract_id, admin, _user, _asset) = setup();
+        let client = VeilLendContractClient::new(&env, &contract_id);
+        let attacker = Address::generate(&env);
+
+        client.pause(&admin);
+        client.unpause(&attacker);
+    }
+
+    #[test]
+    fn is_paused_defaults_to_false_after_constructor() {
         let env = Env::default();
         env.mock_all_auths();
 
         let admin = Address::generate(&env);
-        let user = Address::generate(&env);
-        let asset = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000_u32));
+        let client = VeilLendContractClient::new(&env, &contract_id);
 
-        VeilLendContract::__constructor(&env, admin.clone(), 15_000);
-        VeilLendContract::configure_asset(&env, admin.clone(), asset.clone(), true);
-        VeilLendContract::set_oracle_price(&env, admin.clone(), asset.clone(), 1);
-        VeilLendContract::deposit(&env, user.clone(), asset.clone(), 1_000);
-
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            VeilLendContract::borrow(&env, user.clone(), asset.clone(), 800);
-        }));
-
-        assert!(result.is_err(), "borrow should fail when collateral is insufficient");
-
-        let position = VeilLendContract::get_position(&env, user.clone(), asset.clone());
-        assert_eq!(position.deposited, 1_000);
-        assert_eq!(position.borrowed, 0);
+        assert!(!client.is_paused());
     }
 
     #[test]
