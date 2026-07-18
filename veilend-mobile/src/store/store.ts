@@ -19,6 +19,8 @@ const PERSIST_KEYS = {
   authToken: 'authToken',
   address: 'address',
   isPrivacyMode: 'isPrivacyMode',
+  profileName: 'profileName',
+  profileImage: 'profileImage',
   secretKey: 'stellar_secret_key',
 } as const;
 
@@ -36,6 +38,10 @@ type AuthState = {
 
 type UiState = {
   isPrivacyMode: boolean;
+  profileName: Nullable<string>;
+  profileImage: Nullable<string>;
+  setProfileName: (name: string | null) => void;
+  setProfileImage: (uri: string | null) => void;
   togglePrivacyMode: () => void;
   expectedNetwork: string;
   currentNetwork: string | null;
@@ -113,6 +119,8 @@ export const useStore = create<StoreState>(
         address: null,
         authToken: null,
         isPrivacyMode: false,
+        profileName: null,
+        profileImage: null,
         sessionRestored: true,
       });
       // Clear ALL persisted keys to prevent stale data on next launch
@@ -120,6 +128,8 @@ export const useStore = create<StoreState>(
         SecureStore.deleteItemAsync(PERSIST_KEYS.authToken);
         SecureStore.deleteItemAsync(PERSIST_KEYS.address);
         SecureStore.deleteItemAsync(PERSIST_KEYS.isPrivacyMode);
+        SecureStore.deleteItemAsync(PERSIST_KEYS.profileName);
+        SecureStore.deleteItemAsync(PERSIST_KEYS.profileImage);
         SecureStore.deleteItemAsync(PERSIST_KEYS.secretKey);
       } catch (e) {
         // ignore persistence errors
@@ -128,6 +138,26 @@ export const useStore = create<StoreState>(
 
     // UI
     isPrivacyMode: false,
+    profileName: null,
+    profileImage: null,
+    setProfileName: (name: string | null) => {
+      set({ profileName: name });
+      try {
+        if (name) SecureStore.setItemAsync(PERSIST_KEYS.profileName, name);
+        else SecureStore.deleteItemAsync(PERSIST_KEYS.profileName);
+      } catch (e) {
+        // ignore persistence errors
+      }
+    },
+    setProfileImage: (uri: string | null) => {
+      set({ profileImage: uri });
+      try {
+        if (uri) SecureStore.setItemAsync(PERSIST_KEYS.profileImage, uri);
+        else SecureStore.deleteItemAsync(PERSIST_KEYS.profileImage);
+      } catch (e) {
+        // ignore persistence errors
+      }
+    },
     togglePrivacyMode: () => {
       const next = !get().isPrivacyMode;
       set({ isPrivacyMode: next });
@@ -297,16 +327,20 @@ export const useStore = create<StoreState>(
 // ──────────────────────────────────────────────
 (async () => {
   try {
-    const [token, address, privacyMode] = await Promise.all([
+    const [token, address, privacyMode, profileName, profileImage] = await Promise.all([
       SecureStore.getItemAsync(PERSIST_KEYS.authToken),
       SecureStore.getItemAsync(PERSIST_KEYS.address),
       SecureStore.getItemAsync(PERSIST_KEYS.isPrivacyMode),
+      SecureStore.getItemAsync(PERSIST_KEYS.profileName),
+      SecureStore.getItemAsync(PERSIST_KEYS.profileImage),
     ]);
 
     const patch: Partial<AuthState & UiState> = { sessionRestored: true };
     if (token) patch.authToken = token;
     if (address) patch.address = address;
     if (privacyMode === 'true') patch.isPrivacyMode = true;
+    if (profileName) patch.profileName = profileName;
+    if (profileImage) patch.profileImage = profileImage;
 
     useStore.setState(patch);
   } catch (e) {
