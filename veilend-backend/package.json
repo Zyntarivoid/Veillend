@@ -22,7 +22,6 @@
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
-    "@nestjs/bull": "^11.0.4",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.0.1",
@@ -30,10 +29,8 @@
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/throttler": "^6.5.0",
-    "@nestjs/typeorm": "^11.0.2",
     "@prisma/client": "^5.22.0",
     "@stellar/stellar-sdk": "^15.1.0",
-    "bull": "^4.16.5",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
     "nestjs-cls": "^6.2.1",
@@ -44,7 +41,6 @@
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "stellar-sdk": "^13.3.0",
-    "typeorm": "^1.0.0",
     "uuid": "^14.0.0"
   },
   "devDependencies": {
