@@ -12,6 +12,49 @@ export interface WalletInfo {
   publicKey: string;
 }
 
+export interface WalletConnectionMessage {
+  title: string;
+  description: string;
+  primaryAction: string;
+  secondaryAction: string;
+  isRetryable: boolean;
+}
+
+export const getWalletConnectionMessage = (
+  errorMessage?: string | null,
+  isInstalled = true
+): WalletConnectionMessage => {
+  const normalizedError = (errorMessage || "").toLowerCase();
+
+  if (!isInstalled || normalizedError.includes("not installed") || normalizedError.includes("install")) {
+    return {
+      title: "Freighter is not ready",
+      description: "Install the Freighter browser extension, then return here and connect again.",
+      primaryAction: "Connect",
+      secondaryAction: "Cancel",
+      isRetryable: false,
+    };
+  }
+
+  if (normalizedError.includes("unlock") || normalizedError.includes("not connected") || normalizedError.includes("connected")) {
+    return {
+      title: "Wallet connection needs attention",
+      description: "Unlock Freighter and approve the connection request so VeilLend can continue.",
+      primaryAction: "Try again",
+      secondaryAction: "Cancel",
+      isRetryable: true,
+    };
+  }
+
+  return {
+    title: "We hit a wallet issue",
+    description: "Review the message below, then try again when you're ready to continue.",
+    primaryAction: "Try again",
+    secondaryAction: "Cancel",
+    isRetryable: true,
+  };
+};
+
 /**
  * Check if Freighter wallet is installed
  */
