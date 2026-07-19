@@ -15,7 +15,7 @@ The application architecture is organized into distinct domain modules to clearl
 ### Core Modules
 
 - **Auth (`src/auth`)**
-  - **Responsibility**: Manages wallet-based authentication, verifying Stellar signatures, session management, and role-based access control (RBAC).
+  - **Responsibility**: Manages wallet-based authentication, verifying Stellar signatures, and role-based access control (RBAC). Issues database-backed sessions that can be inspected (`GET /auth/session`) and revoked (`POST /auth/logout`) independently of JWT expiry — see [`SESSION.md`](./SESSION.md) for the full lifecycle.
 
 - **Portfolios (`src/portfolios`)**
   - **Responsibility**: Manages user portfolios, aggregates positions, calculates health factors, and groups assets per user or wallet address.
