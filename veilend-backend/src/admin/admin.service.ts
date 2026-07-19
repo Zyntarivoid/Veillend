@@ -27,7 +27,7 @@ export class AdminService {
     return this.prisma.admin.findMany();
   }
 
-  async configureAsset(dto: ConfigureAssetDto) {
+  configureAsset(dto: ConfigureAssetDto) {
     // Placeholder: Actual contract interaction would go here
     return {
       success: true,
@@ -36,7 +36,7 @@ export class AdminService {
     };
   }
 
-  async setOraclePrice(dto: SetOraclePriceDto) {
+  setOraclePrice(dto: SetOraclePriceDto) {
     // Placeholder: Actual contract interaction would go here
     return {
       success: true,
@@ -45,7 +45,7 @@ export class AdminService {
     };
   }
 
-  async setMinCollateralRatio(dto: SetMinCollateralRatioDto) {
+  setMinCollateralRatio(dto: SetMinCollateralRatioDto) {
     // Placeholder: Actual contract interaction would go here
     return {
       success: true,
@@ -54,4 +54,3 @@ export class AdminService {
     };
   }
 }
-
