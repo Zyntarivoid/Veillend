@@ -108,6 +108,8 @@ describe('IndexerService', () => {
       const mockScValToNative = scValToNative as jest.Mock;
       mockScValToNative.mockImplementation((val) => val);
 
+      mockRepository.saveTransaction.mockResolvedValueOnce(true);
+
       await service.runIndexer();
 
       expect(mockRpcClient.getLatestLedger).toHaveBeenCalled();
@@ -158,6 +160,7 @@ describe('IndexerService', () => {
     beforeEach(() => {
       mockRepository.getCheckpoint.mockResolvedValue({ lastIndexedLedger: 10 });
       mockRpcClient.getLatestLedger.mockResolvedValue({ sequence: 15 });
+      mockRepository.saveTransaction.mockResolvedValue(true);
     });
 
     it('should process borrow event', async () => {
@@ -238,6 +241,30 @@ describe('IndexerService', () => {
         'asset-addr',
         true,
       );
+    });
+
+    it('should skip updating position if saveTransaction returns false (duplicate event)', async () => {
+      const mockEvent = {
+        id: 'evt-dup',
+        topic: ['veillend', 'borrow', 'user-addr', 'asset-addr'],
+        value: 500n,
+        ledger: 12,
+      };
+      mockRpcClient.getEvents.mockResolvedValueOnce({ events: [mockEvent] });
+
+      // Return false to simulate a duplicate event
+      mockRepository.saveTransaction.mockResolvedValueOnce(false);
+
+      await service.runIndexer();
+
+      expect(mockRepository.saveTransaction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'borrow',
+          amount: '500',
+        }),
+      );
+      // It should NOT call updatePosition
+      expect(mockRepository.updatePosition).not.toHaveBeenCalled();
     });
   });
 });

@@ -104,14 +104,16 @@ export class IndexerRepository {
     );
   }
 
-  async saveTransaction(tx: IndexerTransaction): Promise<void> {
+  async saveTransaction(tx: IndexerTransaction): Promise<boolean> {
     const data = await this.loadData();
     // Check for duplicate transaction ID to enforce idempotency
     const exists = data.transactions.some((t) => t.id === tx.id);
     if (!exists) {
       data.transactions.push(tx);
       await this.saveData(data);
+      return true;
     }
+    return false;
   }
 
   async getPositions(userAddress: string): Promise<IndexerPosition[]> {

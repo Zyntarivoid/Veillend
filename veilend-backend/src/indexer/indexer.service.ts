@@ -218,7 +218,7 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
         const amount = this.parseAmount(amountVal);
         const amountStr = amount.toString();
 
-        await this.repository.saveTransaction({
+        const isNewTx = await this.repository.saveTransaction({
           id,
           userAddress,
           type: topic1 as 'deposit' | 'borrow' | 'repay' | 'withdraw',
@@ -229,25 +229,31 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
           timestamp,
         });
 
-        let depositedDelta = 0n;
-        let borrowedDelta = 0n;
+        if (isNewTx) {
+          let depositedDelta = 0n;
+          let borrowedDelta = 0n;
 
-        if (topic1 === 'deposit') {
-          depositedDelta = amount;
-        } else if (topic1 === 'withdraw') {
-          depositedDelta = -amount;
-        } else if (topic1 === 'borrow') {
-          borrowedDelta = amount;
-        } else if (topic1 === 'repay') {
-          borrowedDelta = -amount;
+          if (topic1 === 'deposit') {
+            depositedDelta = amount;
+          } else if (topic1 === 'withdraw') {
+            depositedDelta = -amount;
+          } else if (topic1 === 'borrow') {
+            borrowedDelta = amount;
+          } else if (topic1 === 'repay') {
+            borrowedDelta = -amount;
+          }
+
+          await this.repository.updatePosition(
+            userAddress,
+            assetAddress,
+            depositedDelta,
+            borrowedDelta,
+          );
+        } else {
+          this.logger.warn(
+            `Skipping duplicate event processing for tx id: ${id}`,
+          );
         }
-
-        await this.repository.updatePosition(
-          userAddress,
-          assetAddress,
-          depositedDelta,
-          borrowedDelta,
-        );
       }
     } catch (error) {
       this.logger.error(
