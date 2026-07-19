@@ -4,7 +4,7 @@ import {
   OnApplicationBootstrap,
   OnModuleDestroy,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { AppConfigService } from '../config/app-config.service';
 import { scValToNative, rpc, xdr } from '@stellar/stellar-sdk';
 import { SorobanRpcService } from '../stellar/soroban-rpc.service';
 import {
@@ -20,7 +20,7 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
   private pollTimeout?: NodeJS.Timeout;
 
   constructor(
-    private readonly configService: ConfigService,
+    private readonly configService: AppConfigService,
     private readonly rpcService: SorobanRpcService,
     private readonly repository: IndexerRepository,
   ) {}
@@ -37,10 +37,7 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
   }
 
   private startPolling() {
-    const interval = this.configService.get<number>(
-      'indexer.pollIntervalMs',
-      5000,
-    );
+    const interval = this.configService.indexer.pollIntervalMs;
     this.pollTimeout = setTimeout(() => {
       void this.runIndexer().then(() => {
         this.startPolling();
@@ -55,14 +52,8 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
     this.isProcessing = true;
 
     try {
-      const configStartLedger = this.configService.get<number>(
-        'indexer.startLedger',
-        1,
-      );
-      const contractId = this.configService.get<string>(
-        'indexer.contractId',
-        '',
-      );
+      const configStartLedger = this.configService.indexer.startLedger;
+      const contractId = this.configService.indexer.contractId;
 
       if (!contractId) {
         this.logger.warn(

@@ -8,14 +8,18 @@ export interface IndexerConfig {
 
 export default registerAs(
   'indexer',
-  (): IndexerConfig => ({
-    contractId:
-      process.env.STELLAR_CONTRACT_ID ||
+  (configService: { get: (key: string, defaultValue: any) => any }): IndexerConfig => ({
+    contractId: configService.get(
+      'STELLAR_CONTRACT_ID',
       'CCW57ZST4NV43YS7JZKMGLG62624NV43YS7JZKMGLG62624NV43YS7JZ',
-    startLedger: parseInt(process.env.STELLAR_INDEXER_START_LEDGER || '1', 10),
-    pollIntervalMs: parseInt(
-      process.env.STELLAR_INDEXER_POLL_INTERVAL_MS || '5000',
-      10,
+    ),
+    startLedger: configService.get(
+      'STELLAR_INDEXER_START_LEDGER',
+      1,
+    ),
+    pollIntervalMs: configService.get(
+      'STELLAR_INDEXER_POLL_INTERVAL_MS',
+      5000,
     ),
   }),
 );
