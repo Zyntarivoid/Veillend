@@ -57,6 +57,7 @@ export default function BorrowScreen() {
         {MOCK_ASSETS.map((asset) => (
           <TouchableOpacity
             key={asset.id}
+            testID={`asset-card-${asset.symbol}`}
             style={styles.assetCard}
             onPress={() => openBorrowModal(asset)}
           >
@@ -106,7 +107,7 @@ export default function BorrowScreen() {
                 <TouchableOpacity onPress={() => setModalVisible(false)} style={[styles.modalBtn, { backgroundColor: '#333' }]}>
                   <Text style={styles.buttonText}>Cancel</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={confirmBorrow} style={[styles.modalBtn, { backgroundColor: '#A855F7' }]} disabled={useStore.getState().lendingLoading}>
+                <TouchableOpacity testID="confirm-borrow-btn" onPress={confirmBorrow} style={[styles.modalBtn, { backgroundColor: '#A855F7' }]} disabled={useStore.getState().lendingLoading}>
                   {useStore.getState().lendingLoading ? <ActivityIndicator color="#fff"/> : <Text style={styles.buttonText}>Confirm</Text>}
                 </TouchableOpacity>
               </View>
