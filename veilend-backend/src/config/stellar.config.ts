@@ -15,6 +15,5 @@ export class StellarConfig {
 
   @IsOptional()
   @IsString()
-  STELLAR_NETWORK_PASSPHRASE: string =
-    'Test SDF Network ; September 2015';
+  STELLAR_NETWORK_PASSPHRASE: string = 'Test SDF Network ; September 2015';
 }

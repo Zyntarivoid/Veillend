@@ -8,7 +8,9 @@ export interface StellarConfig {
 
 export default registerAs(
   'stellar',
-  (configService: { get: (key: string, defaultValue: string) => string }): StellarConfig => ({
+  (configService: {
+    get: (key: string, defaultValue: string) => string;
+  }): StellarConfig => ({
     horizonUrl: configService.get(
       'STELLAR_HORIZON_URL',
       'https://horizon-testnet.stellar.org',
