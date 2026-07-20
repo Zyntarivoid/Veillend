@@ -15,7 +15,7 @@ The application architecture is organized into distinct domain modules to clearl
 ### Core Modules
 
 - **Auth (`src/auth`)**
-  - **Responsibility**: Manages wallet-based authentication, verifying Stellar signatures, session management, and role-based access control (RBAC).
+  - **Responsibility**: Manages wallet-based authentication, verifying Stellar signatures, and role-based access control (RBAC). Issues database-backed sessions that can be inspected (`GET /auth/session`) and revoked (`POST /auth/logout`) independently of JWT expiry — see [`SESSION.md`](./SESSION.md) for the full lifecycle.
 
 - **Portfolios (`src/portfolios`)**
   - **Responsibility**: Manages user portfolios, aggregates positions, calculates health factors, and groups assets per user or wallet address.
@@ -31,6 +31,16 @@ The application architecture is organized into distinct domain modules to clearl
 
 - **Admin Configuration (`src/admin`)**
   - **Responsibility**: Manages protocol-wide settings, risk parameters (e.g., LTV, liquidation thresholds), and administrative operations.
+
+## Contract Synchronization & Validation
+
+To maintain alignment between the backend and the evolving Soroban contract interface, two npm scripts are provided:
+
+- **Sync Contracts**: `npm run sync-contracts`
+  Run this command to refresh and generate updated artifacts if the smart contract logic changes. (Note: Currently relies on existing shapes per configuration, but serves as the standard refresh command for contributors).
+  
+- **Validate Contracts**: `npm run validate-contracts`
+  Run this command during development or in CI to statically detect contract shape drift. It ensures the indexer natively handles all expected contract events without missing critical handlers.
 
 ## Shared Contracts and DTO Conventions
 

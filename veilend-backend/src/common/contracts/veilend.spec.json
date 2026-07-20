@@ -1,0 +1,26 @@
+{
+  "name": "VeilLend",
+  "version": "1.0.0",
+  "events": [
+    {
+      "topic": "deposit",
+      "description": "Emitted when a user deposits an asset"
+    },
+    {
+      "topic": "borrow",
+      "description": "Emitted when a user borrows an asset"
+    },
+    {
+      "topic": "repay",
+      "description": "Emitted when a user repays a borrowed asset"
+    },
+    {
+      "topic": "withdraw",
+      "description": "Emitted when a user withdraws a deposited asset"
+    },
+    {
+      "topic": "asset_configured",
+      "description": "Emitted when an admin configures an asset's support status"
+    }
+  ]
+}

@@ -2,8 +2,8 @@
 
 import { useEffect } from 'react';
 import { Container, Flex, Section } from '@/components/Layout';
-import { Button } from '@/components/Button';
-import { Alert } from '@/components/Alert';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
 
 export default function DashboardError({
   error,
@@ -22,15 +22,15 @@ export default function DashboardError({
       <Container className="pb-16">
         <Section className="pt-20 pb-10">
           <Flex direction="col" gap="lg" className="max-w-2xl mx-auto text-center">
-            <Alert variant="error" className="text-left">
-              <h2 className="font-bold text-lg mb-2">Failed to load dashboard</h2>
-              <p className="text-sm">
+            <Alert variant="destructive" className="text-left">
+              <AlertTitle>Failed to load dashboard</AlertTitle>
+              <AlertDescription>
                 We encountered an error while fetching your live portfolio and activity data. 
                 Please try again or check your network connection.
-              </p>
+              </AlertDescription>
             </Alert>
             <div className="mt-4">
-              <Button onClick={() => reset()} variant="primary">
+              <Button onClick={() => reset()}>
                 Try again
               </Button>
             </div>

@@ -1,14 +1,16 @@
 'use client';
 
 import React from 'react';
-import { buttonClassName } from '@/components/Button';
+import { type VariantProps } from 'class-variance-authority';
+import { buttonVariants } from '@/components/ui/button';
 import { trackCampaignEvent } from '@/lib/campaignAnalytics';
+import { cn } from '@/lib/utils';
 
 type TrackedLinkProps = React.AnchorHTMLAttributes<HTMLAnchorElement> & {
   ctaId: string;
   ctaLabel: string;
-  variant?: 'primary' | 'secondary' | 'outline' | 'ghost';
-  size?: 'sm' | 'md' | 'lg';
+  variant?: VariantProps<typeof buttonVariants>['variant'];
+  size?: VariantProps<typeof buttonVariants>['size'];
   fullWidth?: boolean;
 };
 
@@ -18,8 +20,8 @@ export function TrackedLink({
   href,
   onClick,
   className,
-  variant = 'primary',
-  size = 'md',
+  variant = 'default',
+  size = 'default',
   fullWidth = false,
   children,
   ...props
@@ -27,7 +29,7 @@ export function TrackedLink({
   return (
     <a
       href={href}
-      className={buttonClassName({ variant, size, fullWidth, className })}
+      className={cn(buttonVariants({ variant, size }), fullWidth && 'w-full', className)}
       onClick={(event) => {
         trackCampaignEvent('campaign_cta_click', {
           ctaId,

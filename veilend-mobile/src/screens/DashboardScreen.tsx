@@ -7,7 +7,11 @@ import * as ImagePicker from 'expo-image-picker';
 import { MOCK_USER } from '../data/mockData';
 import { shortenAddress } from '../utils/helpers';
 import ProtocolStatusBanners from '../components/ProtocolStatusBanners';
-import { useResponsive } from '../hooks/useResponsive';
+
+const { width } = Dimensions.get('window');
+const isSmallScreen = width < 380;
+const CARD_WIDTH = width - 48; // Padding 24 * 2
+const DEFAULT_PROFILE_IMAGE = 'https://i.pravatar.cc/100?img=5';
 
 
   
@@ -21,6 +25,10 @@ export default function DashboardScreen({ navigation }: any) {
     authToken,
     logout,
     isPrivacyMode,
+    profileName,
+    profileImage,
+    setProfileName,
+    setProfileImage,
     togglePrivacyMode,
     expectedNetwork,
     currentNetwork,
@@ -75,18 +83,18 @@ export default function DashboardScreen({ navigation }: any) {
       </View>
     );
   }
-  const [username, setUsername] = useState(address ? shortenAddress(address) : MOCK_USER.name);
   const [isEditingName, setIsEditingName] = useState(false);
-  const [tempName, setTempName] = useState(address ? shortenAddress(address) : MOCK_USER.name);
-  const [profileImage, setProfileImage] = useState('https://i.pravatar.cc/100?img=5');
+  const [tempName, setTempName] = useState('');
+
+  const defaultUsername = address ? shortenAddress(address) : MOCK_USER.name;
+  const username = profileName ?? defaultUsername;
+  const avatarUri = profileImage ?? DEFAULT_PROFILE_IMAGE;
 
   useEffect(() => {
-    if (address) {
-      const shortAddr = shortenAddress(address);
-      setUsername(shortAddr);
-      setTempName(shortAddr);
+    if (!isEditingName) {
+      setTempName(username);
     }
-  }, [address]);
+  }, [isEditingName, username]);
 
   const handleLogout = () => {
     setProfileVisible(false);
@@ -99,7 +107,8 @@ export default function DashboardScreen({ navigation }: any) {
   };
 
   const saveUsername = () => {
-    setUsername(tempName);
+    const nextName = tempName.trim();
+    setProfileName(nextName.length > 0 ? nextName : null);
     setIsEditingName(false);
   };
 
@@ -256,9 +265,8 @@ export default function DashboardScreen({ navigation }: any) {
             accessibilityHint="Opens profile and settings"
           >
             <Image 
-              source={{ uri: profileImage }} 
-              style={styles.avatar}
-              accessibilityIgnoresInvertColors={false}
+              source={{ uri: avatarUri }} 
+              style={styles.avatar} 
             />
           </TouchableOpacity>
         </View>
@@ -856,5 +864,4 @@ function makeStyles(s: boolean) {
     fontSize: 16,
     fontWeight: 'bold',
   },
-  });
-}
+});

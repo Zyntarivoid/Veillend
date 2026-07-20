@@ -56,6 +56,17 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 | [ESLint](https://eslint.org)                 | 9       | Code linting                    |
 | [Prettier](https://prettier.io)              | 3       | Code formatting                 |
 
+## UI component standard
+
+The web application standardizes on [shadcn/ui](https://ui.shadcn.com/) components backed by Radix UI primitives. Use the components in `src/components/ui/` for reusable controls and surfaces; Tailwind utilities remain appropriate for page layout and for composing product-specific views.
+
+- Import primitives from `@/components/ui/<component>` (for example, `@/components/ui/button`). Do not add parallel `Button`, `Card`, `Input`, `Badge`, `Alert`, or `Skeleton` components outside this directory.
+- Prefer an existing component and its `variant`, `size`, and `className` APIs before adding custom markup. Keep product-specific compositions such as wallet and campaign views in `src/components/`.
+- To add a missing primitive, generate or adapt it using the shadcn/Radix conventions in this repository: TypeScript, `cn` from `@/lib/utils`, `data-slot` attributes, and variants with `class-variance-authority` where needed.
+- Update `components.json` when the shadcn configuration changes, and document any intentionally bespoke component in its source file.
+
+This keeps accessibility behavior, visual states, and maintenance in one component layer. The former duplicate primitives have been removed; migrate any stale imports to `@/components/ui/` rather than restoring them.
+
 ## Project Structure
 
 ```

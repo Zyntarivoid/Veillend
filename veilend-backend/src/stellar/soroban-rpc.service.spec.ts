@@ -1,6 +1,6 @@
-/* eslint-disable @typescript-eslint/unbound-method, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConfigService } from '@nestjs/config';
+import { AppConfigService } from '../config/app-config.service';
 import { SorobanRpcService } from './soroban-rpc.service';
 import { rpc } from '@stellar/stellar-sdk';
 
@@ -19,30 +19,41 @@ jest.mock('@stellar/stellar-sdk', () => {
 
 describe('SorobanRpcService', () => {
   let service: SorobanRpcService;
-  let configService: ConfigService;
   let mockRpcServerInstance: {
     getHealth: jest.Mock;
   };
 
   beforeEach(async () => {
+    // Reset mocks before each test
     jest.clearAllMocks();
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SorobanRpcService,
         {
-          provide: ConfigService,
+          provide: AppConfigService,
           useValue: {
-            get: jest
-              .fn()
-              .mockReturnValue('https://soroban-testnet.stellar.org'),
+            stellar: {
+              sorobanRpcUrl: 'https://test',
+              horizonUrl: 'https://test',
+              network: 'testnet',
+              networkPassphrase: 'Test SDF Network ; September 2015',
+            },
+            auth: {
+              jwtSecret: 'test',
+            },
+            indexer: {
+              contractId:
+                'CCW57ZST4NV43YS7JZKMGLG62624NV43YS7JZKMGLG62624NV43YS7JZ',
+              startLedger: 1,
+              pollIntervalMs: 5000,
+            },
           },
         },
       ],
     }).compile();
 
     service = module.get<SorobanRpcService>(SorobanRpcService);
-    configService = module.get<ConfigService>(ConfigService);
   });
 
   it('should be defined', () => {
@@ -50,16 +61,9 @@ describe('SorobanRpcService', () => {
   });
 
   describe('onModuleInit', () => {
-    it('should initialize Soroban RPC client and trigger connection check', () => {
+    it('should initialize Soroban RPC client', () => {
       service.onModuleInit();
-      const getSpy = configService.get as jest.Mock;
-      expect(getSpy).toHaveBeenCalledWith(
-        'stellar.sorobanRpcUrl',
-        'https://soroban-testnet.stellar.org',
-      );
-      expect(rpc.Server).toHaveBeenCalledWith(
-        'https://soroban-testnet.stellar.org',
-      );
+      expect(rpc.Server).toHaveBeenCalledWith('https://test');
     });
   });
 
