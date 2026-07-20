@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/unbound-method, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import { AppConfigService } from '../config/app-config.service';
 import { HorizonService } from './horizon.service';
 import { Horizon } from '@stellar/stellar-sdk';
 
@@ -30,8 +31,16 @@ describe('HorizonService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        HorizonService,
-        {
+  HorizonService,
+  {
+    provide: AppConfigService,
+    useValue: {
+      stellar: {
+        horizonUrl: 'https://test',
+      },
+    },
+  },
+],
           provide: ConfigService,
           useValue: {
             get: jest

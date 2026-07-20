@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import { AppConfigService } from '../config/app-config.service';
 import { IndexerService } from './indexer.service';
 import { IndexerRepository } from './indexer.repository';
 import { SorobanRpcService } from '../stellar/soroban-rpc.service';
@@ -47,8 +48,16 @@ describe('IndexerService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        IndexerService,
-        {
+  IndexerService,
+  {
+    provide: AppConfigService,
+    useValue: {
+      stellar: {
+        sorobanRpcUrl: 'https://test',
+      },
+    },
+  },
+],
           provide: IndexerRepository,
           useValue: mockRepository,
         },

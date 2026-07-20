@@ -1,6 +1,8 @@
 /* eslint-disable @typescript-eslint/unbound-method, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import { AppConfigService } from '../config/app-config.service';
+import { AppConfigService } from '../config/app-config.service';
 import { SorobanRpcService } from './soroban-rpc.service';
 import { rpc } from '@stellar/stellar-sdk';
 
@@ -28,9 +30,31 @@ describe('SorobanRpcService', () => {
     jest.clearAllMocks();
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        SorobanRpcService,
-        {
+    providers: [
+  SorobanRpcService,
+  {
+    provide: AppConfigService,
+    useValue: {
+      stellar: {
+        sorobanRpcUrl: 'https://test',
+      },
+      auth: {
+        jwtSecret: 'test',
+      },
+    },
+  },
+],
+    provide: AppConfigService,
+    useValue: {
+      stellar: {
+        sorobanRpcUrl: 'https://test',
+      },
+      auth: {
+        jwtSecret: 'test',
+      },
+    },
+  },
+],
           provide: ConfigService,
           useValue: {
             get: jest
