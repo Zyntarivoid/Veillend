@@ -2,7 +2,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { AppConfigService } from '../config/app-config.service';
-import { AppConfigService } from '../config/app-config.service';
 import { SorobanRpcService } from './soroban-rpc.service';
 import { rpc } from '@stellar/stellar-sdk';
 
@@ -30,20 +29,21 @@ describe('SorobanRpcService', () => {
     jest.clearAllMocks();
 
     const module: TestingModule = await Test.createTestingModule({
-    providers: [
-  SorobanRpcService,
-  {
-    provide: AppConfigService,
-    useValue: {
-      stellar: {
-        sorobanRpcUrl: 'https://test',
-      },
-      auth: {
-        jwtSecret: 'test',
+  providers: [
+    SorobanRpcService,
+    {
+      provide: AppConfigService,
+      useValue: {
+        stellar: {
+          sorobanRpcUrl: 'https://test',
+        },
+        auth: {
+          jwtSecret: 'test',
+        },
       },
     },
-  },
-],
+  ],
+}).compile();
     provide: AppConfigService,
     useValue: {
       stellar: {

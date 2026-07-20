@@ -46,8 +46,7 @@ describe('IndexerService', () => {
       getEvents: jest.fn().mockResolvedValue({ events: [], cursor: 'abc' }),
     };
 
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
+    providers: [
   IndexerService,
   {
     provide: AppConfigService,
