@@ -1,6 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConfigService } from '@nestjs/config';
 import { AppConfigService } from '../config/app-config.service';
 import { IndexerService } from './indexer.service';
 import { IndexerRepository } from './indexer.repository';
@@ -23,14 +22,13 @@ describe('IndexerService', () => {
     getLatestLedger: jest.Mock;
     getEvents: jest.Mock;
   };
-
-  const mockRepository = {
-    getCheckpoint: jest.fn(),
-    saveCheckpoint: jest.fn(),
-    saveTransaction: jest.fn(),
-    updatePosition: jest.fn(),
-    setAssetSupported: jest.fn(),
-    resetDatabase: jest.fn(),
+  let mockRepository: {
+    getCheckpoint: jest.Mock;
+    saveCheckpoint: jest.Mock;
+    saveTransaction: jest.Mock;
+    updatePosition: jest.Mock;
+    setAssetSupported: jest.Mock;
+    resetDatabase: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -46,6 +44,15 @@ describe('IndexerService', () => {
       getEvents: jest.fn().mockResolvedValue({ events: [], cursor: 'abc' }),
     };
 
+    mockRepository = {
+      getCheckpoint: jest.fn().mockResolvedValue({ lastIndexedLedger: 0 }),
+      saveCheckpoint: jest.fn().mockResolvedValue(undefined),
+      saveTransaction: jest.fn().mockResolvedValue(true),
+      updatePosition: jest.fn().mockResolvedValue(undefined),
+      setAssetSupported: jest.fn().mockResolvedValue(undefined),
+      resetDatabase: jest.fn().mockResolvedValue(undefined),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         IndexerService,
@@ -54,28 +61,29 @@ describe('IndexerService', () => {
           useValue: {
             stellar: {
               sorobanRpcUrl: 'https://test',
+              horizonUrl: 'https://test',
+              network: 'testnet',
+              networkPassphrase: 'Test SDF Network ; September 2015',
+            },
+            auth: {
+              jwtSecret: 'test',
+            },
+            indexer: {
+              contractId:
+                'CCW57ZST4NV43YS7JZKMGLG62624NV43YS7JZKMGLG62624NV43YS7JZ',
+              startLedger: 1,
+              pollIntervalMs: 5000,
             },
           },
         },
-        { provide: IndexerRepository, useValue: mockRepository },
+        {
+          provide: IndexerRepository,
+          useValue: mockRepository,
+        },
         {
           provide: SorobanRpcService,
           useValue: {
-            getClient: () => mockRpcClient,
-          },
-        },
-        {
-          provide: ConfigService,
-          useValue: {
-            get: jest
-              .fn()
-              .mockImplementation((key: string, defaultValue: unknown) => {
-                if (key === 'indexer.contractId')
-                  return 'CCW57ZST4NV43YS7JZKMGLG62624NV43YS7JZKMGLG62624NV43YS7JZ';
-                if (key === 'indexer.startLedger') return 1;
-                if (key === 'indexer.pollIntervalMs') return 5000;
-                return defaultValue;
-              }),
+            getClient: jest.fn().mockReturnValue(mockRpcClient),
           },
         },
       ],
@@ -113,8 +121,6 @@ describe('IndexerService', () => {
       // Mock mock scValToNative return behavior
       const mockScValToNative = scValToNative as jest.Mock;
       mockScValToNative.mockImplementation((val) => val);
-
-      mockRepository.saveTransaction.mockResolvedValueOnce(true);
 
       await service.runIndexer();
 
@@ -166,7 +172,6 @@ describe('IndexerService', () => {
     beforeEach(() => {
       mockRepository.getCheckpoint.mockResolvedValue({ lastIndexedLedger: 10 });
       mockRpcClient.getLatestLedger.mockResolvedValue({ sequence: 15 });
-      mockRepository.saveTransaction.mockResolvedValue(true);
     });
 
     it('should process borrow event', async () => {
@@ -232,7 +237,7 @@ describe('IndexerService', () => {
       );
     });
 
-    it('should process asset configured event', async () => {
+    it('should process asset_configured event', async () => {
       const mockEvent = {
         id: 'evt-5',
         topic: ['veillend', 'asset_configured', 'admin-addr', 'asset-addr'],

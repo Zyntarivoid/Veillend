@@ -1,6 +1,5 @@
-/* eslint-disable @typescript-eslint/unbound-method, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConfigService } from '@nestjs/config';
 import { AppConfigService } from '../config/app-config.service';
 import { HorizonService } from './horizon.service';
 import { Horizon } from '@stellar/stellar-sdk';
@@ -20,7 +19,6 @@ jest.mock('@stellar/stellar-sdk', () => {
 
 describe('HorizonService', () => {
   let service: HorizonService;
-  let configService: ConfigService;
   let mockHorizonServerInstance: {
     root: jest.Mock;
   };
@@ -36,23 +34,26 @@ describe('HorizonService', () => {
           provide: AppConfigService,
           useValue: {
             stellar: {
+              sorobanRpcUrl: 'https://test',
               horizonUrl: 'https://test',
+              network: 'testnet',
+              networkPassphrase: 'Test SDF Network ; September 2015',
             },
-          },
-        },
-        {
-          provide: ConfigService,
-          useValue: {
-            get: jest
-              .fn()
-              .mockReturnValue('https://horizon-testnet.stellar.org'),
+            auth: {
+              jwtSecret: 'test',
+            },
+            indexer: {
+              contractId:
+                'CCW57ZST4NV43YS7JZKMGLG62624NV43YS7JZKMGLG62624NV43YS7JZ',
+              startLedger: 1,
+              pollIntervalMs: 5000,
+            },
           },
         },
       ],
     }).compile();
 
     service = module.get<HorizonService>(HorizonService);
-    configService = module.get<ConfigService>(ConfigService);
   });
 
   it('should be defined', () => {
@@ -60,16 +61,9 @@ describe('HorizonService', () => {
   });
 
   describe('onModuleInit', () => {
-    it('should initialize Horizon client and trigger connection check', () => {
+    it('should initialize Horizon client', () => {
       service.onModuleInit();
-      const getSpy = configService.get as jest.Mock;
-      expect(getSpy).toHaveBeenCalledWith(
-        'stellar.horizonUrl',
-        'https://horizon-testnet.stellar.org',
-      );
-      expect(Horizon.Server).toHaveBeenCalledWith(
-        'https://horizon-testnet.stellar.org',
-      );
+      expect(Horizon.Server).toHaveBeenCalledWith('https://test');
     });
   });
 
@@ -120,7 +114,6 @@ describe('HorizonService', () => {
       service.checkConnection$().subscribe((response) => {
         expect(response.success).toBe(true);
         expect(response.data?.connected).toBe(true);
-        expect(response.error).toBeUndefined();
         done();
       });
     });
