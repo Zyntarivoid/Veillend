@@ -13,7 +13,7 @@ describe('JwtStrategy', () => {
     return { headers: { authorization: `Bearer ${token}` } } as Request;
   }
 
-  beforeEach(async () => {
+  beforeEach( () => {
     prisma = { session: { findUnique: jest.fn() } };
 
     const module: TestingModule = await Test.createTestingModule({
