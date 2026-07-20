@@ -1,16 +1,40 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error, Address,
-    Env,
+    contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error,
+    symbol_short, Address, Env, Symbol,
 };
 
+/// Increment this only when a contract interface change requires consumers to adapt.
+pub const CONTRACT_VERSION: u32 = 1;
+
+/// Increment this only when the serialized `DataKey` or stored value layout changes.
+pub const STORAGE_SCHEMA_VERSION: u32 = 1;
+
+/// A compact, stable identifier for the current `DataKey` storage layout.
+const STORAGE_SCHEMA_ID: Symbol = symbol_short!("VLENDV1");
+
+/// Queryable metadata describing the contract interface and its storage layout.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct ContractMetadata {
+    pub contract_version: u32,
+    pub storage_schema_version: u32,
+    pub storage_schema_id: Symbol,
+}
+
+/// Keys and value shapes that make up storage schema `VLENDV1`.
+///
+/// Instance storage: `Admin: Address`, `MinCollateralRatioBps: u32`.
+/// Persistent storage: `SupportedAsset(Address): bool`,
+/// `Position(Address, Address): Position`, and `OraclePrice(Address): i128`.
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
     Admin,
     MinCollateralRatioBps,
     SupportedAsset(Address),
+    AssetReserve(Address),
     Position(Address, Address),
     OraclePrice(Address),
     /// Per-asset deposit cap (max total deposits for this asset)
@@ -37,6 +61,24 @@ pub struct Position {
 pub struct AssetCaps {
     pub deposit_cap: i128,
     pub borrow_cap: i128,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct AssetReserve {
+    pub total_balance: i128,
+    pub protocol_fees: i128,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub enum ReserveUpdateKind {
+    ConfigureAsset,
+    Deposit,
+    Borrow,
+    Repay,
+    Withdraw,
+    FeeAccrual,
 }
 
 #[contracterror]
@@ -75,6 +117,8 @@ pub enum VeilLendError {
     InvalidCap = 15,
     /// Circuit breaker triggered - asset temporarily paused
     CircuitBreakerTriggered = 16,
+    /// Reserve balance is too low for the requested action
+    InsufficientReserve = 17,
 }
 
 #[contractevent(topics = ["veillend", "asset_configured"])]
@@ -146,11 +190,32 @@ pub struct CircuitBreakerEvent {
     pub paused: bool,
 }
 
+#[contractevent(topics = ["veillend", "asset_reserve_updated"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AssetReserveUpdated {
+    #[topic]
+    pub asset: Address,
+    pub total_balance: i128,
+    pub protocol_fees: i128,
+    pub kind: ReserveUpdateKind,
+}
+
 #[contract]
 pub struct VeilLendContract;
 
 #[contractimpl]
 impl VeilLendContract {
+    /// Returns the interface and storage metadata for this deployed contract shape.
+    ///
+    /// Clients should read this before assuming a storage layout during migrations.
+    pub fn contract_metadata(_env: Env) -> ContractMetadata {
+        ContractMetadata {
+            contract_version: CONTRACT_VERSION,
+            storage_schema_version: STORAGE_SCHEMA_VERSION,
+            storage_schema_id: STORAGE_SCHEMA_ID,
+        }
+    }
+
     pub fn __constructor(env: Env, admin: Address, min_collateral_ratio_bps: u32) {
         if env.storage().instance().has(&DataKey::Admin) {
             panic_with_error!(&env, VeilLendError::AlreadyInitialized);
@@ -200,10 +265,21 @@ impl VeilLendContract {
 
         AssetConfigured {
             admin,
-            asset,
+            asset: asset.clone(),
             supported,
         }
         .publish(&env);
+
+        if supported {
+            let reserve = Self::read_asset_reserve(&env, &asset);
+            Self::write_asset_reserve(&env, &asset, &reserve);
+            Self::publish_asset_reserve_updated(
+                &env,
+                &asset,
+                &reserve,
+                ReserveUpdateKind::ConfigureAsset,
+            );
+        }
     }
 
     /// Set the oracle price for a supported asset (admin only)
@@ -391,8 +467,11 @@ impl VeilLendContract {
         Self::check_deposit_cap(&env, &asset, amount);
 
         let mut position = Self::read_position(&env, &user, &asset);
+        let mut reserve = Self::read_asset_reserve(&env, &asset);
         position.deposited += amount;
+        reserve.total_balance += amount;
         Self::write_position(&env, &user, &asset, &position);
+        Self::write_asset_reserve(&env, &asset, &reserve);
 
         // Update total deposits
         let total = Self::get_total_deposited(env.clone(), asset.clone()) + amount;
@@ -402,10 +481,11 @@ impl VeilLendContract {
 
         DepositEvent {
             user,
-            asset,
+            asset: asset.clone(),
             amount,
         }
         .publish(&env);
+        Self::publish_asset_reserve_updated(&env, &asset, &reserve, ReserveUpdateKind::Deposit);
     }
 
     pub fn borrow(env: Env, user: Address, asset: Address, amount: i128) {
@@ -418,9 +498,15 @@ impl VeilLendContract {
         Self::check_borrow_cap(&env, &asset, amount);
 
         let mut position = Self::read_position(&env, &user, &asset);
+        let mut reserve = Self::read_asset_reserve(&env, &asset);
+        if amount > reserve.total_balance {
+            panic_with_error!(&env, VeilLendError::InsufficientReserve);
+        }
         position.borrowed += amount;
+        reserve.total_balance -= amount;
         Self::assert_collateralized(&env, &user, &asset, &position);
         Self::write_position(&env, &user, &asset, &position);
+        Self::write_asset_reserve(&env, &asset, &reserve);
 
         // Update total borrows
         let total = Self::get_total_borrowed(env.clone(), asset.clone()) + amount;
@@ -430,10 +516,11 @@ impl VeilLendContract {
 
         BorrowEvent {
             user,
-            asset,
+            asset: asset.clone(),
             amount,
         }
         .publish(&env);
+        Self::publish_asset_reserve_updated(&env, &asset, &reserve, ReserveUpdateKind::Borrow);
     }
 
     pub fn repay(env: Env, user: Address, asset: Address, amount: i128) {
@@ -443,12 +530,15 @@ impl VeilLendContract {
         user.require_auth();
 
         let mut position = Self::read_position(&env, &user, &asset);
+        let mut reserve = Self::read_asset_reserve(&env, &asset);
         if amount > position.borrowed {
             panic_with_error!(&env, VeilLendError::RepayTooLarge);
         }
 
         position.borrowed -= amount;
+        reserve.total_balance += amount;
         Self::write_position(&env, &user, &asset, &position);
+        Self::write_asset_reserve(&env, &asset, &reserve);
 
         // Update total borrows
         let total = Self::get_total_borrowed(env.clone(), asset.clone()) - amount;
@@ -458,10 +548,11 @@ impl VeilLendContract {
 
         RepayEvent {
             user,
-            asset,
+            asset: asset.clone(),
             amount,
         }
         .publish(&env);
+        Self::publish_asset_reserve_updated(&env, &asset, &reserve, ReserveUpdateKind::Repay);
     }
 
     pub fn withdraw(env: Env, user: Address, asset: Address, amount: i128) {
@@ -471,13 +562,19 @@ impl VeilLendContract {
         user.require_auth();
 
         let mut position = Self::read_position(&env, &user, &asset);
+        let mut reserve = Self::read_asset_reserve(&env, &asset);
         if amount > position.deposited {
             panic_with_error!(&env, VeilLendError::InsufficientDeposit);
         }
+        if amount > reserve.total_balance {
+            panic_with_error!(&env, VeilLendError::InsufficientReserve);
+        }
 
         position.deposited -= amount;
+        reserve.total_balance -= amount;
         Self::assert_collateralized(&env, &user, &asset, &position);
         Self::write_position(&env, &user, &asset, &position);
+        Self::write_asset_reserve(&env, &asset, &reserve);
 
         // Update total deposits
         let total = Self::get_total_deposited(env.clone(), asset.clone()) - amount;
@@ -487,14 +584,20 @@ impl VeilLendContract {
 
         WithdrawEvent {
             user,
-            asset,
+            asset: asset.clone(),
             amount,
         }
         .publish(&env);
+        Self::publish_asset_reserve_updated(&env, &asset, &reserve, ReserveUpdateKind::Withdraw);
     }
 
     pub fn get_position(env: Env, user: Address, asset: Address) -> Position {
         Self::read_position(&env, &user, &asset)
+    }
+
+    pub fn get_asset_reserve(env: Env, asset: Address) -> AssetReserve {
+        Self::require_supported_asset(&env, &asset);
+        Self::read_asset_reserve(&env, &asset)
     }
 
     pub fn is_asset_supported(env: Env, asset: Address) -> bool {
@@ -502,6 +605,23 @@ impl VeilLendContract {
             .persistent()
             .get(&DataKey::SupportedAsset(asset))
             .unwrap_or(false)
+    }
+
+    pub fn record_protocol_fee(env: Env, admin: Address, asset: Address, amount: i128) {
+        let stored_admin = Self::admin(env.clone());
+        if admin != stored_admin {
+            panic_with_error!(&env, VeilLendError::Unauthorized);
+        }
+
+        Self::require_supported_asset(&env, &asset);
+        Self::require_positive_amount(&env, amount);
+        admin.require_auth();
+
+        let mut reserve = Self::read_asset_reserve(&env, &asset);
+        reserve.total_balance += amount;
+        reserve.protocol_fees += amount;
+        Self::write_asset_reserve(&env, &asset, &reserve);
+        Self::publish_asset_reserve_updated(&env, &asset, &reserve, ReserveUpdateKind::FeeAccrual);
     }
 
     pub fn admin(env: Env) -> Address {
@@ -520,6 +640,37 @@ impl VeilLendContract {
 }
 
 impl VeilLendContract {
+    fn read_asset_reserve(env: &Env, asset: &Address) -> AssetReserve {
+        env.storage()
+            .persistent()
+            .get(&DataKey::AssetReserve(asset.clone()))
+            .unwrap_or(AssetReserve {
+                total_balance: 0,
+                protocol_fees: 0,
+            })
+    }
+
+    fn write_asset_reserve(env: &Env, asset: &Address, reserve: &AssetReserve) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::AssetReserve(asset.clone()), reserve);
+    }
+
+    fn publish_asset_reserve_updated(
+        env: &Env,
+        asset: &Address,
+        reserve: &AssetReserve,
+        kind: ReserveUpdateKind,
+    ) {
+        AssetReserveUpdated {
+            asset: asset.clone(),
+            total_balance: reserve.total_balance,
+            protocol_fees: reserve.protocol_fees,
+            kind,
+        }
+        .publish(env);
+    }
+
     fn read_position(env: &Env, user: &Address, asset: &Address) -> Position {
         env.storage()
             .persistent()
@@ -653,6 +804,16 @@ mod tests {
     }
 
     #[test]
+    fn test_asset_reserve_creation() {
+        let reserve = AssetReserve {
+            total_balance: 1000,
+            protocol_fees: 25,
+        };
+        assert_eq!(reserve.total_balance, 1000);
+        assert_eq!(reserve.protocol_fees, 25);
+    }
+
+    #[test]
     fn test_error_codes() {
         assert_eq!(VeilLendError::AlreadyInitialized as u32, 1);
         assert_eq!(VeilLendError::Unauthorized as u32, 2);
@@ -670,6 +831,16 @@ mod tests {
         assert_eq!(VeilLendError::BorrowCapExceeded as u32, 14);
         assert_eq!(VeilLendError::InvalidCap as u32, 15);
         assert_eq!(VeilLendError::CircuitBreakerTriggered as u32, 16);
+        assert_eq!(VeilLendError::InsufficientReserve as u32, 17);
+    }
+
+    #[test]
+    fn test_contract_metadata_identifies_current_storage_shape() {
+        let metadata = VeilLendContract::contract_metadata(Env::default());
+
+        assert_eq!(metadata.contract_version, 1);
+        assert_eq!(metadata.storage_schema_version, 1);
+        assert_eq!(metadata.storage_schema_id, symbol_short!("VLENDV1"));
     }
 
     #[test]
@@ -692,6 +863,7 @@ mod tests {
             VeilLendError::BorrowCapExceeded as u32,
             VeilLendError::InvalidCap as u32,
             VeilLendError::CircuitBreakerTriggered as u32,
+            VeilLendError::InsufficientReserve as u32,
         ];
         let mut sorted = codes.to_vec();
         sorted.sort();

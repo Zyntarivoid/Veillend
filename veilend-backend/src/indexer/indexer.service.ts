@@ -4,7 +4,7 @@ import {
   OnApplicationBootstrap,
   OnModuleDestroy,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { AppConfigService } from '../config/app-config.service';
 import { scValToNative, rpc, xdr } from '@stellar/stellar-sdk';
 import { SorobanRpcService } from '../stellar/soroban-rpc.service';
 import {
@@ -20,7 +20,7 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
   private pollTimeout?: NodeJS.Timeout;
 
   constructor(
-    private readonly configService: ConfigService,
+    private readonly configService: AppConfigService,
     private readonly rpcService: SorobanRpcService,
     private readonly repository: IndexerRepository,
   ) {}
@@ -37,10 +37,7 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
   }
 
   private startPolling() {
-    const interval = this.configService.get<number>(
-      'indexer.pollIntervalMs',
-      5000,
-    );
+    const interval = this.configService.indexer.pollIntervalMs;
     this.pollTimeout = setTimeout(() => {
       void this.runIndexer().then(() => {
         this.startPolling();
@@ -55,14 +52,8 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
     this.isProcessing = true;
 
     try {
-      const configStartLedger = this.configService.get<number>(
-        'indexer.startLedger',
-        1,
-      );
-      const contractId = this.configService.get<string>(
-        'indexer.contractId',
-        '',
-      );
+      const configStartLedger = this.configService.indexer.startLedger;
+      const contractId = this.configService.indexer.contractId;
 
       if (!contractId) {
         this.logger.warn(
@@ -218,7 +209,7 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
         const amount = this.parseAmount(amountVal);
         const amountStr = amount.toString();
 
-        await this.repository.saveTransaction({
+        const isNewTx = await this.repository.saveTransaction({
           id,
           userAddress,
           type: topic1 as 'deposit' | 'borrow' | 'repay' | 'withdraw',
@@ -229,25 +220,31 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
           timestamp,
         });
 
-        let depositedDelta = 0n;
-        let borrowedDelta = 0n;
+        if (isNewTx) {
+          let depositedDelta = 0n;
+          let borrowedDelta = 0n;
 
-        if (topic1 === 'deposit') {
-          depositedDelta = amount;
-        } else if (topic1 === 'withdraw') {
-          depositedDelta = -amount;
-        } else if (topic1 === 'borrow') {
-          borrowedDelta = amount;
-        } else if (topic1 === 'repay') {
-          borrowedDelta = -amount;
+          if (topic1 === 'deposit') {
+            depositedDelta = amount;
+          } else if (topic1 === 'withdraw') {
+            depositedDelta = -amount;
+          } else if (topic1 === 'borrow') {
+            borrowedDelta = amount;
+          } else if (topic1 === 'repay') {
+            borrowedDelta = -amount;
+          }
+
+          await this.repository.updatePosition(
+            userAddress,
+            assetAddress,
+            depositedDelta,
+            borrowedDelta,
+          );
+        } else {
+          this.logger.warn(
+            `Skipping duplicate event processing for tx id: ${id}`,
+          );
         }
-
-        await this.repository.updatePosition(
-          userAddress,
-          assetAddress,
-          depositedDelta,
-          borrowedDelta,
-        );
       }
     } catch (error) {
       this.logger.error(

@@ -18,10 +18,17 @@ export class TransactionsService {
 
   constructor(private readonly horizonService: HorizonService) {}
 
-  async getTransactions(walletAddress: string): Promise<ServiceResponse<TransactionRecord[]>> {
+  async getTransactions(
+    walletAddress: string,
+  ): Promise<ServiceResponse<TransactionRecord[]>> {
     try {
       const client = this.horizonService.getClient();
-      const txs = await client.transactions().forAccount(walletAddress).limit(20).order('desc').call();
+      const txs = await client
+        .transactions()
+        .forAccount(walletAddress)
+        .limit(20)
+        .order('desc')
+        .call();
 
       const records: TransactionRecord[] = txs.records.map((tx) => {
         // Determine transaction type from operations
@@ -63,8 +70,11 @@ export class TransactionsService {
         data: records,
       };
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Failed to fetch transactions';
-      this.logger.warn(`Transaction fetch failed for ${walletAddress}: ${message}`);
+      const message =
+        error instanceof Error ? error.message : 'Failed to fetch transactions';
+      this.logger.warn(
+        `Transaction fetch failed for ${walletAddress}: ${message}`,
+      );
       return {
         success: false,
         error: { message, code: 'TRANSACTIONS_FETCH_ERROR', rawError: error },

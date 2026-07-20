@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Wallet, X, ExternalLink } from "lucide-react";
 import { useWallet } from "@/context/WalletContext";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { getWalletConnectionMessage, isFreighterInstalled } from "@/lib/stellar/wallet";
 
 // Define the Freighter window interface
 interface FreighterWindow extends Window {
@@ -29,12 +30,20 @@ interface WalletConnectProps {
 }
 
 export function WalletConnect({ className, size = "default" }: WalletConnectProps) {
-  const { address, isConnected, isAuthenticated, isLoading, error, connect, disconnect } = useWallet();
+  const { address, isConnected, isAuthenticated, isLoading, error, connect, disconnect, clearError } = useWallet();
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const primaryActionRef = useRef<HTMLButtonElement>(null);
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    setIsModalOpen(nextOpen);
+    if (!nextOpen) {
+      clearError();
+    }
+  };
 
   const handleConnect = async () => {
-    await connect();
-    if (!error) {
+    const success = await connect();
+    if (success) {
       setIsModalOpen(false);
     }
   };
@@ -42,7 +51,20 @@ export function WalletConnect({ className, size = "default" }: WalletConnectProp
   const handleDisconnect = async () => {
     await disconnect();
     setIsModalOpen(false);
+    clearError();
   };
+
+  const walletMessage = getWalletConnectionMessage(error, isFreighterInstalled());
+
+  useEffect(() => {
+    if (!isModalOpen) return;
+
+    const focusTimer = window.setTimeout(() => {
+      primaryActionRef.current?.focus();
+    }, 50);
+
+    return () => window.clearTimeout(focusTimer);
+  }, [isModalOpen, error]);
 
   const truncatedAddress = address
     ? `${address.slice(0, 6)}...${address.slice(-4)}`
@@ -82,11 +104,14 @@ export function WalletConnect({ className, size = "default" }: WalletConnectProp
         {isLoading ? "Connecting..." : "Connect Wallet"}
       </Button>
 
-      <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-        <DialogContent className="sm:max-w-md bg-slate-950 border-slate-800 text-slate-100">
+      <Dialog open={isModalOpen} onOpenChange={handleOpenChange}>
+        <DialogContent
+          className="sm:max-w-md bg-slate-950 border-slate-800 text-slate-100"
+          aria-describedby="wallet-connect-description"
+        >
           <DialogHeader>
             <DialogTitle className="text-xl font-bold text-slate-100">Connect Wallet</DialogTitle>
-            <DialogDescription className="text-slate-400">
+            <DialogDescription id="wallet-connect-description" className="text-slate-400">
               Connect your Stellar wallet to access the VeilLend dashboard and manage your shielded assets.
             </DialogDescription>
           </DialogHeader>
@@ -104,25 +129,58 @@ export function WalletConnect({ className, size = "default" }: WalletConnectProp
                 </div>
               </div>
               <Button
+                ref={primaryActionRef}
                 variant="default"
                 size="sm"
                 onClick={handleConnect}
                 disabled={isLoading}
                 className="bg-emerald-600 hover:bg-emerald-500"
               >
-                {isLoading ? "Connecting..." : "Connect"}
+                {isLoading ? "Connecting..." : error ? walletMessage.primaryAction : "Connect"}
               </Button>
             </div>
 
-            {/* Error Message */}
-            {error && (
-              <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 text-sm text-red-400">
-                {error}
+            {(error || !isFreighterInstalled()) && (
+              <div
+                className={`rounded-xl border p-3 text-sm ${error ? "bg-red-500/10 border-red-500/20 text-red-400" : "bg-amber-500/10 border-amber-500/20 text-amber-400"}`}
+                role="alert"
+                aria-live="polite"
+              >
+                <p className="font-medium">{walletMessage.title}</p>
+                <p className="mt-1 text-sm/6">
+                  {walletMessage.description}
+                </p>
+                {error && (
+                  <p className="mt-2 font-mono text-xs opacity-80">{error}</p>
+                )}
+              </div>
+            )}
+
+            {/* Recovery actions */}
+            {(error || !isFreighterInstalled()) && (
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={handleConnect}
+                  disabled={isLoading}
+                  className="bg-emerald-600 hover:bg-emerald-500"
+                >
+                  {isLoading ? "Connecting..." : walletMessage.primaryAction}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleOpenChange(false)}
+                  className="text-slate-400 hover:text-slate-200"
+                >
+                  {walletMessage.secondaryAction}
+                </Button>
               </div>
             )}
 
             {/* Info Message */}
-            {!isFreighterInstalled() && (
+            {!isFreighterInstalled() && !error && (
               <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-sm text-amber-400">
                 <p className="flex items-center gap-2">
                   <span>Freighter wallet not detected.</span>
@@ -146,7 +204,7 @@ export function WalletConnect({ className, size = "default" }: WalletConnectProp
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setIsModalOpen(false)}
+              onClick={() => handleOpenChange(false)}
               className="text-slate-400 hover:text-slate-200"
             >
               <X className="h-4 w-4 mr-1" />
@@ -159,14 +217,5 @@ export function WalletConnect({ className, size = "default" }: WalletConnectProp
   );
 }
 
-/**
- * Helper function to check if Freighter is installed
- * This is exported for use in other components
- */
-export const isFreighterInstalled = (): boolean => {
-  if (typeof window === "undefined") return false;
-  const win = window as FreighterWindow;
-  return typeof win.freighter !== "undefined";
-};
 
 export default WalletConnect;

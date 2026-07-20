@@ -13,7 +13,9 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.cedarich.veillend.mobileapp",
+      "buildNumber": "1"
     },
     "android": {
       "adaptiveIcon": {
