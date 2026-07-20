@@ -13,10 +13,11 @@
  *   survive app restarts and can be inspected on the next launch.
  */
 
-import { Platform } from 'react-native';
 import * as SecureStoreShim from './secureStoreShim';
+import { getRuntimePlatform } from './runtimePlatform';
 
 let SecureStore: typeof SecureStoreShim;
+const platform = getRuntimePlatform();
 try {
   // @ts-ignore
   SecureStore = require('expo-secure-store');
@@ -167,7 +168,7 @@ export function createErrorReport(
         ? JSON.parse(scrubPII(JSON.stringify(options.metadata)))
         : options.metadata
       : undefined,
-    platform: `${Platform.OS} ${Platform.Version}`,
+    platform: `${platform.OS} ${platform.Version}`,
     appVersion: APP_VERSION,
   };
 
