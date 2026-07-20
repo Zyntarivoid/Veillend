@@ -45,7 +45,7 @@ describe('JwtStrategy', () => {
     });
   });
 
-  it('throws when no session exists for the token (revoked)', async () => {
+  it('throws when no session exists for the token (revoked)', () => {
     prisma.session.findUnique.mockResolvedValue(null);
 
     await expect(
@@ -53,7 +53,7 @@ describe('JwtStrategy', () => {
     ).rejects.toThrow(UnauthorizedException);
   });
 
-  it('throws when the session has expired', async () => {
+  it('throws when the session has expired', () => {
     prisma.session.findUnique.mockResolvedValue({
       id: 'session-1',
       expiresAt: new Date(Date.now() - 60_000),
