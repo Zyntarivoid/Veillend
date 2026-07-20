@@ -15,6 +15,12 @@ interface RequestWithUser extends Request {
   user?: AuthenticatedUser;
 }
 
+interface RequestWithUser extends Request {
+  user?: {
+    walletAddress: string;
+  };
+}
+
 @Injectable()
 export class AdminGuard implements CanActivate {
   constructor(private prisma: PrismaService) {}

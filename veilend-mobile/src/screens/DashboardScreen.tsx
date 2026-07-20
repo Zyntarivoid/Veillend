@@ -12,6 +12,7 @@ import ProtocolStatusBanners from '../components/ProtocolStatusBanners';
 const { width } = Dimensions.get('window');
 const isSmallScreen = width < 380;
 const CARD_WIDTH = width - 48; // Padding 24 * 2
+const DEFAULT_PROFILE_IMAGE = 'https://i.pravatar.cc/100?img=5';
 
 
   
@@ -21,6 +22,10 @@ export default function DashboardScreen({ navigation }: any) {
     authToken,
     logout,
     isPrivacyMode,
+    profileName,
+    profileImage,
+    setProfileName,
+    setProfileImage,
     togglePrivacyMode,
     expectedNetwork,
     currentNetwork,
@@ -70,18 +75,18 @@ export default function DashboardScreen({ navigation }: any) {
       </View>
     );
   }
-  const [username, setUsername] = useState(address ? shortenAddress(address) : MOCK_USER.name);
   const [isEditingName, setIsEditingName] = useState(false);
-  const [tempName, setTempName] = useState(address ? shortenAddress(address) : MOCK_USER.name);
-  const [profileImage, setProfileImage] = useState('https://i.pravatar.cc/100?img=5');
+  const [tempName, setTempName] = useState('');
+
+  const defaultUsername = address ? shortenAddress(address) : MOCK_USER.name;
+  const username = profileName ?? defaultUsername;
+  const avatarUri = profileImage ?? DEFAULT_PROFILE_IMAGE;
 
   useEffect(() => {
-    if (address) {
-      const shortAddr = shortenAddress(address);
-      setUsername(shortAddr);
-      setTempName(shortAddr);
+    if (!isEditingName) {
+      setTempName(username);
     }
-  }, [address]);
+  }, [isEditingName, username]);
 
   const handleLogout = () => {
     setProfileVisible(false);
@@ -94,7 +99,8 @@ export default function DashboardScreen({ navigation }: any) {
   };
 
   const saveUsername = () => {
-    setUsername(tempName);
+    const nextName = tempName.trim();
+    setProfileName(nextName.length > 0 ? nextName : null);
     setIsEditingName(false);
   };
 
@@ -216,7 +222,7 @@ export default function DashboardScreen({ navigation }: any) {
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setProfileVisible(true)}>
             <Image 
-              source={{ uri: profileImage }} 
+              source={{ uri: avatarUri }} 
               style={styles.avatar} 
             />
           </TouchableOpacity>

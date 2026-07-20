@@ -24,18 +24,18 @@ export class AdminController {
   constructor(private readonly adminService: AdminService) {}
 
   @Post('admins')
-  addAdmin(@Body() dto: AddAdminDto) {
-    return this.adminService.addAdmin(dto);
+  async addAdmin(@Body() dto: AddAdminDto) {
+    return await this.adminService.addAdmin(dto);
   }
 
   @Delete('admins/:walletAddress')
-  removeAdmin(@Param('walletAddress') walletAddress: string) {
-    return this.adminService.removeAdmin(walletAddress);
+  async removeAdmin(@Param('walletAddress') walletAddress: string) {
+    return await this.adminService.removeAdmin(walletAddress);
   }
 
   @Get('admins')
-  listAdmins() {
-    return this.adminService.listAdmins();
+  async listAdmins() {
+    return await this.adminService.listAdmins();
   }
 
   @Post('assets/configure')
