@@ -41,7 +41,7 @@ export function redactConfig<T extends Record<string, unknown>>(
       const isSensitive = sensitiveKeys.some((sensitiveKey) =>
         key.toUpperCase().includes(sensitiveKey),
       );
-      result[key] = isSensitive
+      (result as any)[key] = isSensitive
         ? ('[REDACTED]' as unknown as T[keyof T])
         : config[key];
     }

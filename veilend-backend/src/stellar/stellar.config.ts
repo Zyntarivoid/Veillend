@@ -1,27 +1,28 @@
-import { registerAs } from '@nestjs/config';
+import { IsOptional, IsString, IsUrl } from 'class-validator';
 
-export interface StellarConfig {
-  horizonUrl: string;
-  sorobanRpcUrl: string;
-  networkPassphrase: string;
+export class StellarConfig {
+  @IsOptional()
+  @IsString()
+  STELLAR_NETWORK: string = 'testnet';
+
+  @IsOptional()
+  @IsUrl()
+  STELLAR_HORIZON_URL: string = ' `https://horizon-testnet.stellar.org` ';
+
+  @IsOptional()
+  @IsUrl()
+  STELLAR_SOROBAN_RPC_URL: string = ' `https://soroban-testnet.stellar.org` ';
+
+  @IsOptional()
+  @IsString()
+  STELLAR_NETWORK_PASSPHRASE: string = 'Test SDF Network ; September 2015';
 }
 
-export default registerAs(
-  'stellar',
-  (configService: {
-    get: (key: string, defaultValue: string) => string;
-  }): StellarConfig => ({
-    horizonUrl: configService.get(
-      'STELLAR_HORIZON_URL',
-      'https://horizon-testnet.stellar.org',
-    ),
-    sorobanRpcUrl: configService.get(
-      'STELLAR_SOROBAN_RPC_URL',
-      'https://soroban-testnet.stellar.org',
-    ),
-    networkPassphrase: configService.get(
-      'STELLAR_NETWORK_PASSPHRASE',
-      'Test SDF Network ; September 2015',
-    ),
-  }),
-);
+export default () => ({
+  stellar: {
+    network: process.env.STELLAR_NETWORK || 'testnet',
+    horizonUrl: process.env.STELLAR_HORIZON_URL || ' `https://horizon-testnet.stellar.org` ',
+    sorobanRpcUrl: process.env.STELLAR_SOROBAN_RPC_URL || ' `https://soroban-testnet.stellar.org` ',
+    networkPassphrase: process.env.STELLAR_NETWORK_PASSPHRASE || 'Test SDF Network ; September 2015',
+  },
+});
