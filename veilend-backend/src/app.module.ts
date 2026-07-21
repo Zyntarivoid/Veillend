@@ -4,6 +4,7 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ClsModule } from 'nestjs-cls';
 import type { Request, Response } from 'express';
+import { PrismaModule } from './prisma/prisma.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { StellarModule } from './stellar/stellar.module';
@@ -13,8 +14,8 @@ import { AssetsModule } from './assets/assets.module';
 import { TransactionsModule } from './transactions/transactions.module';
 import { AdminModule } from './admin/admin.module';
 import { AuthModule } from './auth/auth.module';
+import { ProtocolModule } from './protocol/protocol.module';
 import { ConfigModule } from './config/config.module';
-import { PrismaModule } from './prisma/prisma.module';
 import { AppLoggerService } from './common/logging/app-logger.service';
 import { LoggingInterceptor } from './common/logging/logging.interceptor';
 import { AllExceptionsFilter } from './common/logging/all-exceptions.filter';
@@ -54,6 +55,7 @@ import {
     TransactionsModule,
     AdminModule,
     AuthModule,
+    ProtocolModule,
   ],
   controllers: [AppController],
   providers: [

@@ -5,16 +5,31 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import type { Request } from 'express';
+
+interface AuthenticatedUser {
+  walletAddress: string;
+}
+
+interface RequestWithUser extends Request {
+  user?: AuthenticatedUser;
+}
+
+interface RequestWithUser extends Request {
+  user?: {
+    walletAddress: string;
+  };
+}
 
 @Injectable()
 export class AdminGuard implements CanActivate {
   constructor(private prisma: PrismaService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request = context.switchToHttp().getRequest();
+    const request = context.switchToHttp().getRequest<RequestWithUser>();
     const user = request.user;
 
-    if (!user?.walletAddress) {
+    if (!user || !user.walletAddress) {
       throw new UnauthorizedException('No user authenticated');
     }
 

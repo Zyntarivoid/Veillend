@@ -8,6 +8,7 @@ import DashboardScreen from '../screens/DashboardScreen';
 import DepositScreen from '../screens/DepositScreen';
 import BorrowScreen from '../screens/BorrowScreen';
 import RepayScreen from '../screens/RepayScreen';
+import SettingsScreen from '../screens/SettingsScreen';
 import { useStore } from '../store/store';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -75,7 +76,10 @@ export default function RootNavigator() {
         {!authToken ? (
           <Stack.Screen name="ConnectWallet" component={ConnectWalletScreen} />
         ) : (
-          <Stack.Screen name="Main" component={MainTabs} />
+          <>
+            <Stack.Screen name="Main" component={MainTabs} />
+            <Stack.Screen name="Settings" component={SettingsScreen} />
+          </>
         )}
       </Stack.Navigator>
     </NavigationContainer>

@@ -54,6 +54,7 @@ model Asset {
   name          String
   logoUrl       String?
   isNative      Boolean  @default(false)
+  isSupported   Boolean  @default(false)     // set by the indexer's 'asset_configured' event
   createdAt     DateTime @default(now())
 
   positions     Position[]
@@ -139,7 +140,7 @@ model TransactionHistory {
 
   // Soroban-specific
   contractId      String?                           // contract that emitted the event
-  sorobanEventId  String?
+  sorobanEventId  String?           @unique         // Soroban event id; the true per-event idempotency key (a txHash can contain multiple events)
 
   memo            String?
   createdAt       DateTime          @default(now())
@@ -149,6 +150,7 @@ model TransactionHistory {
   @@index([assetId])
   @@index([txHash])
   @@index([ledgerSequence])
+  @@index([sorobanEventId])
 }
 
 // ─── Sync Checkpoints ────────────────────────────────────────────────────────
@@ -180,4 +182,15 @@ model Admin {
   createdAt      DateTime @default(now())
 
   @@index([walletAddress])
+}
+
+// ─── Indexer Checkpoint ──────────────────────────────────────────────────────
+
+// Singleton row (fixed id "global") tracking the Soroban event indexer's
+// global ledger cursor. Distinct from SyncCheckpoint, which is scoped
+// per-user for a different purpose.
+model IndexerCheckpoint {
+  id                String   @id @default("global")
+  lastIndexedLedger Int      @default(0)
+  updatedAt         DateTime @updatedAt
 }

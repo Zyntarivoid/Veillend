@@ -1,0 +1,51 @@
+# ─────────────────────────────────────────────────────────────
+# VeilLend Backend – Local Development with Docker Compose
+# ─────────────────────────────────────────────────────────────
+# Usage:
+#   docker compose up -d          # start backend + Postgres
+#   docker compose up backend     # start only the backend
+#   docker compose logs -f        # follow logs
+#   docker compose down -v        # tear down (removes volumes)
+# ─────────────────────────────────────────────────────────────
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: veilend
+      POSTGRES_PASSWORD: veilend
+      POSTGRES_DB: veilend
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U veilend']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    ports:
+      - '3000:3000'
+    environment:
+      DATABASE_URL: postgresql://veilend:veilend@postgres:5432/veilend
+      JWT_SECRET: dev_secret
+      PORT: '3000'
+      STELLAR_NETWORK: testnet
+      STELLAR_HORIZON_URL: https://horizon-testnet.stellar.org
+      STELLAR_SOROBAN_RPC_URL: https://soroban-testnet.stellar.org
+      THROTTLE_TTL: '60000'
+      THROTTLE_LIMIT: '100'
+      AUTH_THROTTLE_TTL: '60000'
+      AUTH_THROTTLE_LIMIT: '5'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:

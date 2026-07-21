@@ -10,7 +10,7 @@ export class AdminService {
   constructor(private prisma: PrismaService) {}
 
   async addAdmin(dto: AddAdminDto) {
-    return this.prisma.admin.create({
+    return await this.prisma.admin.create({
       data: {
         walletAddress: dto.walletAddress,
       },
@@ -18,16 +18,16 @@ export class AdminService {
   }
 
   async removeAdmin(walletAddress: string) {
-    return this.prisma.admin.delete({
+    return await this.prisma.admin.delete({
       where: { walletAddress },
     });
   }
 
   async listAdmins() {
-    return this.prisma.admin.findMany();
+    return await this.prisma.admin.findMany();
   }
 
-  async configureAsset(dto: ConfigureAssetDto) {
+  configureAsset(dto: ConfigureAssetDto) {
     // Placeholder: Actual contract interaction would go here
     return {
       success: true,
@@ -36,7 +36,7 @@ export class AdminService {
     };
   }
 
-  async setOraclePrice(dto: SetOraclePriceDto) {
+  setOraclePrice(dto: SetOraclePriceDto) {
     // Placeholder: Actual contract interaction would go here
     return {
       success: true,
@@ -45,7 +45,7 @@ export class AdminService {
     };
   }
 
-  async setMinCollateralRatio(dto: SetMinCollateralRatioDto) {
+  setMinCollateralRatio(dto: SetMinCollateralRatioDto) {
     // Placeholder: Actual contract interaction would go here
     return {
       success: true,

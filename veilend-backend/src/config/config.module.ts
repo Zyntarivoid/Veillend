@@ -2,7 +2,6 @@ import { Module } from '@nestjs/common';
 import { ConfigModule as NestConfigModule } from '@nestjs/config';
 import { validateConfig, redactConfig } from './validation';
 import { AppConfig } from './app.config';
-import { StellarConfig } from './stellar.config';
 import { IndexerConfig } from './indexer.config';
 import { AuthConfig } from './auth.config';
 import { AppConfigService } from './app-config.service';
@@ -19,13 +18,11 @@ const logger = new Logger('ConfigModule');
         logger.log('Validating application configuration...');
 
         const validatedAppConfig = validateConfig(config, AppConfig);
-        const validatedStellarConfig = validateConfig(config, StellarConfig);
         const validatedIndexerConfig = validateConfig(config, IndexerConfig);
         const validatedAuthConfig = validateConfig(config, AuthConfig);
 
         const mergedConfig = {
           ...validatedAppConfig,
-          ...validatedStellarConfig,
           ...validatedIndexerConfig,
           ...validatedAuthConfig,
         };
