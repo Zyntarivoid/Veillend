@@ -22,6 +22,8 @@ const PERSIST_KEYS = {
   profileName: 'profileName',
   profileImage: 'profileImage',
   secretKey: 'stellar_secret_key',
+  currency: 'currency',
+  notificationsEnabled: 'notificationsEnabled',
 } as const;
 
 type AuthState = {
@@ -43,6 +45,10 @@ type UiState = {
   setProfileName: (name: string | null) => void;
   setProfileImage: (uri: string | null) => void;
   togglePrivacyMode: () => void;
+  currency: string;
+  notificationsEnabled: boolean;
+  setCurrency: (currency: string) => void;
+  setNotificationsEnabled: (enabled: boolean) => void;
   expectedNetwork: string;
   currentNetwork: string | null;
   lastProtocolSyncAt: number | null;
@@ -121,6 +127,8 @@ export const useStore = create<StoreState>(
         isPrivacyMode: false,
         profileName: null,
         profileImage: null,
+        currency: 'USD',
+        notificationsEnabled: true,
         sessionRestored: true,
       });
       // Clear ALL persisted keys to prevent stale data on next launch
@@ -131,6 +139,8 @@ export const useStore = create<StoreState>(
         SecureStore.deleteItemAsync(PERSIST_KEYS.profileName);
         SecureStore.deleteItemAsync(PERSIST_KEYS.profileImage);
         SecureStore.deleteItemAsync(PERSIST_KEYS.secretKey);
+        SecureStore.deleteItemAsync(PERSIST_KEYS.currency);
+        SecureStore.deleteItemAsync(PERSIST_KEYS.notificationsEnabled);
       } catch (e) {
         // ignore persistence errors
       }
@@ -167,6 +177,27 @@ export const useStore = create<StoreState>(
         } else {
           SecureStore.deleteItemAsync(PERSIST_KEYS.isPrivacyMode);
         }
+      } catch (e) {
+        // ignore persistence errors
+      }
+    },
+    currency: 'USD',
+    notificationsEnabled: true,
+    setCurrency: (currency: string) => {
+      set({ currency });
+      try {
+        SecureStore.setItemAsync(PERSIST_KEYS.currency, currency);
+      } catch (e) {
+        // ignore persistence errors
+      }
+    },
+    setNotificationsEnabled: (enabled: boolean) => {
+      set({ notificationsEnabled: enabled });
+      try {
+        SecureStore.setItemAsync(
+          PERSIST_KEYS.notificationsEnabled,
+          enabled ? 'true' : 'false',
+        );
       } catch (e) {
         // ignore persistence errors
       }
@@ -327,13 +358,16 @@ export const useStore = create<StoreState>(
 // ──────────────────────────────────────────────
 (async () => {
   try {
-    const [token, address, privacyMode, profileName, profileImage] = await Promise.all([
-      SecureStore.getItemAsync(PERSIST_KEYS.authToken),
-      SecureStore.getItemAsync(PERSIST_KEYS.address),
-      SecureStore.getItemAsync(PERSIST_KEYS.isPrivacyMode),
-      SecureStore.getItemAsync(PERSIST_KEYS.profileName),
-      SecureStore.getItemAsync(PERSIST_KEYS.profileImage),
-    ]);
+    const [token, address, privacyMode, profileName, profileImage, currency, notificationsEnabled] =
+      await Promise.all([
+        SecureStore.getItemAsync(PERSIST_KEYS.authToken),
+        SecureStore.getItemAsync(PERSIST_KEYS.address),
+        SecureStore.getItemAsync(PERSIST_KEYS.isPrivacyMode),
+        SecureStore.getItemAsync(PERSIST_KEYS.profileName),
+        SecureStore.getItemAsync(PERSIST_KEYS.profileImage),
+        SecureStore.getItemAsync(PERSIST_KEYS.currency),
+        SecureStore.getItemAsync(PERSIST_KEYS.notificationsEnabled),
+      ]);
 
     const patch: Partial<AuthState & UiState> = { sessionRestored: true };
     if (token) patch.authToken = token;
@@ -341,6 +375,8 @@ export const useStore = create<StoreState>(
     if (privacyMode === 'true') patch.isPrivacyMode = true;
     if (profileName) patch.profileName = profileName;
     if (profileImage) patch.profileImage = profileImage;
+    if (currency) patch.currency = currency;
+    if (notificationsEnabled !== null) patch.notificationsEnabled = notificationsEnabled === 'true';
 
     useStore.setState(patch);
   } catch (e) {

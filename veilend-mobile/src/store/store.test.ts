@@ -16,6 +16,8 @@ beforeEach(async () => {
     isPrivacyMode: false,
     profileName: null,
     profileImage: null,
+    currency: 'USD',
+    notificationsEnabled: true,
     authLoading: false,
     sessionRestored: true,
     lendingLoading: false,
@@ -128,6 +130,46 @@ describe('Privacy mode persistence (issue #59)', () => {
     togglePrivacyMode();
 
     assert.equal(useStore.getState().isPrivacyMode, false);
+  });
+});
+
+describe('Settings preferences persistence (issue #190)', () => {
+  it('should default currency to USD and notifications to enabled', () => {
+    assert.equal(useStore.getState().currency, 'USD');
+    assert.equal(useStore.getState().notificationsEnabled, true);
+  });
+
+  it('should persist currency when set', async () => {
+    const { setCurrency } = useStore.getState();
+    setCurrency('EUR');
+    await flushPersistence();
+
+    assert.equal(useStore.getState().currency, 'EUR');
+    assert.equal(await SecureStoreShim.getItemAsync('currency'), 'EUR');
+  });
+
+  it('should persist notificationsEnabled when toggled off', async () => {
+    const { setNotificationsEnabled } = useStore.getState();
+    setNotificationsEnabled(false);
+    await flushPersistence();
+
+    assert.equal(useStore.getState().notificationsEnabled, false);
+    assert.equal(await SecureStoreShim.getItemAsync('notificationsEnabled'), 'false');
+  });
+
+  it('logout should reset currency and notificationsEnabled to defaults', async () => {
+    const { setCurrency, setNotificationsEnabled, logout } = useStore.getState();
+    setCurrency('GBP');
+    setNotificationsEnabled(false);
+    await flushPersistence();
+
+    logout();
+    await flushPersistence();
+
+    assert.equal(useStore.getState().currency, 'USD');
+    assert.equal(useStore.getState().notificationsEnabled, true);
+    assert.equal(await SecureStoreShim.getItemAsync('currency'), null);
+    assert.equal(await SecureStoreShim.getItemAsync('notificationsEnabled'), null);
   });
 });
 

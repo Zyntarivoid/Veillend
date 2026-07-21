@@ -1,12 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Image, Modal, TextInput, TouchableWithoutFeedback, Keyboard, KeyboardAvoidingView, Platform, Dimensions, FlatList, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Image, Modal, TouchableWithoutFeedback, Keyboard, Dimensions, FlatList, ActivityIndicator } from 'react-native';
 import api from '../utils/api';
 import { useStore, TransactionRecord } from '../store/store';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
 import { MOCK_USER } from '../data/mockData';
-import { shortenAddress } from '../utils/helpers';
+import { shortenAddress, getCurrencySymbol } from '../utils/helpers';
 import ProtocolStatusBanners from '../components/ProtocolStatusBanners';
 
 const { width } = Dimensions.get('window');
@@ -24,8 +23,7 @@ export default function DashboardScreen({ navigation }: any) {
     isPrivacyMode,
     profileName,
     profileImage,
-    setProfileName,
-    setProfileImage,
+    currency,
     togglePrivacyMode,
     expectedNetwork,
     currentNetwork,
@@ -75,18 +73,9 @@ export default function DashboardScreen({ navigation }: any) {
       </View>
     );
   }
-  const [isEditingName, setIsEditingName] = useState(false);
-  const [tempName, setTempName] = useState('');
-
   const defaultUsername = address ? shortenAddress(address) : MOCK_USER.name;
   const username = profileName ?? defaultUsername;
   const avatarUri = profileImage ?? DEFAULT_PROFILE_IMAGE;
-
-  useEffect(() => {
-    if (!isEditingName) {
-      setTempName(username);
-    }
-  }, [isEditingName, username]);
 
   const handleLogout = () => {
     setProfileVisible(false);
@@ -98,26 +87,6 @@ export default function DashboardScreen({ navigation }: any) {
     refreshProtocolStatus().catch(() => {});
   };
 
-  const saveUsername = () => {
-    const nextName = tempName.trim();
-    setProfileName(nextName.length > 0 ? nextName : null);
-    setIsEditingName(false);
-  };
-
-  const pickImage = async () => {
-    // No permissions request is necessary for launching the image library
-    let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 1,
-    });
-
-    if (!result.canceled) {
-      setProfileImage(result.assets[0].uri);
-    }
-  };
-  
   const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
     if (viewableItems.length > 0) {
       setCurrentIndex(viewableItems[0].index || 0);
@@ -173,9 +142,9 @@ export default function DashboardScreen({ navigation }: any) {
             <Text style={styles.cardLabel}>{item.label}</Text>
             <View style={styles.balanceRow}>
               <Text style={styles.balanceAmount}>
-                {isPrivacyMode 
-                  ? '****' 
-                  : `$${item.value.toLocaleString('en-US', { minimumFractionDigits: 2 })}`
+                {isPrivacyMode
+                  ? '****'
+                  : `${getCurrencySymbol(currency)}${item.value.toLocaleString('en-US', { minimumFractionDigits: 2 })}`
                 }
               </Text>
                {/* Masked number eye icon */}
@@ -257,72 +226,26 @@ export default function DashboardScreen({ navigation }: any) {
                   </TouchableOpacity>
                 </View>
 
-                {/* Profile Setup / Username */}
-                <View style={styles.menuItem}>
-                  <View style={styles.menuIconBox}>
-                    <Ionicons name="person" size={20} color="#00D1FF" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.menuLabel}>Username</Text>
-                    {isEditingName ? (
-                      <View style={styles.editNameContainer}>
-                        <TextInput
-                          style={styles.nameInput}
-                          value={tempName}
-                          onChangeText={setTempName}
-                          autoFocus
-                          placeholderTextColor="#555"
-                        />
-                        <TouchableOpacity onPress={saveUsername} style={styles.saveBtn}>
-                          <Ionicons name="checkmark" size={18} color="#000" />
-                        </TouchableOpacity>
-                      </View>
-                    ) : (
-                      <View style={styles.nameDisplayRow}>
-                        <Text style={styles.menuValue}>{username}</Text>
-                        <TouchableOpacity onPress={() => {
-                          setTempName(username);
-                          setIsEditingName(true);
-                        }}>
-                          <Ionicons name="pencil" size={16} color="#A855F7" style={{ marginLeft: 8 }} />
-                        </TouchableOpacity>
-                      </View>
-                    )}
-                  </View>
+                {/* Profile summary */}
+                <View style={styles.profileSummary}>
+                  <Image source={{ uri: avatarUri }} style={styles.largeAvatar} />
+                  <Text style={styles.profileSummaryName}>{username}</Text>
                 </View>
 
-                {/* Change Profile Picture */}
-                <TouchableOpacity style={styles.menuItem} onPress={pickImage}>
-                  <View style={styles.menuIconBox}>
-                    <Ionicons name="camera" size={20} color="#00D1FF" />
-                  </View>
-                  <View>
-                    <Text style={styles.menuLabel}>Change Profile Picture</Text>
-                    <Text style={styles.menuSubLabel}>Update your avatar</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={20} color="#555" style={{ marginLeft: 'auto' }} />
-                </TouchableOpacity>
-
-                {/* Account Preference */}
-                <TouchableOpacity style={styles.menuItem}>
+                {/* Settings */}
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={() => {
+                    setProfileVisible(false);
+                    navigation.navigate('Settings');
+                  }}
+                >
                   <View style={styles.menuIconBox}>
                     <Ionicons name="settings" size={20} color="#A855F7" />
                   </View>
                   <View>
-                    <Text style={styles.menuLabel}>Account Preferences</Text>
-                    <Text style={styles.menuSubLabel}>Currency, Notifications, Privacy</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={20} color="#555" style={{ marginLeft: 'auto' }} />
-                </TouchableOpacity>
-
-                {/* Profile Setup (Generic) */}
-                 <TouchableOpacity style={styles.menuItem}>
-                  <View style={styles.menuIconBox}>
-                    <Ionicons name="build" size={20} color="#A855F7" />
-                  </View>
-                  <View>
-                    <Text style={styles.menuLabel}>Profile Setup</Text>
-                    <Text style={styles.menuSubLabel}>Complete your KYC/Verification</Text>
+                    <Text style={styles.menuLabel}>Settings</Text>
+                    <Text style={styles.menuSubLabel}>Profile, currency, notifications & privacy</Text>
                   </View>
                   <Ionicons name="chevron-forward" size={20} color="#555" style={{ marginLeft: 'auto' }} />
                 </TouchableOpacity>
@@ -652,9 +575,15 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#fff',
   },
-  profileImageContainer: {
-    position: 'relative',
-    marginBottom: 8,
+  profileSummary: {
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  profileSummaryName: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginTop: 12,
   },
   largeAvatar: {
     width: 80,
@@ -662,23 +591,6 @@ const styles = StyleSheet.create({
     borderRadius: 40,
     borderWidth: 2,
     borderColor: '#A855F7',
-  },
-  cameraIconBadge: {
-    position: 'absolute',
-    bottom: 0,
-    right: 0,
-    backgroundColor: '#00D1FF',
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#121212',
-  },
-  editPhotoText: {
-    color: '#A1A1A1',
-    fontSize: 12,
   },
   menuItem: {
     flexDirection: 'row',
@@ -706,32 +618,6 @@ const styles = StyleSheet.create({
   menuSubLabel: {
     fontSize: 12,
     color: '#888',
-  },
-  menuValue: {
-    fontSize: 16,
-    color: '#ccc',
-  },
-  nameDisplayRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  editNameContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  nameInput: {
-    flex: 1,
-    color: '#fff',
-    fontSize: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#A855F7',
-    paddingVertical: 4,
-    marginRight: 10,
-  },
-  saveBtn: {
-    backgroundColor: '#00D1FF',
-    padding: 6,
-    borderRadius: 8,
   },
   divider: {
     height: 1,
