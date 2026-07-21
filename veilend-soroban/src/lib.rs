@@ -912,10 +912,14 @@ mod tests {
         env.mock_all_auths();
 
         let admin = Address::generate(&env);
-        let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000_u32));
+        let contract_id = env.register_contract(VeilLendContract);
+        let client = VeilLendContractClient::new(&env, &contract_id);
+        
+        // Initialize once
+        client.__constructor(&admin, &15_000_u32);
         
         // Trying to initialize again should fail
-        VeilLendContract::__constructor(env, admin.clone(), 20_000);
+        client.__constructor(&admin, &20_000_u32);
     }
 
     #[test]
