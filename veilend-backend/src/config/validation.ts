@@ -42,7 +42,6 @@ export function redactConfig<T extends Record<string, unknown>>(
         key.toUpperCase().includes(sensitiveKey),
       );
       (result as any)[key] = isSensitive
-      result[key as keyof typeof result] = isSensitive
         ? ('[REDACTED]' as unknown as T[keyof T])
         : config[key];
     }
