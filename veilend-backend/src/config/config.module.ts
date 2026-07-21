@@ -4,10 +4,11 @@ import { validateConfig, redactConfig } from './validation';
 import { AppConfig } from './app.config';
 import { IndexerConfig } from './indexer.config';
 import { AuthConfig } from './auth.config';
+import { StellarConfig } from './stellar.config';
 import { AppConfigService } from './app-config.service';
 import { Logger } from '@nestjs/common';
 
-const logger = new Logger('ConfigModule');
+const logger = new Logger('ConfigValidation');
 
 @Module({
   imports: [
@@ -20,11 +21,13 @@ const logger = new Logger('ConfigModule');
         const validatedAppConfig = validateConfig(config, AppConfig);
         const validatedIndexerConfig = validateConfig(config, IndexerConfig);
         const validatedAuthConfig = validateConfig(config, AuthConfig);
+        const validatedStellarConfig = validateConfig(config, StellarConfig);
 
         const mergedConfig = {
           ...validatedAppConfig,
           ...validatedIndexerConfig,
           ...validatedAuthConfig,
+          ...validatedStellarConfig,
         };
 
         logger.log('Configuration validated successfully!');

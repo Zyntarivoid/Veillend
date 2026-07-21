@@ -17,6 +17,3 @@ export class StellarConfig {
   @IsString()
   STELLAR_NETWORK_PASSPHRASE: string = 'Test SDF Network ; September 2015';
 }
-export default () => ({
-  horizonUrl: process.env.HORIZON_URL,
-});
