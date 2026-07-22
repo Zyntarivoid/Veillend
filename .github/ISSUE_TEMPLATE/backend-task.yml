@@ -1,0 +1,67 @@
+name: Backend task
+description: Plan a backend API, indexing, auth, or observability contribution.
+title: "backend: "
+labels:
+  - backend
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for VeilLend backend work such as API routes, DTOs,
+        authentication/session handling, indexing, portfolio reads, readiness
+        checks, and contributor-facing backend documentation.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What backend behavior should change?
+      placeholder: Add a concise description of the backend contribution.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Backend area
+      description: Pick the closest backend surface.
+      options:
+        - Auth and wallet sessions
+        - Portfolio or position reads
+        - Asset metadata or protocol configuration
+        - Transaction history or indexing
+        - Admin or risk configuration
+        - Health, readiness, or observability
+        - Backend documentation or contributor process
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List the observable conditions that make this issue done.
+      placeholder: |
+        - [ ] Endpoint or behavior is implemented.
+        - [ ] Validation and error handling are covered.
+        - [ ] Tests or documentation are updated.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Suggested validation
+      description: Commands or checks contributors should run before opening a PR.
+      placeholder: |
+        - npm run test
+        - npm run test:e2e
+        - npm run lint
+  - type: textarea
+    id: security
+    attributes:
+      label: Security and data handling notes
+      description: Call out auth, wallet, secret, payment, or user-data concerns.
+      placeholder: Mention required guards, private data boundaries, and unsafe cases.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Link related issues, PRs, docs, or implementation notes.
