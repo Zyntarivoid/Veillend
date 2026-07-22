@@ -792,7 +792,7 @@ impl VeilLendContract {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{testutils::Address as _, testutils::Env as _};
+    use soroban_sdk::{testutils::Address as _, Env};
 
     #[test]
     fn test_position_creation() {
@@ -912,14 +912,16 @@ mod tests {
         env.mock_all_auths();
 
         let admin = Address::generate(&env);
-        let contract_id = env.register_contract(VeilLendContract);
-        let client = VeilLendContractClient::new(&env, &contract_id);
+        let contract_id = env.register(VeilLendContract, ());
+
+        // Set the contract address so we can call __constructor directly
+        env.set_contract_address(&contract_id);
 
         // Initialize once
-        client.__constructor(&admin, &15_000_u32);
+        VeilLendContract::__constructor(env.clone(), admin.clone(), 15_000_u32);
 
         // Trying to initialize again should fail
-        client.__constructor(&admin, &20_000_u32);
+        VeilLendContract::__constructor(env, admin, 20_000_u32);
     }
 
     #[test]
@@ -1167,7 +1169,7 @@ mod tests {
     #[should_panic(expected = "Error(Contract, #9)")]
     fn test_not_initialized_admin() {
         let env = Env::default();
-        let contract_id = env.register_contract(VeilLendContract);
+        let contract_id = env.register(VeilLendContract, ());
         let client = VeilLendContractClient::new(&env, &contract_id);
         client.admin();
     }

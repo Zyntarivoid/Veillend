@@ -1,17 +1,19 @@
 #![cfg(test)]
 
+use veilend_soroban::{VeilLendContract, VeilLendContractClient};
+use soroban_sdk::{testutils::Address as _, Env, Address};
+
 fn main() {}
 
 #[test]
 fn test_initialize_contract() {
     let env = Env::default();
-    let contract_id = env.register(VeilLendContract, ());
-    let client = VeilLendContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
     env.mock_all_auths();
 
-    client.__constructor(&admin, &15_000);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000_u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
 
     assert_eq!(client.admin(), admin);
     assert_eq!(client.min_collateral_ratio_bps(), 15_000);
@@ -21,14 +23,14 @@ fn test_initialize_contract() {
 #[test]
 fn test_configure_asset() {
     let env = Env::default();
-    let contract_id = env.register(VeilLendContract, ());
-    let client = VeilLendContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
     let asset = Address::generate(&env);
-
     env.mock_all_auths();
-    client.__constructor(&admin, &15_000);
+
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000_u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
     client.configure_asset(&admin, &asset, &true);
 
     assert_eq!(client.is_asset_supported(&asset), true);
@@ -44,15 +46,15 @@ fn test_configure_asset() {
 #[test]
 fn test_update_asset_caps() {
     let env = Env::default();
-    let contract_id = env.register(VeilLendContract, ());
-    let client = VeilLendContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
     let asset = Address::generate(&env);
     let user = Address::generate(&env);
-
     env.mock_all_auths();
-    client.__constructor(&admin, &15_000);
+
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000_u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
     client.configure_asset(&admin, &asset, &true);
     client.set_oracle_price(&admin, &asset, &100);
 
@@ -90,15 +92,15 @@ fn test_update_asset_caps() {
 #[test]
 fn test_circuit_breaker_pause() {
     let env = Env::default();
-    let contract_id = env.register(VeilLendContract, ());
-    let client = VeilLendContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
     let asset = Address::generate(&env);
     let user = Address::generate(&env);
-
     env.mock_all_auths();
-    client.__constructor(&admin, &15_000);
+
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000_u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
     client.configure_asset(&admin, &asset, &true);
     client.set_oracle_price(&admin, &asset, &100);
 
@@ -136,14 +138,13 @@ fn test_circuit_breaker_pause() {
 #[test]
 fn test_circuit_breaker_unauthorized() {
     let env = Env::default();
-    let contract_id = env.register(VeilLendContract, ());
-    let client = VeilLendContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
     let attacker = Address::generate(&env);
-
     env.mock_all_auths();
-    client.__constructor(&admin, &15_000);
+
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000_u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
 
     // Attacker tries to pause
     let result = std::panic::catch_unwind(|| {
@@ -158,16 +159,16 @@ fn test_circuit_breaker_unauthorized() {
 #[test]
 fn test_deposit_and_borrow_with_caps() {
     let env = Env::default();
-    let contract_id = env.register(VeilLendContract, ());
-    let client = VeilLendContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
     let asset = Address::generate(&env);
     let user1 = Address::generate(&env);
     let user2 = Address::generate(&env);
-
     env.mock_all_auths();
-    client.__constructor(&admin, &15_000);
+
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000_u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
     client.configure_asset(&admin, &asset, &true);
     client.set_oracle_price(&admin, &asset, &100);
 
@@ -206,15 +207,15 @@ fn test_deposit_and_borrow_with_caps() {
 #[test]
 fn test_unlimited_caps() {
     let env = Env::default();
-    let contract_id = env.register(VeilLendContract, ());
-    let client = VeilLendContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
     let asset = Address::generate(&env);
     let user = Address::generate(&env);
-
     env.mock_all_auths();
-    client.__constructor(&admin, &15_000);
+
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000_u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
     client.configure_asset(&admin, &asset, &true);
     client.set_oracle_price(&admin, &asset, &100);
 
@@ -233,14 +234,14 @@ fn test_unlimited_caps() {
 #[test]
 fn test_invalid_caps() {
     let env = Env::default();
-    let contract_id = env.register(VeilLendContract, ());
-    let client = VeilLendContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
     let asset = Address::generate(&env);
-
     env.mock_all_auths();
-    client.__constructor(&admin, &15_000);
+
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000_u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
     client.configure_asset(&admin, &asset, &true);
 
     // Zero cap is invalid (should be -1 for unlimited or positive)
@@ -264,14 +265,14 @@ fn test_invalid_caps() {
 #[test]
 fn test_cap_update_events() {
     let env = Env::default();
-    let contract_id = env.register(VeilLendContract, ());
-    let client = VeilLendContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
     let asset = Address::generate(&env);
-
     env.mock_all_auths();
-    client.__constructor(&admin, &15_000);
+
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000_u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
     client.configure_asset(&admin, &asset, &true);
 
     // Events are emitted - we just verify no panic
@@ -284,13 +285,12 @@ fn test_cap_update_events() {
 #[test]
 fn test_circuit_breaker_events() {
     let env = Env::default();
-    let contract_id = env.register(VeilLendContract, ());
-    let client = VeilLendContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
-
     env.mock_all_auths();
-    client.__constructor(&admin, &15_000);
+
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000_u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
 
     // Toggle pause on
     client.set_paused(&admin, &true);
