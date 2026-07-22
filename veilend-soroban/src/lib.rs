@@ -353,6 +353,9 @@ impl VeilLendContract {
         // Ensure asset is supported
         Self::require_supported_asset(&env, &asset);
 
+        // Get current contract address (example fix for current_contract_address error)
+        let _contract_address = env.current_contract_address();
+
         admin.require_auth();
 
         env.storage()
