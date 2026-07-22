@@ -915,15 +915,19 @@ mod tests {
         // Register the contract without calling constructor
         let contract_id = env.register(VeilLendContract, ());
 
-        // Set the current contract address for test env
-        use soroban_sdk::testutils::Env as _;
-        env.set_current_contract_address(&contract_id);
+        // First, initialize once using the contract's __constructor via env.invoke_contract
+        let mut args = soroban_sdk::Vec::new(&env);
+        args.push_back(admin.clone());
+        args.push_back(15_000_u32);
 
-        // Initialize once
-        VeilLendContract::__constructor(env.clone(), admin.clone(), 15_000_u32);
+        env.invoke_contract::<()>(&contract_id, &symbol_short!("__constructor"), args);
 
         // Trying to initialize again should fail
-        VeilLendContract::__constructor(env, admin, 20_000_u32);
+        let mut args2 = soroban_sdk::Vec::new(&env);
+        args2.push_back(admin);
+        args2.push_back(20_000_u32);
+
+        env.invoke_contract::<()>(&contract_id, &symbol_short!("__constructor"), args2);
     }
 
     #[test]
