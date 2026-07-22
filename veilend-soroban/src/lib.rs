@@ -216,7 +216,7 @@ impl VeilLendContract {
         }
     }
 
-    pub fn __constructor(env: Env, admin: Address, min_collateral_ratio_bps: u32) {
+    pub fn initialize(env: Env, admin: Address, min_collateral_ratio_bps: u32) {
         if env.storage().instance().has(&DataKey::Admin) {
             panic_with_error!(&env, VeilLendError::AlreadyInitialized);
         }
@@ -898,8 +898,10 @@ mod tests {
         env.mock_all_auths();
 
         let admin = Address::generate(&env);
-        let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000_u32));
+        let contract_id = env.register(VeilLendContract, ());
         let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
 
         assert_eq!(client.admin(), admin);
         assert_eq!(client.min_collateral_ratio_bps(), 15_000);
@@ -912,22 +914,11 @@ mod tests {
         env.mock_all_auths();
 
         let admin = Address::generate(&env);
-        // Register the contract without calling constructor
         let contract_id = env.register(VeilLendContract, ());
+        let client = VeilLendContractClient::new(&env, &contract_id);
 
-        // First, initialize once using the contract's __constructor via env.invoke_contract
-        let mut args = soroban_sdk::Vec::new(&env);
-        args.push_back(admin.clone());
-        args.push_back(15_000_u32);
-
-        env.invoke_contract::<()>(&contract_id, &symbol_short!("__constructor"), args);
-
-        // Trying to initialize again should fail
-        let mut args2 = soroban_sdk::Vec::new(&env);
-        args2.push_back(admin);
-        args2.push_back(20_000_u32);
-
-        env.invoke_contract::<()>(&contract_id, &symbol_short!("__constructor"), args2);
+        client.initialize(&admin, &15_000_u32);
+        client.initialize(&admin, &20_000_u32);
     }
 
     #[test]
@@ -937,7 +928,10 @@ mod tests {
         env.mock_all_auths();
 
         let admin = Address::generate(&env);
-        let _contract_id = env.register(VeilLendContract, (admin, 9_999_u32));
+        let contract_id = env.register(VeilLendContract, ());
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &9_999_u32);
     }
 
     #[test]
@@ -949,8 +943,10 @@ mod tests {
         let admin = Address::generate(&env);
         let unauthorized = Address::generate(&env);
         let asset = Address::generate(&env);
-        let contract_id = env.register(VeilLendContract, (admin, 15_000_u32));
+        let contract_id = env.register(VeilLendContract, ());
         let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
 
         client.configure_asset(&unauthorized, &asset, &true);
     }
@@ -963,8 +959,10 @@ mod tests {
         let admin = Address::generate(&env);
         let asset = Address::generate(&env);
         let other_asset = Address::generate(&env);
-        let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000_u32));
+        let contract_id = env.register(VeilLendContract, ());
         let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
 
         assert!(!client.is_asset_supported(&asset));
         assert!(!client.is_asset_supported(&other_asset));
@@ -986,8 +984,10 @@ mod tests {
 
         let admin = Address::generate(&env);
         let asset = Address::generate(&env);
-        let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000_u32));
+        let contract_id = env.register(VeilLendContract, ());
         let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
 
         assert_eq!(client.get_oracle_price(&asset), None);
         client.set_oracle_price(&admin, &asset, &100);
@@ -1002,8 +1002,10 @@ mod tests {
 
         let admin = Address::generate(&env);
         let asset = Address::generate(&env);
-        let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000_u32));
+        let contract_id = env.register(VeilLendContract, ());
         let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
 
         client.set_oracle_price(&admin, &asset, &0);
     }
@@ -1017,8 +1019,10 @@ mod tests {
         let admin = Address::generate(&env);
         let unauthorized = Address::generate(&env);
         let asset = Address::generate(&env);
-        let contract_id = env.register(VeilLendContract, (admin, 15_000_u32));
+        let contract_id = env.register(VeilLendContract, ());
         let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
 
         client.set_oracle_price(&unauthorized, &asset, &100);
     }
@@ -1030,8 +1034,10 @@ mod tests {
 
         let admin = Address::generate(&env);
         let asset = Address::generate(&env);
-        let contract_id = env.register(VeilLendContract, (admin, 15_000_u32));
+        let contract_id = env.register(VeilLendContract, ());
         let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
 
         assert_eq!(client.get_oracle_price(&asset), None);
     }
@@ -1042,8 +1048,10 @@ mod tests {
         env.mock_all_auths();
 
         let admin = Address::generate(&env);
-        let contract_id = env.register(VeilLendContract, (admin.clone(), 20_000_u32));
+        let contract_id = env.register(VeilLendContract, ());
         let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &20_000_u32);
 
         assert_eq!(client.min_collateral_ratio_bps(), 20_000);
     }
@@ -1056,8 +1064,10 @@ mod tests {
         let admin = Address::generate(&env);
         let asset = Address::generate(&env);
         let user = Address::generate(&env);
-        let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000_u32));
+        let contract_id = env.register(VeilLendContract, ());
         let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
 
         client.configure_asset(&admin, &asset, &true);
         client.set_oracle_price(&admin, &asset, &100);
@@ -1078,8 +1088,10 @@ mod tests {
         let admin = Address::generate(&env);
         let asset = Address::generate(&env);
         let user = Address::generate(&env);
-        let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000_u32));
+        let contract_id = env.register(VeilLendContract, ());
         let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
 
         client.configure_asset(&admin, &asset, &true);
         client.set_oracle_price(&admin, &asset, &100);
@@ -1096,8 +1108,10 @@ mod tests {
         let admin = Address::generate(&env);
         let asset = Address::generate(&env);
         let user = Address::generate(&env);
-        let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000_u32));
+        let contract_id = env.register(VeilLendContract, ());
         let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
 
         client.configure_asset(&admin, &asset, &true);
         client.set_oracle_price(&admin, &asset, &100);
@@ -1115,8 +1129,10 @@ mod tests {
         let admin = Address::generate(&env);
         let asset = Address::generate(&env);
         let user = Address::generate(&env);
-        let contract_id = env.register(VeilLendContract, (admin, 15_000_u32));
+        let contract_id = env.register(VeilLendContract, ());
         let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
 
         client.deposit(&user, &asset, &1000);
     }
@@ -1130,8 +1146,10 @@ mod tests {
         let admin = Address::generate(&env);
         let asset = Address::generate(&env);
         let user = Address::generate(&env);
-        let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000_u32));
+        let contract_id = env.register(VeilLendContract, ());
         let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
 
         client.configure_asset(&admin, &asset, &true);
         client.deposit(&user, &asset, &0);
@@ -1146,8 +1164,10 @@ mod tests {
         let admin = Address::generate(&env);
         let asset = Address::generate(&env);
         let user = Address::generate(&env);
-        let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000_u32));
+        let contract_id = env.register(VeilLendContract, ());
         let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
 
         client.configure_asset(&admin, &asset, &true);
         client.deposit(&user, &asset, &-100);
@@ -1162,8 +1182,10 @@ mod tests {
         let admin = Address::generate(&env);
         let asset = Address::generate(&env);
         let user = Address::generate(&env);
-        let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000_u32));
+        let contract_id = env.register(VeilLendContract, ());
         let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
 
         client.configure_asset(&admin, &asset, &true);
         client.set_oracle_price(&admin, &asset, &100);
@@ -1189,8 +1211,10 @@ mod tests {
         let admin = Address::generate(&env);
         let asset = Address::generate(&env);
         let user = Address::generate(&env);
-        let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000_u32));
+        let contract_id = env.register(VeilLendContract, ());
         let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
 
         client.configure_asset(&admin, &asset, &true);
         client.deposit(&user, &asset, &1000);
@@ -1205,8 +1229,10 @@ mod tests {
         let admin = Address::generate(&env);
         let asset = Address::generate(&env);
         let user = Address::generate(&env);
-        let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000_u32));
+        let contract_id = env.register(VeilLendContract, ());
         let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
 
         client.configure_asset(&admin, &asset, &true);
         client.set_oracle_price(&admin, &asset, &100);
@@ -1228,8 +1254,10 @@ mod tests {
         let admin = Address::generate(&env);
         let asset = Address::generate(&env);
         let user = Address::generate(&env);
-        let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000_u32));
+        let contract_id = env.register(VeilLendContract, ());
         let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
 
         client.configure_asset(&admin, &asset, &true);
         client.set_oracle_price(&admin, &asset, &100);
