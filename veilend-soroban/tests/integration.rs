@@ -3,8 +3,6 @@
 use soroban_sdk::{testutils::Address as _, Address, Env};
 use veillend_contract::{VeilLendContract, VeilLendContractClient};
 
-fn main() {}
-
 #[test]
 fn test_initialize_contract() {
     let env = Env::default();

@@ -17,4 +17,3 @@ soroban-sdk = { version = "=23.5.3", features = ["testutils"] }
 [[test]]
 name = "integration"
 path = "tests/integration.rs"
-harness = false
