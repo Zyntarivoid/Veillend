@@ -47,8 +47,8 @@ function MainTabs() {
 /** Splash shown while session is being restored from SecureStore */
 function SessionRestoreSplash() {
   return (
-    <View style={styles.splash}>
-      <ActivityIndicator size="large" color="#09cc71" />
+    <View style={styles.splashContainer} testID="session-restore-splash">
+      <ActivityIndicator size="large" color="#A855F7" />
     </View>
   );
 }
