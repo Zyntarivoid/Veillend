@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use soroban_sdk::{testutils::Address as _, Env, Address};
+use soroban_sdk::{testutils::Address as _, Address, Env};
 use veilend_hello::*;
 
 #[test]

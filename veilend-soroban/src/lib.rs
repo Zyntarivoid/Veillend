@@ -914,10 +914,10 @@ mod tests {
         let admin = Address::generate(&env);
         let contract_id = env.register_contract(VeilLendContract);
         let client = VeilLendContractClient::new(&env, &contract_id);
-        
+
         // Initialize once
         client.__constructor(&admin, &15_000_u32);
-        
+
         // Trying to initialize again should fail
         client.__constructor(&admin, &20_000_u32);
     }
@@ -1097,8 +1097,6 @@ mod tests {
         client.borrow(&user, &asset, &500);
         client.withdraw(&user, &asset, &400);
     }
-
-
 
     #[test]
     #[should_panic(expected = "Error(Contract, #3)")]
