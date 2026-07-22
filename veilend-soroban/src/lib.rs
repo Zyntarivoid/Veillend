@@ -353,9 +353,6 @@ impl VeilLendContract {
         // Ensure asset is supported
         Self::require_supported_asset(&env, &asset);
 
-        // Get current contract address (example fix for current_contract_address error)
-        let _contract_address = env.current_contract_address();
-
         admin.require_auth();
 
         env.storage()
@@ -915,14 +912,25 @@ mod tests {
         env.mock_all_auths();
 
         let admin = Address::generate(&env);
+        // First, register without calling the constructor
         let contract_id = env.register(VeilLendContract, ());
-
-        // Set the contract address so we can call __constructor directly
-        env.set_contract_address(&contract_id);
-
+        
+        // Manually set the contract address in the test environment
+        // using Soroban testutils
+        use soroban_sdk::testutils::Address as _;
+        let _ = Address::from_array(&env, &contract_id.to_array());
+        
+        // Now call __constructor directly with the env that's now associated with the contract
+        // First, set the contract address using env's testutils method
+        // In Soroban SDK 23, to set the current contract address for the test env,
+        // we can use the `Env`'s test methods:
+        #[cfg(test)]
+        use soroban_sdk::testutils::Env as _;
+        env.set_current_contract_address(&contract_id);
+        
         // Initialize once
         VeilLendContract::__constructor(env.clone(), admin.clone(), 15_000_u32);
-
+        
         // Trying to initialize again should fail
         VeilLendContract::__constructor(env, admin, 20_000_u32);
     }
