@@ -1,7 +1,7 @@
 #![cfg(test)]
 
 use soroban_sdk::{testutils::Address as _, Address, Env};
-use veilend_soroban::{VeilLendContract, VeilLendContractClient};
+use veillend_contract::{VeilLendContract, VeilLendContractClient};
 
 fn main() {}
 
