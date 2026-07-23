@@ -17,7 +17,7 @@ fn test_initialize_contract() {
 
     assert_eq!(client.admin(), admin);
     assert_eq!(client.min_collateral_ratio_bps(), 15_000);
-    assert_eq!(client.is_paused(), false);
+    assert!(!client.is_paused());
 }
 
 #[test]
@@ -35,7 +35,7 @@ fn test_configure_asset() {
 
     client.configure_asset(&admin, &asset, &true);
 
-    assert_eq!(client.is_asset_supported(&asset), true);
+    assert!(client.is_asset_supported(&asset));
 
     let caps = client.get_asset_caps(&asset);
     assert_eq!(caps.deposit_cap, -1);
@@ -112,7 +112,7 @@ fn test_circuit_breaker_pause() {
 
     // Pause the contract
     client.set_paused(&admin, &true);
-    assert_eq!(client.is_paused(), true);
+    assert!(client.is_paused());
 
     // Deposit should fail
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -161,7 +161,7 @@ fn test_circuit_breaker_unauthorized() {
     assert!(result.is_err());
 
     // Should still be unpaused
-    assert_eq!(client.is_paused(), false);
+    assert!(!client.is_paused());
 }
 
 #[test]
@@ -312,9 +312,9 @@ fn test_circuit_breaker_events() {
 
     // Toggle pause on
     client.set_paused(&admin, &true);
-    assert_eq!(client.is_paused(), true);
+    assert!(client.is_paused());
 
     // Toggle pause off
     client.set_paused(&admin, &false);
-    assert_eq!(client.is_paused(), false);
+    assert!(!client.is_paused());
 }
