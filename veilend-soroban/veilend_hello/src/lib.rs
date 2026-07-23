@@ -1,4 +1,4 @@
-use soroban_sdk::{contract, contractimpl, contractclient, symbol_short, Env, Symbol, Address};
+use soroban_sdk::{contract, contractclient, contractimpl, symbol_short, Address, Env, Symbol};
 
 #[contract]
 pub struct VeilLendHelloContract;

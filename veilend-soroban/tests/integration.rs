@@ -1,37 +1,41 @@
 #![cfg(test)]
 
-fn main() {}
+use soroban_sdk::{testutils::Address as _, Address, Env};
+use veillend_contract::{VeilLendContract, VeilLendContractClient};
 
 #[test]
 fn test_initialize_contract() {
     let env = Env::default();
-    let contract_id = env.register(VeilLendContract, ());
-    let client = VeilLendContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
     env.mock_all_auths();
 
-    client.__constructor(&admin, &15_000);
+    let contract_id = env.register(VeilLendContract, ());
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    client.initialize(&admin, &15_000_u32);
 
     assert_eq!(client.admin(), admin);
     assert_eq!(client.min_collateral_ratio_bps(), 15_000);
-    assert_eq!(client.is_paused(), false);
+    assert!(!client.is_paused());
 }
 
 #[test]
 fn test_configure_asset() {
     let env = Env::default();
-    let contract_id = env.register(VeilLendContract, ());
-    let client = VeilLendContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
     let asset = Address::generate(&env);
-
     env.mock_all_auths();
-    client.__constructor(&admin, &15_000);
+
+    let contract_id = env.register(VeilLendContract, ());
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    client.initialize(&admin, &15_000_u32);
+
     client.configure_asset(&admin, &asset, &true);
 
-    assert_eq!(client.is_asset_supported(&asset), true);
+    assert!(client.is_asset_supported(&asset));
 
     let caps = client.get_asset_caps(&asset);
     assert_eq!(caps.deposit_cap, -1);
@@ -44,15 +48,17 @@ fn test_configure_asset() {
 #[test]
 fn test_update_asset_caps() {
     let env = Env::default();
-    let contract_id = env.register(VeilLendContract, ());
-    let client = VeilLendContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
     let asset = Address::generate(&env);
     let user = Address::generate(&env);
-
     env.mock_all_auths();
-    client.__constructor(&admin, &15_000);
+
+    let contract_id = env.register(VeilLendContract, ());
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    client.initialize(&admin, &15_000_u32);
+
     client.configure_asset(&admin, &asset, &true);
     client.set_oracle_price(&admin, &asset, &100);
 
@@ -72,50 +78,52 @@ fn test_update_asset_caps() {
     assert_eq!(client.get_total_deposited(&asset), 1000);
 
     // This should fail (exceeds cap)
-    let result = std::panic::catch_unwind(|| {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.deposit(&user, &asset, &1);
-    });
+    }));
     assert!(result.is_err());
 
     // Test borrow cap
     client.borrow(&user, &asset, &500);
     assert_eq!(client.get_total_borrowed(&asset), 500);
 
-    let result = std::panic::catch_unwind(|| {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.borrow(&user, &asset, &1);
-    });
+    }));
     assert!(result.is_err());
 }
 
 #[test]
 fn test_circuit_breaker_pause() {
     let env = Env::default();
-    let contract_id = env.register(VeilLendContract, ());
-    let client = VeilLendContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
     let asset = Address::generate(&env);
     let user = Address::generate(&env);
-
     env.mock_all_auths();
-    client.__constructor(&admin, &15_000);
+
+    let contract_id = env.register(VeilLendContract, ());
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    client.initialize(&admin, &15_000_u32);
+
     client.configure_asset(&admin, &asset, &true);
     client.set_oracle_price(&admin, &asset, &100);
 
     // Pause the contract
     client.set_paused(&admin, &true);
-    assert_eq!(client.is_paused(), true);
+    assert!(client.is_paused());
 
     // Deposit should fail
-    let result = std::panic::catch_unwind(|| {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.deposit(&user, &asset, &100);
-    });
+    }));
     assert!(result.is_err());
 
     // Borrow should fail
-    let result = std::panic::catch_unwind(|| {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.borrow(&user, &asset, &100);
-    });
+    }));
     assert!(result.is_err());
 
     // First do deposit and borrow while unpaused
@@ -136,38 +144,41 @@ fn test_circuit_breaker_pause() {
 #[test]
 fn test_circuit_breaker_unauthorized() {
     let env = Env::default();
-    let contract_id = env.register(VeilLendContract, ());
-    let client = VeilLendContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
     let attacker = Address::generate(&env);
-
     env.mock_all_auths();
-    client.__constructor(&admin, &15_000);
+
+    let contract_id = env.register(VeilLendContract, ());
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    client.initialize(&admin, &15_000_u32);
 
     // Attacker tries to pause
-    let result = std::panic::catch_unwind(|| {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.set_paused(&attacker, &true);
-    });
+    }));
     assert!(result.is_err());
 
     // Should still be unpaused
-    assert_eq!(client.is_paused(), false);
+    assert!(!client.is_paused());
 }
 
 #[test]
 fn test_deposit_and_borrow_with_caps() {
     let env = Env::default();
-    let contract_id = env.register(VeilLendContract, ());
-    let client = VeilLendContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
     let asset = Address::generate(&env);
     let user1 = Address::generate(&env);
     let user2 = Address::generate(&env);
-
     env.mock_all_auths();
-    client.__constructor(&admin, &15_000);
+
+    let contract_id = env.register(VeilLendContract, ());
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    client.initialize(&admin, &15_000_u32);
+
     client.configure_asset(&admin, &asset, &true);
     client.set_oracle_price(&admin, &asset, &100);
 
@@ -183,9 +194,9 @@ fn test_deposit_and_borrow_with_caps() {
     assert_eq!(client.get_total_deposited(&asset), 2000);
 
     // User2 tries to deposit more - should fail
-    let result = std::panic::catch_unwind(|| {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.deposit(&user2, &asset, &1);
-    });
+    }));
     assert!(result.is_err());
 
     // User1 borrows 500
@@ -197,24 +208,26 @@ fn test_deposit_and_borrow_with_caps() {
     assert_eq!(client.get_total_borrowed(&asset), 1000);
 
     // User2 tries to borrow more - should fail
-    let result = std::panic::catch_unwind(|| {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.borrow(&user2, &asset, &1);
-    });
+    }));
     assert!(result.is_err());
 }
 
 #[test]
 fn test_unlimited_caps() {
     let env = Env::default();
-    let contract_id = env.register(VeilLendContract, ());
-    let client = VeilLendContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
     let asset = Address::generate(&env);
     let user = Address::generate(&env);
-
     env.mock_all_auths();
-    client.__constructor(&admin, &15_000);
+
+    let contract_id = env.register(VeilLendContract, ());
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    client.initialize(&admin, &15_000_u32);
+
     client.configure_asset(&admin, &asset, &true);
     client.set_oracle_price(&admin, &asset, &100);
 
@@ -233,26 +246,28 @@ fn test_unlimited_caps() {
 #[test]
 fn test_invalid_caps() {
     let env = Env::default();
-    let contract_id = env.register(VeilLendContract, ());
-    let client = VeilLendContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
     let asset = Address::generate(&env);
-
     env.mock_all_auths();
-    client.__constructor(&admin, &15_000);
+
+    let contract_id = env.register(VeilLendContract, ());
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    client.initialize(&admin, &15_000_u32);
+
     client.configure_asset(&admin, &asset, &true);
 
     // Zero cap is invalid (should be -1 for unlimited or positive)
-    let result = std::panic::catch_unwind(|| {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.update_asset_caps(&admin, &asset, &0, &500);
-    });
+    }));
     assert!(result.is_err());
 
     // Negative cap other than -1 is invalid
-    let result = std::panic::catch_unwind(|| {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.update_asset_caps(&admin, &asset, &-2, &500);
-    });
+    }));
     assert!(result.is_err());
 
     // Should still have default caps
@@ -264,14 +279,16 @@ fn test_invalid_caps() {
 #[test]
 fn test_cap_update_events() {
     let env = Env::default();
-    let contract_id = env.register(VeilLendContract, ());
-    let client = VeilLendContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
     let asset = Address::generate(&env);
-
     env.mock_all_auths();
-    client.__constructor(&admin, &15_000);
+
+    let contract_id = env.register(VeilLendContract, ());
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    client.initialize(&admin, &15_000_u32);
+
     client.configure_asset(&admin, &asset, &true);
 
     // Events are emitted - we just verify no panic
@@ -284,19 +301,20 @@ fn test_cap_update_events() {
 #[test]
 fn test_circuit_breaker_events() {
     let env = Env::default();
+
+    let admin = Address::generate(&env);
+    env.mock_all_auths();
+
     let contract_id = env.register(VeilLendContract, ());
     let client = VeilLendContractClient::new(&env, &contract_id);
 
-    let admin = Address::generate(&env);
-
-    env.mock_all_auths();
-    client.__constructor(&admin, &15_000);
+    client.initialize(&admin, &15_000_u32);
 
     // Toggle pause on
     client.set_paused(&admin, &true);
-    assert_eq!(client.is_paused(), true);
+    assert!(client.is_paused());
 
     // Toggle pause off
     client.set_paused(&admin, &false);
-    assert_eq!(client.is_paused(), false);
+    assert!(!client.is_paused());
 }

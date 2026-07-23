@@ -38,12 +38,13 @@ export function redactConfig<T extends Record<string, unknown>>(
   const result: Partial<T> = {};
   for (const key in config) {
     if (Object.prototype.hasOwnProperty.call(config, key)) {
+      const typedKey = key as keyof T;
       const isSensitive = sensitiveKeys.some((sensitiveKey) =>
         key.toUpperCase().includes(sensitiveKey),
       );
-      result[key as keyof typeof result] = isSensitive
+      result[typedKey] = isSensitive
         ? ('[REDACTED]' as unknown as T[keyof T])
-        : config[key];
+        : config[typedKey];
     }
   }
   return result;

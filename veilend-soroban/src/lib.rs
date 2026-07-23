@@ -216,7 +216,7 @@ impl VeilLendContract {
         }
     }
 
-    pub fn __constructor(env: Env, admin: Address, min_collateral_ratio_bps: u32) {
+    pub fn initialize(env: Env, admin: Address, min_collateral_ratio_bps: u32) {
         if env.storage().instance().has(&DataKey::Admin) {
             panic_with_error!(&env, VeilLendError::AlreadyInitialized);
         }
@@ -792,6 +792,7 @@ impl VeilLendContract {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use soroban_sdk::{testutils::Address as _, Env};
 
     #[test]
     fn test_position_creation() {
@@ -889,5 +890,379 @@ mod tests {
             VeilLendError::Unauthorized as u32,
             "NotInitialized and Unauthorized must be distinct error codes"
         );
+    }
+
+    #[test]
+    fn test_initialize() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, ());
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
+
+        assert_eq!(client.admin(), admin);
+        assert_eq!(client.min_collateral_ratio_bps(), 15_000);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #1)")]
+    fn test_initialize_twice() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, ());
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
+        client.initialize(&admin, &20_000_u32);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #8)")]
+    fn test_constructor_rejects_invalid_min_collateral_ratio() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, ());
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &9_999_u32);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #2)")]
+    fn test_configure_asset_rejects_unauthorized_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let unauthorized = Address::generate(&env);
+        let asset = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, ());
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
+
+        client.configure_asset(&unauthorized, &asset, &true);
+    }
+
+    #[test]
+    fn test_supported_asset_reads_default_false_and_updates_after_configuration() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let asset = Address::generate(&env);
+        let other_asset = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, ());
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
+
+        assert!(!client.is_asset_supported(&asset));
+        assert!(!client.is_asset_supported(&other_asset));
+
+        client.configure_asset(&admin, &asset, &true);
+
+        assert!(client.is_asset_supported(&asset));
+        assert!(!client.is_asset_supported(&other_asset));
+
+        client.configure_asset(&admin, &asset, &false);
+
+        assert!(!client.is_asset_supported(&asset));
+    }
+
+    #[test]
+    fn test_set_oracle_price() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let asset = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, ());
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
+
+        assert_eq!(client.get_oracle_price(&asset), None);
+        client.set_oracle_price(&admin, &asset, &100);
+        assert_eq!(client.get_oracle_price(&asset), Some(100));
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #4)")]
+    fn test_set_oracle_price_invalid_price() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let asset = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, ());
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
+
+        client.set_oracle_price(&admin, &asset, &0);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #2)")]
+    fn test_set_oracle_price_unauthorized() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let unauthorized = Address::generate(&env);
+        let asset = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, ());
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
+
+        client.set_oracle_price(&unauthorized, &asset, &100);
+    }
+
+    #[test]
+    fn test_get_oracle_price_not_set() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let asset = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, ());
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
+
+        assert_eq!(client.get_oracle_price(&asset), None);
+    }
+
+    #[test]
+    fn test_min_collateral_ratio() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, ());
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &20_000_u32);
+
+        assert_eq!(client.min_collateral_ratio_bps(), 20_000);
+    }
+
+    #[test]
+    fn test_oracle_price() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let asset = Address::generate(&env);
+        let user = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, ());
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
+
+        client.configure_asset(&admin, &asset, &true);
+        client.set_oracle_price(&admin, &asset, &100);
+        client.deposit(&user, &asset, &1000);
+        client.borrow(&user, &asset, &500);
+
+        let position = client.get_position(&user, &asset);
+        assert_eq!(position.deposited, 1000);
+        assert_eq!(position.borrowed, 500);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #5)")]
+    fn test_borrow_exceeds_oracle_collateral_limit() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let asset = Address::generate(&env);
+        let user = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, ());
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
+
+        client.configure_asset(&admin, &asset, &true);
+        client.set_oracle_price(&admin, &asset, &100);
+        client.deposit(&user, &asset, &1000);
+        client.borrow(&user, &asset, &700);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #5)")]
+    fn test_withdraw_exceeds_oracle_collateral_limit() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let asset = Address::generate(&env);
+        let user = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, ());
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
+
+        client.configure_asset(&admin, &asset, &true);
+        client.set_oracle_price(&admin, &asset, &100);
+        client.deposit(&user, &asset, &1000);
+        client.borrow(&user, &asset, &500);
+        client.withdraw(&user, &asset, &400);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #3)")]
+    fn test_deposit_unsupported_asset() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let asset = Address::generate(&env);
+        let user = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, ());
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
+
+        client.deposit(&user, &asset, &1000);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #10)")]
+    fn test_deposit_zero_amount() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let asset = Address::generate(&env);
+        let user = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, ());
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
+
+        client.configure_asset(&admin, &asset, &true);
+        client.deposit(&user, &asset, &0);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #4)")]
+    fn test_deposit_negative_amount() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let asset = Address::generate(&env);
+        let user = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, ());
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
+
+        client.configure_asset(&admin, &asset, &true);
+        client.deposit(&user, &asset, &-100);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #6)")]
+    fn test_withdraw_insufficient_deposit() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let asset = Address::generate(&env);
+        let user = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, ());
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
+
+        client.configure_asset(&admin, &asset, &true);
+        client.set_oracle_price(&admin, &asset, &100);
+        client.deposit(&user, &asset, &500);
+        client.withdraw(&user, &asset, &600);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #9)")]
+    fn test_not_initialized_admin() {
+        let env = Env::default();
+        let contract_id = env.register(VeilLendContract, ());
+        let client = VeilLendContractClient::new(&env, &contract_id);
+        client.admin();
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #11)")]
+    fn test_borrow_oracle_price_missing() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let asset = Address::generate(&env);
+        let user = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, ());
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
+
+        client.configure_asset(&admin, &asset, &true);
+        client.deposit(&user, &asset, &1000);
+        client.borrow(&user, &asset, &500);
+    }
+
+    #[test]
+    fn test_repay_normal() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let asset = Address::generate(&env);
+        let user = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, ());
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
+
+        client.configure_asset(&admin, &asset, &true);
+        client.set_oracle_price(&admin, &asset, &100);
+        client.deposit(&user, &asset, &1000);
+        client.borrow(&user, &asset, &500);
+        client.repay(&user, &asset, &300);
+
+        let position = client.get_position(&user, &asset);
+        assert_eq!(position.deposited, 1000);
+        assert_eq!(position.borrowed, 200);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #7)")]
+    fn test_repay_too_large() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let asset = Address::generate(&env);
+        let user = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, ());
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        client.initialize(&admin, &15_000_u32);
+
+        client.configure_asset(&admin, &asset, &true);
+        client.set_oracle_price(&admin, &asset, &100);
+        client.deposit(&user, &asset, &1000);
+        client.borrow(&user, &asset, &500);
+        client.repay(&user, &asset, &600);
     }
 }
