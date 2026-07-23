@@ -78,6 +78,40 @@ cargo build --target wasm32-unknown-unknown --release
 stellar contract build
 ```
 
+## Generate Contract Specifications & Bindings
+
+Contract specifications and client bindings make it safe and easy for backend/frontend contributors to integrate with the Soroban contract.
+
+### Generate TypeScript Bindings
+
+To generate TypeScript client bindings for the contract (for use in veilend-web, veilend-backend, etc.):
+
+1. Build the contract first:
+   ```bash
+   stellar contract build
+   ```
+
+2. Generate TypeScript bindings into the `specs` directory:
+   ```bash
+   stellar contract bindings typescript --output-dir ./specs --contract-id C... # replace with your contract ID or use --wasm
+   ```
+
+   Alternatively, to generate from the built WASM file (without needing a contract ID):
+   ```bash
+   stellar contract bindings typescript --output-dir ./specs --wasm target/wasm32-unknown-unknown/release/veillend_contract.wasm
+   ```
+
+### Inspect Contract Spec
+
+To inspect the contract specification (functions, errors, events) from the built WASM:
+```bash
+stellar contract info interface --wasm target/wasm32-unknown-unknown/release/veillend_contract.wasm
+```
+
+### Storing Specifications
+
+All generated specifications and client bindings should be stored in the `specs/` directory.
+
 ## Testing
 
 ```bash
@@ -129,6 +163,7 @@ When changing the public interface, increment `CONTRACT_VERSION`. When changing 
 3. Run `cargo test`
 4. Build WASM with `cargo build --target wasm32-unknown-unknown --release`
 5. Build Soroban artifacts with `stellar contract build`
+6. (Optional) Generate/update specifications/bindings and commit to `specs/`
 
 ## Next Steps
 
