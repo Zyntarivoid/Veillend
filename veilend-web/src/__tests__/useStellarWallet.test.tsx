@@ -88,7 +88,6 @@ describe('useStellarWallet', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /^connect$/i }));
     });
-
     await waitFor(() => {
       expect(screen.getByTestId('isConnected')).toHaveTextContent('true');
       expect(screen.getByTestId('isAuthenticated')).toHaveTextContent('true');
