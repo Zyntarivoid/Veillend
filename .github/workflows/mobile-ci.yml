@@ -54,4 +54,4 @@ jobs:
         run: npx expo config --type public > /dev/null
 
       - name: Run Expo Doctor
-        run: npx expo-doctor@latest
+        run: npm run doctor

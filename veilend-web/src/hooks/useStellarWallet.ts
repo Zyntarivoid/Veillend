@@ -15,7 +15,7 @@ export interface WalletState {
 }
 
 export interface WalletActions {
-  connect: () => Promise<void>;
+  connect: () => Promise<boolean>;
   disconnect: () => Promise<void>;
   clearError: () => void;
 }
@@ -51,8 +51,8 @@ export function useStellarWallet(): WalletState & WalletActions {
     initializeWallet();
   }, []);
 
-  const connect = useCallback(async () => {
-    if (state.isLoading) return;
+  const connect = useCallback(async (): Promise<boolean> => {
+    if (state.isLoading) return false;
 
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
 
@@ -71,6 +71,8 @@ export function useStellarWallet(): WalletState & WalletActions {
         isLoading: false,
         error: null,
       }));
+
+      return true;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to connect wallet";
       setState((prev) => ({
@@ -80,6 +82,8 @@ export function useStellarWallet(): WalletState & WalletActions {
         isConnected: false,
         isAuthenticated: false,
       }));
+
+      return false;
     }
   }, [state.isLoading]);
 
