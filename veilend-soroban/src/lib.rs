@@ -1,18 +1,20 @@
 #![no_std]
 
+mod interest;
+
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error,
     symbol_short, Address, Env, Symbol,
 };
 
 /// Increment this only when a contract interface change requires consumers to adapt.
-pub const CONTRACT_VERSION: u32 = 1;
+pub const CONTRACT_VERSION: u32 = 2;
 
 /// Increment this only when the serialized `DataKey` or stored value layout changes.
-pub const STORAGE_SCHEMA_VERSION: u32 = 1;
+pub const STORAGE_SCHEMA_VERSION: u32 = 2;
 
 /// A compact, stable identifier for the current `DataKey` storage layout.
-const STORAGE_SCHEMA_ID: Symbol = symbol_short!("VLENDV1");
+const STORAGE_SCHEMA_ID: Symbol = symbol_short!("VLENDV2");
 
 /// Queryable metadata describing the contract interface and its storage layout.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -23,11 +25,14 @@ pub struct ContractMetadata {
     pub storage_schema_id: Symbol,
 }
 
-/// Keys and value shapes that make up storage schema `VLENDV1`.
+/// Keys and value shapes that make up storage schema `VLENDV2`.
 ///
 /// Instance storage: `Admin: Address`, `MinCollateralRatioBps: u32`.
 /// Persistent storage: `SupportedAsset(Address): bool`,
-/// `Position(Address, Address): Position`, and `OraclePrice(Address): i128`.
+/// `Position(Address, Address): Position`, `OraclePrice(Address): i128`,
+/// `DepositCap(Address)`/`BorrowCap(Address): i128`,
+/// `TotalDeposited(Address)`/`TotalBorrowed(Address): i128`, `Paused: bool`,
+/// and `InterestState(Address): InterestState`.
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
@@ -47,6 +52,8 @@ pub enum DataKey {
     TotalBorrowed(Address),
     /// Circuit breaker state - paused or not
     Paused,
+    /// Time-based interest accrual indexes for an asset
+    InterestState(Address),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -54,6 +61,21 @@ pub enum DataKey {
 pub struct Position {
     pub deposited: i128,
     pub borrowed: i128,
+    /// interest.rs `supply_index` at this position's last realization
+    pub supply_index_snapshot: i128,
+    /// interest.rs `borrow_index` at this position's last realization
+    pub borrow_index_snapshot: i128,
+}
+
+/// Time-based interest accrual state for one asset. See `interest.rs` for
+/// the accrual math. `supply_index`/`borrow_index` are fixed-point
+/// (interest::RATE_SCALE = 1.0x).
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct InterestState {
+    pub supply_index: i128,
+    pub borrow_index: i128,
+    pub last_accrual_timestamp: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -79,6 +101,7 @@ pub enum ReserveUpdateKind {
     Repay,
     Withdraw,
     FeeAccrual,
+    InterestAccrual,
 }
 
 #[contracterror]
@@ -249,18 +272,18 @@ impl VeilLendContract {
         if supported {
             env.storage()
                 .persistent()
-                .set(&DataKey::DepositCap(asset.clone()), &-1);
+                .set(&DataKey::DepositCap(asset.clone()), &-1i128);
             env.storage()
                 .persistent()
-                .set(&DataKey::BorrowCap(asset.clone()), &-1);
+                .set(&DataKey::BorrowCap(asset.clone()), &-1i128);
 
             // Initialize totals to 0
             env.storage()
                 .persistent()
-                .set(&DataKey::TotalDeposited(asset.clone()), &0);
+                .set(&DataKey::TotalDeposited(asset.clone()), &0i128);
             env.storage()
                 .persistent()
-                .set(&DataKey::TotalBorrowed(asset.clone()), &0);
+                .set(&DataKey::TotalBorrowed(asset.clone()), &0i128);
         }
 
         AssetConfigured {
@@ -463,10 +486,17 @@ impl VeilLendContract {
         Self::require_positive_amount(&env, amount);
         user.require_auth();
 
+        // Accrue interest first so both the cap check below and the totals
+        // we write reflect up-to-date, time-aware values.
+        let interest_state = Self::accrue_and_persist_interest(&env, &asset);
+
         // Check deposit cap
         Self::check_deposit_cap(&env, &asset, amount);
 
-        let mut position = Self::read_position(&env, &user, &asset);
+        let mut position = interest::compute_accrued_position(
+            &Self::read_position(&env, &user, &asset),
+            &interest_state,
+        );
         let mut reserve = Self::read_asset_reserve(&env, &asset);
         position.deposited += amount;
         reserve.total_balance += amount;
@@ -494,10 +524,17 @@ impl VeilLendContract {
         Self::require_positive_amount(&env, amount);
         user.require_auth();
 
+        // Accrue interest first so both the cap check below and the totals
+        // we write reflect up-to-date, time-aware values.
+        let interest_state = Self::accrue_and_persist_interest(&env, &asset);
+
         // Check borrow cap
         Self::check_borrow_cap(&env, &asset, amount);
 
-        let mut position = Self::read_position(&env, &user, &asset);
+        let mut position = interest::compute_accrued_position(
+            &Self::read_position(&env, &user, &asset),
+            &interest_state,
+        );
         let mut reserve = Self::read_asset_reserve(&env, &asset);
         if amount > reserve.total_balance {
             panic_with_error!(&env, VeilLendError::InsufficientReserve);
@@ -529,7 +566,12 @@ impl VeilLendContract {
         Self::require_positive_amount(&env, amount);
         user.require_auth();
 
-        let mut position = Self::read_position(&env, &user, &asset);
+        let interest_state = Self::accrue_and_persist_interest(&env, &asset);
+
+        let mut position = interest::compute_accrued_position(
+            &Self::read_position(&env, &user, &asset),
+            &interest_state,
+        );
         let mut reserve = Self::read_asset_reserve(&env, &asset);
         if amount > position.borrowed {
             panic_with_error!(&env, VeilLendError::RepayTooLarge);
@@ -561,7 +603,12 @@ impl VeilLendContract {
         Self::require_positive_amount(&env, amount);
         user.require_auth();
 
-        let mut position = Self::read_position(&env, &user, &asset);
+        let interest_state = Self::accrue_and_persist_interest(&env, &asset);
+
+        let mut position = interest::compute_accrued_position(
+            &Self::read_position(&env, &user, &asset),
+            &interest_state,
+        );
         let mut reserve = Self::read_asset_reserve(&env, &asset);
         if amount > position.deposited {
             panic_with_error!(&env, VeilLendError::InsufficientDeposit);
@@ -591,13 +638,42 @@ impl VeilLendContract {
         Self::publish_asset_reserve_updated(&env, &asset, &reserve, ReserveUpdateKind::Withdraw);
     }
 
+    /// Returns a user's position with any interest accrued since their last
+    /// interaction simulated in, without persisting anything. The official
+    /// on-chain indexes only advance when a mutating entrypoint (deposit,
+    /// borrow, repay, withdraw, or accrue_interest) is called.
     pub fn get_position(env: Env, user: Address, asset: Address) -> Position {
-        Self::read_position(&env, &user, &asset)
+        let state = Self::simulate_accrued_interest_state(&env, &asset);
+        interest::compute_accrued_position(&Self::read_position(&env, &user, &asset), &state)
     }
 
     pub fn get_asset_reserve(env: Env, asset: Address) -> AssetReserve {
         Self::require_supported_asset(&env, &asset);
         Self::read_asset_reserve(&env, &asset)
+    }
+
+    /// Returns this asset's time-based interest accrual state (indexes and
+    /// last-accrual timestamp) with interest simulated up to the current
+    /// ledger time, without persisting anything.
+    pub fn get_interest_state(env: Env, asset: Address) -> InterestState {
+        Self::simulate_accrued_interest_state(&env, &asset)
+    }
+
+    /// Forces a reserve-level interest accrual and persists it, without
+    /// touching any individual position. Callable by anyone — accrual is a
+    /// pure function of elapsed time and current state, not a privileged
+    /// action.
+    pub fn accrue_interest(env: Env, asset: Address) {
+        Self::require_supported_asset(&env, &asset);
+        Self::accrue_and_persist_interest(&env, &asset);
+
+        let reserve = Self::read_asset_reserve(&env, &asset);
+        Self::publish_asset_reserve_updated(
+            &env,
+            &asset,
+            &reserve,
+            ReserveUpdateKind::InterestAccrual,
+        );
     }
 
     pub fn is_asset_supported(env: Env, asset: Address) -> bool {
@@ -616,6 +692,9 @@ impl VeilLendContract {
         Self::require_supported_asset(&env, &asset);
         Self::require_positive_amount(&env, amount);
         admin.require_auth();
+
+        // Keep the interest clock fresh even on admin-only fee recording.
+        Self::accrue_and_persist_interest(&env, &asset);
 
         let mut reserve = Self::read_asset_reserve(&env, &asset);
         reserve.total_balance += amount;
@@ -678,7 +757,73 @@ impl VeilLendContract {
             .unwrap_or(Position {
                 deposited: 0,
                 borrowed: 0,
+                supply_index_snapshot: interest::RATE_SCALE,
+                borrow_index_snapshot: interest::RATE_SCALE,
             })
+    }
+
+    fn read_interest_state(env: &Env, asset: &Address) -> InterestState {
+        env.storage()
+            .persistent()
+            .get(&DataKey::InterestState(asset.clone()))
+            .unwrap_or(InterestState {
+                supply_index: interest::RATE_SCALE,
+                borrow_index: interest::RATE_SCALE,
+                last_accrual_timestamp: env.ledger().timestamp(),
+            })
+    }
+
+    fn write_interest_state(env: &Env, asset: &Address, state: &InterestState) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::InterestState(asset.clone()), state);
+    }
+
+    /// Accrues time-based interest for `asset`'s reserve, persisting the
+    /// updated interest indexes and applying accrued interest to the
+    /// aggregate `TotalDeposited`/`TotalBorrowed` totals. Does not touch any
+    /// individual position — callers that need a specific position's
+    /// balances to reflect accrual must additionally realize that position
+    /// via `interest::compute_accrued_position` against the returned state.
+    ///
+    /// Must be called before any cap check or balance mutation in every
+    /// entrypoint that reads/writes reserve state, so caps are enforced
+    /// against up-to-date totals and totals never drift from reality.
+    fn accrue_and_persist_interest(env: &Env, asset: &Address) -> InterestState {
+        let state = Self::read_interest_state(env, asset);
+        let total_supplied = Self::get_total_deposited(env.clone(), asset.clone());
+        let total_borrowed = Self::get_total_borrowed(env.clone(), asset.clone());
+        let now = env.ledger().timestamp();
+
+        let result = interest::compute_accrual(&state, total_supplied, total_borrowed, now);
+
+        Self::write_interest_state(env, asset, &result.state);
+        if result.interest_to_suppliers != 0 {
+            env.storage().persistent().set(
+                &DataKey::TotalDeposited(asset.clone()),
+                &(total_supplied + result.interest_to_suppliers),
+            );
+        }
+        if result.interest_to_borrowers != 0 {
+            env.storage().persistent().set(
+                &DataKey::TotalBorrowed(asset.clone()),
+                &(total_borrowed + result.interest_to_borrowers),
+            );
+        }
+
+        result.state
+    }
+
+    /// Like `accrue_and_persist_interest`, but purely computed — does not
+    /// write anything to storage. Used by read-only view functions so
+    /// callers always see live, accurate current state between transactions.
+    fn simulate_accrued_interest_state(env: &Env, asset: &Address) -> InterestState {
+        let state = Self::read_interest_state(env, asset);
+        let total_supplied = Self::get_total_deposited(env.clone(), asset.clone());
+        let total_borrowed = Self::get_total_borrowed(env.clone(), asset.clone());
+        let now = env.ledger().timestamp();
+
+        interest::compute_accrual(&state, total_supplied, total_borrowed, now).state
     }
 
     fn write_position(env: &Env, user: &Address, asset: &Address, position: &Position) {
@@ -798,6 +943,8 @@ mod tests {
         let position = Position {
             deposited: 1000,
             borrowed: 500,
+            supply_index_snapshot: interest::RATE_SCALE,
+            borrow_index_snapshot: interest::RATE_SCALE,
         };
         assert_eq!(position.deposited, 1000);
         assert_eq!(position.borrowed, 500);
@@ -838,9 +985,9 @@ mod tests {
     fn test_contract_metadata_identifies_current_storage_shape() {
         let metadata = VeilLendContract::contract_metadata(Env::default());
 
-        assert_eq!(metadata.contract_version, 1);
-        assert_eq!(metadata.storage_schema_version, 1);
-        assert_eq!(metadata.storage_schema_id, symbol_short!("VLENDV1"));
+        assert_eq!(metadata.contract_version, 2);
+        assert_eq!(metadata.storage_schema_version, 2);
+        assert_eq!(metadata.storage_schema_id, symbol_short!("VLENDV2"));
     }
 
     #[test]
