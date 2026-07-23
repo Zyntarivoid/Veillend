@@ -78,18 +78,18 @@ fn test_update_asset_caps() {
     assert_eq!(client.get_total_deposited(&asset), 1000);
 
     // This should fail (exceeds cap)
-    let result = std::panic::catch_unwind(|| {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.deposit(&user, &asset, &1);
-    });
+    }));
     assert!(result.is_err());
 
     // Test borrow cap
     client.borrow(&user, &asset, &500);
     assert_eq!(client.get_total_borrowed(&asset), 500);
 
-    let result = std::panic::catch_unwind(|| {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.borrow(&user, &asset, &1);
-    });
+    }));
     assert!(result.is_err());
 }
 
@@ -115,15 +115,15 @@ fn test_circuit_breaker_pause() {
     assert_eq!(client.is_paused(), true);
 
     // Deposit should fail
-    let result = std::panic::catch_unwind(|| {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.deposit(&user, &asset, &100);
-    });
+    }));
     assert!(result.is_err());
 
     // Borrow should fail
-    let result = std::panic::catch_unwind(|| {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.borrow(&user, &asset, &100);
-    });
+    }));
     assert!(result.is_err());
 
     // First do deposit and borrow while unpaused
@@ -155,9 +155,9 @@ fn test_circuit_breaker_unauthorized() {
     client.initialize(&admin, &15_000_u32);
 
     // Attacker tries to pause
-    let result = std::panic::catch_unwind(|| {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.set_paused(&attacker, &true);
-    });
+    }));
     assert!(result.is_err());
 
     // Should still be unpaused
@@ -194,9 +194,9 @@ fn test_deposit_and_borrow_with_caps() {
     assert_eq!(client.get_total_deposited(&asset), 2000);
 
     // User2 tries to deposit more - should fail
-    let result = std::panic::catch_unwind(|| {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.deposit(&user2, &asset, &1);
-    });
+    }));
     assert!(result.is_err());
 
     // User1 borrows 500
@@ -208,9 +208,9 @@ fn test_deposit_and_borrow_with_caps() {
     assert_eq!(client.get_total_borrowed(&asset), 1000);
 
     // User2 tries to borrow more - should fail
-    let result = std::panic::catch_unwind(|| {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.borrow(&user2, &asset, &1);
-    });
+    }));
     assert!(result.is_err());
 }
 
@@ -259,15 +259,15 @@ fn test_invalid_caps() {
     client.configure_asset(&admin, &asset, &true);
 
     // Zero cap is invalid (should be -1 for unlimited or positive)
-    let result = std::panic::catch_unwind(|| {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.update_asset_caps(&admin, &asset, &0, &500);
-    });
+    }));
     assert!(result.is_err());
 
     // Negative cap other than -1 is invalid
-    let result = std::panic::catch_unwind(|| {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.update_asset_caps(&admin, &asset, &-2, &500);
-    });
+    }));
     assert!(result.is_err());
 
     // Should still have default caps
