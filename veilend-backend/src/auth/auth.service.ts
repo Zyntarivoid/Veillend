@@ -4,6 +4,22 @@ import { JwtService } from '@nestjs/jwt';
 import { typedData, ec } from 'starknet';
 import { ConfigService } from '@nestjs/config';
 
+function normalizeBigInt(value: unknown): bigint {
+  if (typeof value === 'bigint') {
+    return value;
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return BigInt(value);
+  }
+
+  if (typeof value === 'string') {
+    return BigInt(value.trim());
+  }
+
+  throw new Error(`Invalid bigint value: ${String(value)}`);
+}
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -42,8 +58,8 @@ export class AuthService {
         const messageHash = typedData.getMessageHash(typedDataMessage, address);
 
         // signature may be hex strings; normalize to BigInt
-        const sigR = BigInt(signature[0]);
-        const sigS = BigInt(signature[1]);
+        const sigR = normalizeBigInt(signature[0]);
+        const sigS = normalizeBigInt(signature[1]);
 
         // Build signature object depending on starknet ec interface
         let isVerified = false;
@@ -51,14 +67,14 @@ export class AuthService {
         try {
           // Some starknet versions expose verify(signature, msgHash, publicKey)
           // cast to any to accommodate SDK signature types
-          isVerified = ec.starkCurve.verify([sigR, sigS] as any, BigInt(messageHash.toString()) as any, BigInt(publicKey) as any);
+          isVerified = ec.starkCurve.verify([sigR, sigS] as any, BigInt(messageHash.toString()) as any, normalizeBigInt(publicKey) as any);
         } catch (e) {
           // Fallback: construct Signature class if available
           try {
             // @ts-ignore
             const sigObj = new ec.starkCurve.Signature(sigR, sigS);
             // @ts-ignore
-            isVerified = ec.starkCurve.verify(sigObj as any, BigInt(messageHash.toString()) as any, BigInt(publicKey) as any);
+            isVerified = ec.starkCurve.verify(sigObj as any, BigInt(messageHash.toString()) as any, normalizeBigInt(publicKey) as any);
           } catch (inner) {
             this.logger.error('Signature verification fallback failed', inner);
             throw inner;

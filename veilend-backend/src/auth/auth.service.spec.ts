@@ -36,26 +36,8 @@ describe('AuthService', () => {
     (typedData.getMessageHash as jest.Mock).mockReturnValue(BigInt(123));
     (ec.starkCurve.verify as jest.Mock).mockReturnValue(true);
 
-    const user = await authService.verifySignature('0xabc', ['1', '2'], { message: { nonce: '999' } }, '0xpub');
+    const user = await authService.verifySignature('0xabc', ['1', '2'], { message: { nonce: '999' } }, '0x1');
     expect(user).toBeDefined();
     expect(mockUsersService.createOrUpdate).toHaveBeenCalledWith('0xabc', { nonce: null, nonce_expires_at: null });
-  });
-});
-import { Test, TestingModule } from '@nestjs/testing';
-import { AuthService } from './auth.service';
-
-describe('AuthService', () => {
-  let service: AuthService;
-
-  beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [AuthService],
-    }).compile();
-
-    service = module.get<AuthService>(AuthService);
-  });
-
-  it('should be defined', () => {
-    expect(service).toBeDefined();
   });
 });
