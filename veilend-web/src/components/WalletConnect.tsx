@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { Wallet, X, ExternalLink } from "lucide-react";
+import { Wallet, X, ExternalLink, Loader2, AlertCircle, CheckCircle2, Download } from "lucide-react";
 import { useWallet } from "@/context/WalletContext";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,25 +13,39 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+// import { Flex } from "@/components/Layout";
 import { getWalletConnectionMessage, isFreighterInstalled } from "@/lib/stellar/wallet";
 
-// Define the Freighter window interface
-interface FreighterWindow extends Window {
-  freighter?: {
-    isConnected: () => Promise<{ isConnected: boolean }>;
-    getAddress: () => Promise<{ address: string }>;
-    signTransaction: (txXdr: string, opts?: { networkPassphrase?: string }) => Promise<{ signedTxXdr: string }>;
-  };
-}
-
 interface WalletConnectProps {
+  variant?: 'default' | 'compact' | 'full';
   className?: string;
   size?: "sm" | "default" | "lg";
+  onSuccess?: (address: string) => void;
+  onError?: (error: Error) => void;
 }
 
-export function WalletConnect({ className, size = "default" }: WalletConnectProps) {
-  const { address, isConnected, isAuthenticated, isLoading, error, connect, disconnect, clearError } = useWallet();
+export function WalletConnect({ 
+  variant = 'default',
+  className = "",
+  size = "default",
+  onSuccess,
+  onError
+}: WalletConnectProps) {
+  const { 
+    address, 
+    isConnected, 
+    isAuthenticated, 
+    isInstalled, 
+    isLoading, 
+    error,
+    connect,
+    disconnect,
+    clearError 
+  } = useWallet();
+
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
   const primaryActionRef = useRef<HTMLButtonElement>(null);
 
   const handleOpenChange = (nextOpen: boolean) => {
@@ -42,20 +56,47 @@ export function WalletConnect({ className, size = "default" }: WalletConnectProp
   };
 
   const handleConnect = async () => {
-    const success = await connect();
-    if (success) {
-      setIsModalOpen(false);
+    if (isConnecting || isLoading) return;
+
+    try {
+      setIsConnecting(true);
+      clearError();
+
+      const success = await connect();
+      
+      if (success && address && onSuccess) {
+        onSuccess(address);
+      }
+      
+      if (success) {
+        setIsModalOpen(false);
+      }
+    } catch (err) {
+      const errorObj = err instanceof Error ? err : new Error('Failed to connect wallet');
+      if (onError) {
+        onError(errorObj);
+      }
+    } finally {
+      setIsConnecting(false);
     }
   };
 
   const handleDisconnect = async () => {
-    await disconnect();
-    setIsModalOpen(false);
-    clearError();
+    try {
+      await disconnect();
+      setIsModalOpen(false);
+      clearError();
+    } catch (err) {
+      console.error('Disconnect error:', err);
+    }
   };
 
   const walletMessage = getWalletConnectionMessage(error, isFreighterInstalled());
+  const truncatedAddress = address
+    ? `${address.slice(0, 6)}...${address.slice(-4)}`
+    : "";
 
+  // Focus management
   useEffect(() => {
     if (!isModalOpen) return;
 
@@ -66,12 +107,99 @@ export function WalletConnect({ className, size = "default" }: WalletConnectProp
     return () => window.clearTimeout(focusTimer);
   }, [isModalOpen, error]);
 
-  const truncatedAddress = address
-    ? `${address.slice(0, 6)}...${address.slice(-4)}`
-    : "";
+  // Compact variant - minimal display
+  if (variant === 'compact') {
+    if (isConnected && isAuthenticated && address) {
+      return (
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 bg-emerald-500/10 px-3 py-1.5 rounded-md">
+            <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+            <span className="text-sm text-slate-200">
+              {address.slice(0, 6)}...{address.slice(-4)}
+            </span>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleDisconnect}
+            className="text-xs text-slate-400 hover:text-red-400"
+          >
+            Disconnect
+          </Button>
+        </div>
+      );
+    }
 
-  // Wallet is connected
-  if (isConnected && isAuthenticated) {
+    return (
+      <Button
+        variant="default"
+        size="sm"
+        onClick={() => setIsModalOpen(true)}
+        disabled={isLoading || isConnecting}
+        className={className}
+      >
+        {isLoading || isConnecting ? (
+          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+        ) : (
+          <Wallet className="h-4 w-4 mr-2" />
+        )}
+        {isLoading || isConnecting ? "Connecting..." : "Connect"}
+      </Button>
+    );
+  }
+
+  // Full variant - with extra description
+  if (variant === 'full') {
+    return (
+      <div className="w-full space-y-4">
+        {isConnected && isAuthenticated && address ? (
+          <div className="flex items-center justify-between p-4 bg-emerald-500/5 rounded-lg border border-emerald-500/20">
+            <div className="flex items-center gap-3">
+              <div className="h-12 w-12 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                <CheckCircle2 className="h-6 w-6 text-emerald-400" />
+              </div>
+              <div>
+                <div className="text-sm font-semibold text-slate-200">Connected</div>
+                <div className="text-xs text-slate-400">
+                  {address.slice(0, 6)}...{address.slice(-6)}
+                </div>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDisconnect}
+              className="text-xs border-slate-700 hover:border-red-500/50 hover:text-red-400"
+            >
+              Disconnect
+            </Button>
+          </div>
+        ) : (
+          <>
+            <Button
+              onClick={() => setIsModalOpen(true)}
+              disabled={isLoading || isConnecting}
+              className="w-full flex items-center justify-center gap-2 py-6 text-base"
+              size="lg"
+            >
+              {isLoading || isConnecting ? (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              ) : (
+                <Wallet className="h-5 w-5" />
+              )}
+              {isLoading || isConnecting ? "Connecting..." : "Connect Wallet"}
+            </Button>
+            <p className="text-xs text-slate-400 text-center">
+              Connect your Stellar wallet to access the dashboard
+            </p>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // Default variant - connected state
+  if (isConnected && isAuthenticated && address) {
     return (
       <div className="flex items-center gap-2">
         <Badge variant="secondary" className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
@@ -90,18 +218,22 @@ export function WalletConnect({ className, size = "default" }: WalletConnectProp
     );
   }
 
-  // Wallet not connected
+  // Default variant - disconnected state
   return (
     <>
       <Button
         variant="default"
         size={size}
         onClick={() => setIsModalOpen(true)}
-        disabled={isLoading}
+        disabled={isLoading || isConnecting}
         className={className}
       >
-        <Wallet className="h-4 w-4 mr-2" />
-        {isLoading ? "Connecting..." : "Connect Wallet"}
+        {isLoading || isConnecting ? (
+          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+        ) : (
+          <Wallet className="h-4 w-4 mr-2" />
+        )}
+        {isLoading || isConnecting ? "Connecting..." : "Connect Wallet"}
       </Button>
 
       <Dialog open={isModalOpen} onOpenChange={handleOpenChange}>
@@ -117,6 +249,16 @@ export function WalletConnect({ className, size = "default" }: WalletConnectProp
           </DialogHeader>
 
           <div className="space-y-4 py-4">
+            {/* Error state inside modal */}
+            {error && (
+              <Alert variant="destructive" className="bg-red-500/10 border-red-500/20 text-red-400">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription className="text-sm">
+                  {error}
+                </AlertDescription>
+              </Alert>
+            )}
+
             {/* Freighter Wallet Option */}
             <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -133,16 +275,29 @@ export function WalletConnect({ className, size = "default" }: WalletConnectProp
                 variant="default"
                 size="sm"
                 onClick={handleConnect}
-                disabled={isLoading}
-                className="bg-emerald-600 hover:bg-emerald-500"
+                disabled={isLoading || isConnecting || !isInstalled}
+                className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50"
               >
-                {isLoading ? "Connecting..." : error ? walletMessage.primaryAction : "Connect"}
+                {isLoading || isConnecting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : error ? (
+                  "Retry"
+                ) : isInstalled ? (
+                  "Connect"
+                ) : (
+                  "Install"
+                )}
               </Button>
             </div>
 
-            {(error || !isFreighterInstalled()) && (
+            {/* Wallet status messages */}
+            {(!isInstalled || error) && (
               <div
-                className={`rounded-xl border p-3 text-sm ${error ? "bg-red-500/10 border-red-500/20 text-red-400" : "bg-amber-500/10 border-amber-500/20 text-amber-400"}`}
+                className={`rounded-xl border p-3 text-sm ${
+                  error 
+                    ? "bg-red-500/10 border-red-500/20 text-red-400" 
+                    : "bg-amber-500/10 border-amber-500/20 text-amber-400"
+                }`}
                 role="alert"
                 aria-live="polite"
               >
@@ -157,30 +312,33 @@ export function WalletConnect({ className, size = "default" }: WalletConnectProp
             )}
 
             {/* Recovery actions */}
-            {(error || !isFreighterInstalled()) && (
+            {(error || !isInstalled) && (
               <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="default"
-                  size="sm"
-                  onClick={handleConnect}
-                  disabled={isLoading}
-                  className="bg-emerald-600 hover:bg-emerald-500"
-                >
-                  {isLoading ? "Connecting..." : walletMessage.primaryAction}
-                </Button>
+                {!isInstalled && (
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={() => window.open('https://www.freighter.app/', '_blank')}
+                    className="bg-emerald-600 hover:bg-emerald-500 flex items-center gap-2"
+                  >
+                    <Download className="h-4 w-4" />
+                    Install Freighter
+                    <ExternalLink className="h-3 w-3" />
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => handleOpenChange(false)}
                   className="text-slate-400 hover:text-slate-200"
                 >
-                  {walletMessage.secondaryAction}
+                  {error ? "Dismiss" : "Cancel"}
                 </Button>
               </div>
             )}
 
-            {/* Info Message */}
-            {!isFreighterInstalled() && !error && (
+            {/* Install prompt */}
+            {!isInstalled && !error && (
               <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-sm text-amber-400">
                 <p className="flex items-center gap-2">
                   <span>Freighter wallet not detected.</span>
@@ -216,6 +374,5 @@ export function WalletConnect({ className, size = "default" }: WalletConnectProp
     </>
   );
 }
-
 
 export default WalletConnect;

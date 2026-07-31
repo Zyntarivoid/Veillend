@@ -16,6 +16,8 @@ import { useStore } from '../store/store';
 import { MOCK_USER } from '../data/mockData';
 import { shortenAddress } from '../utils/helpers';
 import Toast from '../utils/toast';
+import { WalletExportModal } from '../components/WalletExportModal';
+import { useWalletSecurity } from '../hooks/useWalletSecurity';
 
 const DEFAULT_PROFILE_IMAGE = 'https://i.pravatar.cc/100?img=5';
 const CURRENCIES = ['USD', 'EUR', 'GBP'];
@@ -35,6 +37,9 @@ export default function SettingsScreen({ navigation }: any) {
     togglePrivacyMode,
     logout,
   } = useStore();
+
+  const { secretKey, isBackupConfirmed } = useWalletSecurity();
+  const [showExportModal, setShowExportModal] = useState(false);
 
   const defaultUsername = address ? shortenAddress(address) : MOCK_USER.name;
   const username = profileName ?? defaultUsername;
@@ -65,6 +70,18 @@ export default function SettingsScreen({ navigation }: any) {
   const handleLogout = () => {
     logout();
     navigation.replace('ConnectWallet');
+  };
+
+  const handleExportWallet = () => {
+    if (!isBackupConfirmed) {
+      Toast.show({
+        type: 'warning',
+        text1: 'Backup Required',
+        text2: 'Please backup your wallet before exporting',
+      });
+      return;
+    }
+    setShowExportModal(true);
   };
 
   return (
@@ -110,6 +127,61 @@ export default function SettingsScreen({ navigation }: any) {
           </TouchableOpacity>
         </View>
         {address ? <Text style={styles.walletAddress}>{shortenAddress(address)}</Text> : null}
+      </View>
+
+      {/* Security */}
+      <Text style={styles.sectionTitle}>Security</Text>
+      <View style={styles.card}>
+        <View style={styles.securityStatus}>
+          <View style={styles.securityStatusRow}>
+            <Ionicons 
+              name={isBackupConfirmed ? "checkmark-circle" : "alert-circle"} 
+              size={24} 
+              color={isBackupConfirmed ? "#09cc71" : "#FFD700"} 
+            />
+            <View style={styles.securityStatusText}>
+              <Text style={styles.rowLabel}>Wallet Backup</Text>
+              <Text style={styles.rowSubLabel}>
+                {isBackupConfirmed 
+                  ? 'Your wallet is securely backed up' 
+                  : 'Please backup your wallet to secure access'}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.divider} />
+
+        <TouchableOpacity 
+          style={styles.securityAction}
+          onPress={handleExportWallet}
+          disabled={!isBackupConfirmed}
+        >
+          <View style={styles.securityActionLeft}>
+            <Ionicons name="download-outline" size={20} color="#00D1FF" />
+            <Text style={styles.securityActionText}>Export Wallet</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="#666" />
+        </TouchableOpacity>
+
+        <View style={styles.divider} />
+
+        <TouchableOpacity 
+          style={styles.securityAction}
+          onPress={() => {
+            Toast.show({
+              type: 'info',
+              text1: 'Reveal Secret Key',
+              text2: 'Please use the wallet backup option to view your secret key',
+            });
+          }}
+        >
+          <View style={styles.securityActionLeft}>
+            <Ionicons name="eye-outline" size={20} color="#00D1FF" />
+            <Text style={styles.securityActionText}>Reveal Secret Key</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="#666" />
+        </TouchableOpacity>
       </View>
 
       {/* Preferences */}
@@ -176,6 +248,13 @@ export default function SettingsScreen({ navigation }: any) {
       </View>
 
       <View style={{ height: 60 }} />
+
+      {/* Wallet Export Modal */}
+      <WalletExportModal
+        visible={showExportModal}
+        secretKey={secretKey}
+        onClose={() => setShowExportModal(false)}
+      />
     </ScrollView>
   );
 }
@@ -338,5 +417,32 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 8,
     fontSize: 16,
+  },
+  securityStatus: {
+    marginBottom: 4,
+  },
+  securityStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  securityStatusText: {
+    flex: 1,
+  },
+  securityAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  securityActionLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  securityActionText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '500',
   },
 });

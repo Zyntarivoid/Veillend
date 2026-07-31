@@ -24,6 +24,8 @@ const PERSIST_KEYS = {
   secretKey: 'stellar_secret_key',
   currency: 'currency',
   notificationsEnabled: 'notificationsEnabled',
+  backupConfirmed: 'wallet_backup_confirmed',
+
 } as const;
 
 type AuthState = {

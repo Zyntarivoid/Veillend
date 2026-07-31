@@ -16,6 +16,7 @@ const SECRET_KEY_STORE = 'stellar_secret_key';
 export function useStellarAuth() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [generatedSecretKey, setGeneratedSecretKey] = useState<string | null>(null);
   const { requestNonce, verify, setAddress, setAuthToken } = useStore();
 
   const authenticate = async (keypair: Keypair) => {
@@ -32,9 +33,12 @@ export function useStellarAuth() {
   const generateWallet = async () => {
     setLoading(true);
     setError(null);
+    setGeneratedSecretKey(null);
     try {
       const keypair = Keypair.random();
-      await SecureStore.setItemAsync(SECRET_KEY_STORE, keypair.secret());
+      const secret = keypair.secret();
+      await SecureStore.setItemAsync(SECRET_KEY_STORE, secret);
+      setGeneratedSecretKey(secret);
       await authenticate(keypair);
     } catch (e: any) {
       setError(e?.message ?? 'Failed to generate wallet');
@@ -46,6 +50,7 @@ export function useStellarAuth() {
   const importWallet = async (secretKey: string) => {
     setLoading(true);
     setError(null);
+    setGeneratedSecretKey(null);
     try {
       const keypair = Keypair.fromSecret(secretKey.trim());
       await SecureStore.setItemAsync(SECRET_KEY_STORE, keypair.secret());
@@ -57,5 +62,11 @@ export function useStellarAuth() {
     }
   };
 
-  return { loading, error, generateWallet, importWallet };
+  return { 
+    loading, 
+    error, 
+    generateWallet, 
+    importWallet,
+    generatedSecretKey,
+  };
 }

@@ -22,15 +22,19 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useStellarAuth } from '../hooks/useStellarAuth';
+import { WalletBackupModal } from '../components/WalletBackupModal';
+import { useWalletSecurity } from '../hooks/useWalletSecurity';
 
 const { width } = Dimensions.get('window');
 
 type Mode = 'choose' | 'import';
 
 export default function ConnectWalletScreen() {
-  const { loading, error, generateWallet, importWallet } = useStellarAuth();
+  const { loading, error, generateWallet, importWallet, generatedSecretKey } = useStellarAuth();
   const [mode, setMode] = useState<Mode>('choose');
   const [secretKey, setSecretKey] = useState('');
+  const [showBackupModal, setShowBackupModal] = useState(false);
+  const { isBackupRequired, confirmBackup } = useWalletSecurity();
 
   const scale = useSharedValue(1);
   useEffect(() => {
@@ -47,6 +51,19 @@ export default function ConnectWalletScreen() {
   const animatedButtonStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
   }));
+
+  const handleGenerateWallet = async () => {
+    await generateWallet();
+    // Check if backup is required after generation
+    if (isBackupRequired()) {
+      setShowBackupModal(true);
+    }
+  };
+
+  const handleBackupConfirmed = async () => {
+    await confirmBackup();
+    setShowBackupModal(false);
+  };
 
   return (
     <KeyboardAvoidingView
@@ -110,7 +127,7 @@ export default function ConnectWalletScreen() {
                 <Animated.View style={[styles.connectButtonContainer, animatedButtonStyle]}>
                   <TouchableOpacity
                     activeOpacity={0.8}
-                    onPress={generateWallet}
+                    onPress={handleGenerateWallet}
                     disabled={loading}
                   >
                     <LinearGradient
@@ -187,6 +204,14 @@ export default function ConnectWalletScreen() {
           </Animated.View>
         </View>
       </ScrollView>
+
+      {/* Wallet Backup Modal */}
+      <WalletBackupModal
+        visible={showBackupModal}
+        secretKey={generatedSecretKey}
+        onClose={() => setShowBackupModal(false)}
+        onBackupConfirmed={handleBackupConfirmed}
+      />
     </KeyboardAvoidingView>
   );
 }

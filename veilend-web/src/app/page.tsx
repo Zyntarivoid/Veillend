@@ -18,9 +18,10 @@ import { Badge } from "@/components/ui/badge"
 import { useWallet } from "@/context/WalletContext"
 
 export default function VeilLendLandingPage() {
-  const { isConnected, isAuthenticated } = useWallet();
+  const { isConnected, isAuthenticated, isLoading, address, error } = useWallet();
   // Simulated Live Campaign Metrics for the contributor block
   const [totalContributed, setTotalContributed] = React.useState<number>(642850)
+  const [connectionError, setConnectionError] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     const interval = setInterval(() => {
@@ -28,6 +29,38 @@ export default function VeilLendLandingPage() {
     }, 4000)
     return () => clearInterval(interval)
   }, [])
+
+  // Handle wallet errors - using useCallback to avoid setState in effect
+  React.useEffect(() => {
+    if (error) {
+      // Use a timeout to avoid synchronous setState in effect
+      const timer = setTimeout(() => {
+        setConnectionError(error)
+      }, 0)
+      
+      const clearTimer = setTimeout(() => {
+        setConnectionError(null)
+      }, 5000)
+      
+      return () => {
+        clearTimeout(timer)
+        clearTimeout(clearTimer)
+      }
+    }
+  }, [error])
+
+  const getConnectButtonText = () => {
+    if (isLoading) return "Connecting..."
+    if (isConnected && isAuthenticated) return "Go to Dashboard"
+    if (connectionError) return "Retry Connection"
+    return "Connect Wallet to Start"
+  }
+
+  const getConnectButtonIcon = () => {
+    if (isLoading) return null
+    if (isConnected && isAuthenticated) return <ArrowRight className="ml-2 h-5 w-5" />
+    return <ArrowRight className="ml-2 h-5 w-5" />
+  }
 
   return (
     <div className="min-h-screen bg-[#030712] text-slate-100 overflow-x-hidden selection:bg-emerald-500/30 selection:text-emerald-300">
@@ -55,19 +88,51 @@ export default function VeilLendLandingPage() {
         </p>
 
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
+          {/* Connection status display */}
+          {isConnected && isAuthenticated && address && (
+            <div className="w-full sm:w-auto flex items-center justify-center gap-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-4 py-2 text-sm text-emerald-400">
+              <CheckCircle2 className="h-4 w-4" />
+              <span>Connected: {address.slice(0, 6)}...{address.slice(-4)}</span>
+            </div>
+          )}
+          
+          {/* Primary CTA Button */}
           {isConnected && isAuthenticated ? (
-            <Button asChild size="lg" className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-8 shadow-lg shadow-emerald-600/20 w-full sm:w-auto transition-all duration-200 hover:scale-[1.02]">
-              <Link href="/dashboard">Go to Dashboard <ArrowRight className="ml-2 h-5 w-5" /></Link>
+            <Button 
+              asChild 
+              size="lg" 
+              className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-8 shadow-lg shadow-emerald-600/20 w-full sm:w-auto transition-all duration-200 hover:scale-[1.02]"
+            >
+              <Link href="/dashboard">
+                {getConnectButtonText()}
+                {getConnectButtonIcon()}
+              </Link>
             </Button>
           ) : (
-            <Button asChild size="lg" className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-8 shadow-lg shadow-emerald-600/20 w-full sm:w-auto transition-all duration-200 hover:scale-[1.02]">
-              <Link href="#connect-wallet">Connect Wallet to Start <ArrowRight className="ml-2 h-5 w-5" /></Link>
+            <Button 
+              asChild 
+              size="lg" 
+              className={`bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-8 shadow-lg shadow-emerald-600/20 w-full sm:w-auto transition-all duration-200 hover:scale-[1.02] ${isLoading ? 'opacity-70 cursor-not-allowed' : ''}`}
+              disabled={isLoading}
+            >
+              <Link href="#connect-wallet" id="connect-wallet">
+                {getConnectButtonText()}
+                {getConnectButtonIcon()}
+              </Link>
             </Button>
           )}
+          
           <Button asChild size="lg" variant="outline" className="border-slate-800 bg-slate-900/40 hover:bg-slate-900 text-slate-200 hover:text-white px-8 backdrop-blur-sm w-full sm:w-auto">
             <Link href="#features">Explore Architecture</Link>
           </Button>
         </div>
+
+        {/* Error display */}
+        {connectionError && (
+          <div className="max-w-md mx-auto mt-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
+            <p className="text-sm text-red-400">{connectionError}</p>
+          </div>
+        )}
 
         {/* Dynamic Abstract Code Terminal Frame Mockup */}
         <div className="max-w-4xl mx-auto mt-16 rounded-xl border border-slate-800 bg-slate-950/60 backdrop-blur-md shadow-2xl overflow-hidden p-1 text-left hidden sm:block">
@@ -233,11 +298,31 @@ export default function VeilLendLandingPage() {
                 <Link href="/dashboard">Go to Dashboard <ChevronRight className="ml-1 h-4 w-4" /></Link>
               </Button>
             ) : (
-              <Button asChild size="lg" className="bg-slate-100 hover:bg-white text-slate-950 font-bold px-8 shadow-md">
-                <Link href="#connect-wallet">Connect Wallet to Start <ChevronRight className="ml-1 h-4 w-4" /></Link>
+              <Button 
+                asChild 
+                size="lg" 
+                className={`bg-slate-100 hover:bg-white text-slate-950 font-bold px-8 shadow-md ${isLoading ? 'opacity-70 cursor-not-allowed' : ''}`}
+                disabled={isLoading}
+              >
+                <Link href="#connect-wallet">
+                  {isLoading ? "Connecting..." : "Connect Wallet to Start"}
+                  {!isLoading && <ChevronRight className="ml-1 h-4 w-4" />}
+                </Link>
               </Button>
             )}
           </div>
+          {/* Connected status display for CTA section */}
+          {isConnected && isAuthenticated && address && (
+            <div className="flex items-center justify-center gap-2 text-sm text-emerald-400 mt-2">
+              <CheckCircle2 className="h-4 w-4" />
+              <span>Wallet connected: {address.slice(0, 6)}...{address.slice(-4)}</span>
+            </div>
+          )}
+          {connectionError && (
+            <div className="max-w-md mx-auto mt-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
+              <p className="text-sm text-red-400">{connectionError}</p>
+            </div>
+          )}
         </div>
       </section>
 
