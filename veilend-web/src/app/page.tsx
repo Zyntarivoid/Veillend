@@ -19,6 +19,10 @@ import { useWallet } from "@/context/WalletContext"
 
 export default function VeilLendLandingPage() {
   const { isConnected, isAuthenticated, isLoading, address, error } = useWallet();
+  // Set document title for client-rendered landing page
+  React.useEffect(() => {
+    document.title = 'VeilLend | GrantFox Campaign';
+  }, []);
   // Simulated Live Campaign Metrics for the contributor block
   const [totalContributed, setTotalContributed] = React.useState<number>(642850)
   const [connectionError, setConnectionError] = React.useState<string | null>(null)
@@ -327,13 +331,13 @@ export default function VeilLendLandingPage() {
       </section>
 
       {/* VISUAL FOOTER */}
-      <footer className="max-w-7xl mx-auto px-6 py-12 border-t border-slate-900 text-center sm:text-left flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 text-xs font-mono text-slate-500">
+      <footer className="max-w-7xl mx-auto px-6 py-12 border-t border-slate-900 text-center sm:text-left flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 text-xs font-mono text-slate-500" role="contentinfo">
         <div>&copy; 2026 VeilLend Protocol Ecosystem. All rights reserved.</div>
-        <div className="flex justify-center gap-6">
+        <nav className="flex justify-center gap-6" aria-label="Footer navigation">
           <Link href="#features" className="hover:text-slate-300 transition-colors">Architecture</Link>
-          <a href="https://stellar.org" target="_blank" rel="noreferrer" className="hover:text-slate-300 transition-colors">Stellar Foundation</a>
+          <a href="https://stellar.org" target="_blank" rel="noreferrer" className="hover:text-slate-300 transition-colors" aria-label="Stellar Foundation (opens in new tab)">Stellar Foundation</a>
           <Link href="/terms" className="hover:text-slate-300 transition-colors">Security Disclosures</Link>
-        </div>
+        </nav>
       </footer>
     </div>
   )

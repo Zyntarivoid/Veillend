@@ -6,6 +6,24 @@ import { fetchDashboardData } from '@/lib/api/dashboard';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 
+import type { Metadata } from 'next';
+
+export const metadata: Metadata = {
+  title: 'Dashboard',
+  description:
+    'View your VeilLend portfolio, deposits, borrows, and recent activity on the Stellar network. Track your shielded lending positions and health factor.',
+  openGraph: {
+    title: 'Dashboard | VeilLend',
+    description:
+      'View your VeilLend portfolio, deposits, borrows, and recent activity on the Stellar network.',
+  },
+  twitter: {
+    title: 'Dashboard | VeilLend',
+    description:
+      'View your VeilLend portfolio, deposits, borrows, and recent activity on the Stellar network.',
+  },
+};
+
 export const dynamic = 'force-dynamic';
 
 // Helper to get wallet address from session/cookie
