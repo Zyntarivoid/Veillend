@@ -8,6 +8,7 @@ import DashboardScreen from '../screens/DashboardScreen';
 import DepositScreen from '../screens/DepositScreen';
 import BorrowScreen from '../screens/BorrowScreen';
 import RepayScreen from '../screens/RepayScreen';
+import WithdrawScreen from '../screens/WithdrawScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import { useStore } from '../store/store';
 import { Ionicons } from '@expo/vector-icons';
@@ -32,6 +33,7 @@ function MainTabs() {
           else if (route.name === 'Deposit') iconName = focused ? 'arrow-down' : 'arrow-down-outline';
           else if (route.name === 'Borrow') iconName = focused ? 'cash' : 'cash-outline';
           else if (route.name === 'Repay') iconName = focused ? 'arrow-up' : 'arrow-up-outline';
+          else if (route.name === 'Withdraw') iconName = focused ? 'log-out' : 'log-out-outline';
           return <Ionicons name={iconName} size={size} color={color} />;
         },
       })}
@@ -40,6 +42,7 @@ function MainTabs() {
       <Tab.Screen name="Deposit" component={DepositScreen} />
       <Tab.Screen name="Borrow" component={BorrowScreen} />
       <Tab.Screen name="Repay" component={RepayScreen} />
+      <Tab.Screen name="Withdraw" component={WithdrawScreen} />
     </Tab.Navigator>
   );
 }

@@ -310,9 +310,9 @@ export default function DashboardScreen({ navigation }: any) {
           onPress={() => navigation.navigate('Repay')} 
         />
         <ServiceButton 
-          icon="grid-outline" 
-          label="More" 
-          onPress={() => {}} 
+          icon="log-out-outline" 
+          label="Withdraw" 
+          onPress={() => navigation.navigate('Withdraw')} 
         />
       </View>
 
