@@ -1,0 +1,10 @@
+{
+  "name": "veillend-backend",
+  "version": "1.0.0",
+  "description": "A lightweight backend with global validation and consistent response envelopes",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test.js"
+  }
+}
