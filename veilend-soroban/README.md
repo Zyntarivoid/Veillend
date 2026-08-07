@@ -1,179 +1,178 @@
 # VeilLend Soroban Contract
 
-This directory is the active Rust/Soroban contract workspace for VeilLend on Stellar.
+Active Rust/Soroban workspace for **VeilLend** on Stellar.  
+Path: `veilend-soroban/` (from the monorepo root).
 
-## Current Scope
-
-The contract currently provides an initial VeilLend lending scaffold with:
-
-- contract initialization with an admin and minimum collateral ratio
-- supported-asset configuration
-- position storage per user and asset
-- reserve accounting per supported asset
-- protocol fee tracking separated from user position balances
-- basic `deposit`, `borrow`, `repay`, and `withdraw` state transitions
-- typed contract events for key lending actions
-- queryable contract and storage-schema metadata for migration safety
-
-This is a protocol foundation, not the full privacy implementation yet. Token transfers, price oracles, liquidation logic, and shielded proof verification still need to be added in follow-up iterations.
-
-## Reserve Accounting Model
-
-Each supported asset now maintains an `AssetReserve` record with:
-
-- `total_balance`: the protocol-tracked balance currently held for that asset
-- `protocol_fees`: the portion of that asset balance owned by the protocol treasury
-
-User balances remain in per-user `Position` records, so protocol-owned fees are not mixed into user deposit or borrow balances.
-
-### State transition rules
-
-- `deposit`: increases the user's deposited balance and the asset reserve `total_balance`
-- `borrow`: increases the user's borrowed balance and decreases the asset reserve `total_balance`
-- `repay`: decreases the user's borrowed balance and increases the asset reserve `total_balance`
-- `withdraw`: decreases the user's deposited balance and decreases the asset reserve `total_balance`
-- `record_protocol_fee`: increases both `total_balance` and `protocol_fees` for the asset
-
-### Events
-
-The contract continues to emit action-specific user events (`deposit`, `borrow`, `repay`, `withdraw`) and now also emits an `asset_reserve_updated` event whenever reserve accounting changes. This keeps reserve state updates observable and documented consistently for indexers and treasury tooling.
-
-## Prerequisites
-
-Install the pinned Rust toolchain for this contract:
+## Contributor quickstart
 
 ```bash
+# 1) Toolchain (pinned in rust-toolchain.toml)
 rustup toolchain install 1.88.0
-```
-
-Install the WebAssembly targets used by Cargo and the Stellar CLI:
-
-```bash
 rustup target add wasm32-unknown-unknown --toolchain 1.88.0
 rustup target add wasm32v1-none --toolchain 1.88.0
-```
 
-Install the Stellar CLI:
+# 2) From this directory
+cd veilend-soroban
+cargo test --locked
+cargo build --locked --target wasm32-unknown-unknown --release
 
-```bash
+# Optional: Stellar CLI (version pinned for this Rust line)
 cargo install --locked stellar-cli --version 23.0.1
+stellar contract build
 ```
 
-On Ubuntu runners or local Ubuntu machines, install the required system packages first:
+Ubuntu system deps (for `stellar-cli`):
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y pkg-config libdbus-1-dev libudev-dev
 ```
 
-## Local Build
+| Pin | Value |
+| --- | --- |
+| Rust | **1.88.0** (`rust-toolchain.toml`) |
+| Stellar CLI | **23.0.1** |
+| WASM target | `wasm32-unknown-unknown` |
+| Crate | `veillend-contract` → `VeilLendContract` |
 
-From this directory, run either build flow:
+Prefer **`--locked`** so builds match `Cargo.lock` and CI.
+
+---
+
+## What works today
+
+Scaffold for a Stellar lending protocol (not full privacy yet):
+
+- Contract init with admin + minimum collateral ratio
+- Supported-asset configuration
+- Per-user/per-asset position storage
+- Per-asset reserve accounting
+- Protocol fee tracking separated from user balances
+- `deposit` / `borrow` / `repay` / `withdraw` state transitions
+- Typed contract events for lending actions
+- Contract + storage-schema metadata for migration safety
+
+**Not in this scaffold yet:** Stellar asset transfers, live price oracles, liquidation, shielded proof verification.
+
+---
+
+## Reserve accounting model
+
+Each supported asset keeps an `AssetReserve`:
+
+| Field | Meaning |
+| --- | --- |
+| `total_balance` | Protocol-tracked balance held for the asset |
+| `protocol_fees` | Portion of that balance owned by the treasury |
+
+User deposits/borrows live in `Position` records — fees are never mixed into user balances.
+
+### State transitions
+
+| Action | User position | Reserve |
+| --- | --- | --- |
+| `deposit` | deposited ↑ | `total_balance` ↑ |
+| `borrow` | borrowed ↑ | `total_balance` ↓ |
+| `repay` | borrowed ↓ | `total_balance` ↑ |
+| `withdraw` | deposited ↓ | `total_balance` ↓ |
+| `record_protocol_fee` | — | `total_balance` ↑ and `protocol_fees` ↑ |
+
+### Events
+
+User action events (`deposit`, `borrow`, `repay`, `withdraw`) plus `asset_reserve_updated` on every reserve change (for indexers / treasury tooling).
+
+---
+
+## Build, test, lint
 
 ```bash
-cargo build --target wasm32-unknown-unknown --release
-```
+# Unit / host tests
+cargo test --locked
 
-```bash
+# WASM release artifact
+cargo build --locked --target wasm32-unknown-unknown --release
+
+# Or via Stellar CLI
 stellar contract build
-```
 
-## Generate Contract Specifications & Bindings
-
-Contract specifications and client bindings make it safe and easy for backend/frontend contributors to integrate with the Soroban contract.
-
-### Generate TypeScript Bindings
-
-To generate TypeScript client bindings for the contract (for use in veilend-web, veilend-backend, etc.):
-
-1. Build the contract first:
-   ```bash
-   stellar contract build
-   ```
-
-2. Generate TypeScript bindings into the `specs` directory:
-   ```bash
-   stellar contract bindings typescript --output-dir ./specs --contract-id C... # replace with your contract ID or use --wasm
-   ```
-
-   Alternatively, to generate from the built WASM file (without needing a contract ID):
-   ```bash
-   stellar contract bindings typescript --output-dir ./specs --wasm target/wasm32-unknown-unknown/release/veillend_contract.wasm
-   ```
-
-### Inspect Contract Spec
-
-To inspect the contract specification (functions, errors, events) from the built WASM:
-```bash
-stellar contract info interface --wasm target/wasm32-unknown-unknown/release/veillend_contract.wasm
-```
-
-### Storing Specifications
-
-All generated specifications and client bindings should be stored in the `specs/` directory.
-
-## Testing
-
-```bash
-cargo test
-```
-
-## Linting
-
-```bash
+# Format + lint (CI-style)
+cargo fmt --all -- --check
 cargo clippy --locked --all-targets -- -D warnings
 ```
 
-## Notes
+Default target is **not** set in `.cargo/config.toml` — always pass `--target wasm32-unknown-unknown` for contract WASM builds.
 
-- `rust-toolchain.toml` pins the contract to Rust `1.88.0`.
-- The crate is named `veillend-contract` and exposes the `VeilLendContract` Soroban contract.
-- Event emission uses Soroban `#[contractevent]` types rather than the deprecated legacy publish payload pattern.
-- Asset reserves and protocol-owned fees are stored separately from user `Position` balances.
-- Cargo does not set a default target in `.cargo/config.toml`; use explicit `--target wasm32-unknown-unknown` when building contract WASM artifacts.
-- `stellar-cli` is pinned to `23.0.1` in CI/local setup because newer releases require a newer Rust compiler than this repo currently uses.
-- On Ubuntu, `stellar-cli` currently also needs `pkg-config`, `libdbus-1-dev`, and `libudev-dev` installed before `cargo install`.
+---
 
-## Contract and storage schema metadata
+## Specs & TypeScript bindings
 
-Call `contract_metadata()` on a deployed contract before writing a migration or an off-chain storage reader. The current contract shape is:
+Specs live under `specs/`. After a successful build:
 
-| Metadata field | Current value | Meaning |
-| :--- | :--- | :--- |
-| `contract_version` | `1` | The public contract interface version. |
-| `storage_schema_version` | `1` | The version of serialized storage keys and values. |
-| `storage_schema_id` | `VLENDV1` | A compact, stable identifier for this storage layout. |
+```bash
+# From WASM (no deployed contract id required)
+stellar contract bindings typescript \
+  --output-dir ./specs \
+  --wasm target/wasm32-unknown-unknown/release/veillend_contract.wasm
 
-Schema `VLENDV1` uses these keys:
+# Inspect interface
+stellar contract info interface \
+  --wasm target/wasm32-unknown-unknown/release/veillend_contract.wasm
+```
+
+Commit updated bindings when the public interface changes.
+
+---
+
+## Contract / storage schema metadata
+
+Call `contract_metadata()` before migrations or off-chain readers.
+
+| Metadata field | Current | Meaning |
+| --- | --- | --- |
+| `contract_version` | `1` | Public interface version |
+| `storage_schema_version` | `1` | Serialized keys/values version |
+| `storage_schema_id` | `VLENDV1` | Stable layout id |
+
+### Schema `VLENDV1` keys
 
 | Durability | Key | Value |
-| :--- | :--- | :--- |
+| --- | --- | --- |
 | Instance | `Admin` | `Address` |
 | Instance | `MinCollateralRatioBps` | `u32` |
 | Persistent | `SupportedAsset(Address)` | `bool` |
-| Persistent | `Position(Address, Address)` | `Position { deposited: i128, borrowed: i128 }` |
+| Persistent | `Position(Address, Address)` | `Position { deposited, borrowed }` |
 | Persistent | `OraclePrice(Address)` | `i128` |
 
-When changing the public interface, increment `CONTRACT_VERSION`. When changing a `DataKey` variant or any stored value shape, increment `STORAGE_SCHEMA_VERSION` and assign a new `STORAGE_SCHEMA_ID`. Keep this table in sync with the implementation.
+- Public interface change → bump `CONTRACT_VERSION`
+- `DataKey` or value shape change → bump `STORAGE_SCHEMA_VERSION` + new `STORAGE_SCHEMA_ID`
+- Keep this table in sync with `src/`
 
-## Development Workflow
+---
 
-1. Write code in `src/lib.rs`
-2. Format and lint with `cargo fmt` and `cargo clippy --all-targets -- -D warnings`
-3. Run `cargo test`
-4. Build WASM with `cargo build --target wasm32-unknown-unknown --release`
-5. Build Soroban artifacts with `stellar contract build`
-6. (Optional) Generate/update specifications/bindings and commit to `specs/`
+## Suggested development loop
 
-## Next Steps
+1. Edit `src/` (contract entry is `VeilLendContract`)
+2. `cargo fmt` + `cargo clippy --locked --all-targets -- -D warnings`
+3. `cargo test --locked`
+4. `cargo build --locked --target wasm32-unknown-unknown --release`
+5. Optionally refresh `specs/` bindings and commit them
 
-- wire in Stellar token transfers for deposit and repayment flows
-- add price feeds and enforce collateral health using oracle-backed values
-- introduce liquidation and treasury management logic on top of the reserve ledger
-- add shielded commitment/nullifier storage for the privacy layer
-- add Soroban host tests for the lending lifecycle and authorization rules
+---
 
-## Documentation
+## Roadmap (not done in this scaffold)
 
-- [Soroban Documentation](https://soroban.stellar.org/docs)
-- [Stellar Developer Docs](https://developers.stellar.org/docs)
+Priority order for follow-up work (also tracked as campaign issues):
+
+1. **Stellar asset transfers** — wire SAC transfers into deposit / repay / withdraw
+2. **Oracle prices** — feed prices and enforce collateral health
+3. **Liquidations** — unhealthy position liquidation + treasury flows
+4. **Privacy layer** — shielded commitment / nullifier storage + proof verification
+5. **Host integration tests** — full lending lifecycle + auth rules under Soroban
+
+---
+
+## Docs
+
+- [Soroban docs](https://soroban.stellar.org/docs)
+- [Stellar developer docs](https://developers.stellar.org/docs)
+- Monorepo root [README](../README.md)
