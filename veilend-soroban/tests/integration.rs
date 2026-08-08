@@ -458,3 +458,110 @@ fn test_two_accrual_calls_at_same_timestamp_are_idempotent() {
         total_borrowed_after_first
     );
 }
+
+#[test]
+fn test_admin_transfer_immediate_acceptance() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(5_000);
+    let admin = Address::generate(&env);
+    let nominee = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    assert!(client.get_pending_admin_transfer().is_none());
+
+    client.propose_admin_transfer(&admin, &nominee, &0u64);
+    let pending = client.get_pending_admin_transfer().expect("pending");
+    assert_eq!(pending.nominee, nominee);
+    assert_eq!(pending.execute_after, 5_000);
+    // Admin unchanged until accept
+    assert_eq!(client.admin(), admin);
+
+    client.accept_admin_transfer(&nominee);
+    assert_eq!(client.admin(), nominee);
+    assert!(client.get_pending_admin_transfer().is_none());
+}
+
+#[test]
+fn test_admin_transfer_delay_blocks_early_accept() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1_000);
+    let admin = Address::generate(&env);
+    let nominee = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    client.propose_admin_transfer(&admin, &nominee, &3_600u64);
+    let pending = client.get_pending_admin_transfer().expect("pending");
+    assert_eq!(pending.execute_after, 1_000 + 3_600);
+
+    let early = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.accept_admin_transfer(&nominee);
+    }));
+    assert!(early.is_err(), "accept before delay must fail");
+    assert_eq!(client.admin(), admin);
+
+    env.ledger().set_timestamp(1_000 + 3_600);
+    client.accept_admin_transfer(&nominee);
+    assert_eq!(client.admin(), nominee);
+}
+
+#[test]
+fn test_admin_transfer_cancel() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let nominee = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    client.propose_admin_transfer(&admin, &nominee, &0u64);
+    client.cancel_admin_transfer(&admin);
+    assert!(client.get_pending_admin_transfer().is_none());
+    assert_eq!(client.admin(), admin);
+
+    // Accept after cancel must fail
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.accept_admin_transfer(&nominee);
+    }));
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_admin_transfer_unauthorized_paths() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let nominee = Address::generate(&env);
+    let stranger = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    // Non-admin cannot propose
+    let bad_propose = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.propose_admin_transfer(&stranger, &nominee, &0u64);
+    }));
+    assert!(bad_propose.is_err());
+
+    // Cannot nominate self
+    let self_nom = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.propose_admin_transfer(&admin, &admin, &0u64);
+    }));
+    assert!(self_nom.is_err());
+
+    client.propose_admin_transfer(&admin, &nominee, &0u64);
+
+    // Wrong nominee cannot accept
+    let bad_accept = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.accept_admin_transfer(&stranger);
+    }));
+    assert!(bad_accept.is_err());
+
+    // Non-admin cannot cancel
+    let bad_cancel = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.cancel_admin_transfer(&stranger);
+    }));
+    assert!(bad_cancel.is_err());
+}
