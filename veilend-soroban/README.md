@@ -140,19 +140,27 @@ Call `contract_metadata()` on a deployed contract before writing a migration or 
 
 | Metadata field | Current value | Meaning |
 | :--- | :--- | :--- |
-| `contract_version` | `1` | The public contract interface version. |
-| `storage_schema_version` | `1` | The version of serialized storage keys and values. |
-| `storage_schema_id` | `VLENDV1` | A compact, stable identifier for this storage layout. |
+| `contract_version` | `3` | The public contract interface version. |
+| `storage_schema_version` | `3` | The version of serialized storage keys and values. |
+| `storage_schema_id` | `VLENDV3` | A compact, stable identifier for this storage layout. |
 
-Schema `VLENDV1` uses these keys:
+Schema `VLENDV3` uses these keys (see `DataKey` in `src/lib.rs` for the full set):
 
 | Durability | Key | Value |
 | :--- | :--- | :--- |
 | Instance | `Admin` | `Address` |
 | Instance | `MinCollateralRatioBps` | `u32` |
+| Instance | `OracleMaxStalenessSecs` | `u64` (`0` disables staleness guard) |
 | Persistent | `SupportedAsset(Address)` | `bool` |
-| Persistent | `Position(Address, Address)` | `Position { deposited: i128, borrowed: i128 }` |
-| Persistent | `OraclePrice(Address)` | `i128` |
+| Persistent | `Position(Address, Address)` | `Position { deposited, borrowed, supply/borrow index snapshots }` |
+| Persistent | `OraclePrice(Address)` | `OraclePriceData { price, decimals, updated_at }` |
+
+### Oracle freshness
+
+- Admin sets quotes via `set_oracle_price(admin, asset, price, decimals)` (stamps `updated_at` from ledger time).
+- Collateral-sensitive paths (`borrow`, `withdraw` with debt) require a present, non-stale quote.
+- Missing → `OraclePriceMissing`; older than max staleness → `OraclePriceStale`; bad decimals → `InvalidOracleDecimals`.
+- Default max age is 1 hour (`DEFAULT_ORACLE_MAX_STALENESS_SECS`); configure with `set_oracle_max_staleness`.
 
 When changing the public interface, increment `CONTRACT_VERSION`. When changing a `DataKey` variant or any stored value shape, increment `STORAGE_SCHEMA_VERSION` and assign a new `STORAGE_SCHEMA_ID`. Keep this table in sync with the implementation.
 

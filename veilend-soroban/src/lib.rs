@@ -8,13 +8,17 @@ use soroban_sdk::{
 };
 
 /// Increment this only when a contract interface change requires consumers to adapt.
-pub const CONTRACT_VERSION: u32 = 2;
+pub const CONTRACT_VERSION: u32 = 3;
 
 /// Increment this only when the serialized `DataKey` or stored value layout changes.
-pub const STORAGE_SCHEMA_VERSION: u32 = 2;
+pub const STORAGE_SCHEMA_VERSION: u32 = 3;
 
 /// A compact, stable identifier for the current `DataKey` storage layout.
-const STORAGE_SCHEMA_ID: Symbol = symbol_short!("VLENDV2");
+const STORAGE_SCHEMA_ID: Symbol = symbol_short!("VLENDV3");
+
+/// Default max age (seconds) for oracle prices used in collateral checks.
+/// Admin may lower/raise via `set_oracle_max_staleness`; `0` disables the check.
+pub const DEFAULT_ORACLE_MAX_STALENESS_SECS: u64 = 3_600;
 
 /// Queryable metadata describing the contract interface and its storage layout.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -25,11 +29,13 @@ pub struct ContractMetadata {
     pub storage_schema_id: Symbol,
 }
 
-/// Keys and value shapes that make up storage schema `VLENDV2`.
+/// Keys and value shapes that make up storage schema `VLENDV3`.
 ///
-/// Instance storage: `Admin: Address`, `MinCollateralRatioBps: u32`.
+/// Instance storage: `Admin: Address`, `MinCollateralRatioBps: u32`,
+/// `OracleMaxStalenessSecs: u64`.
 /// Persistent storage: `SupportedAsset(Address): bool`,
-/// `Position(Address, Address): Position`, `OraclePrice(Address): i128`,
+/// `Position(Address, Address): Position`,
+/// `OraclePrice(Address): OraclePriceData`,
 /// `DepositCap(Address)`/`BorrowCap(Address): i128`,
 /// `TotalDeposited(Address)`/`TotalBorrowed(Address): i128`, `Paused: bool`,
 /// and `InterestState(Address): InterestState`.
@@ -41,6 +47,7 @@ pub enum DataKey {
     SupportedAsset(Address),
     AssetReserve(Address),
     Position(Address, Address),
+    /// Oracle quote metadata for an asset (price, decimals, updated_at)
     OraclePrice(Address),
     /// Per-asset deposit cap (max total deposits for this asset)
     DepositCap(Address),
@@ -54,6 +61,8 @@ pub enum DataKey {
     Paused,
     /// Time-based interest accrual indexes for an asset
     InterestState(Address),
+    /// Max age in seconds for oracle prices (instance); `0` = no staleness guard
+    OracleMaxStalenessSecs,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -90,6 +99,25 @@ pub struct AssetCaps {
 pub struct AssetReserve {
     pub total_balance: i128,
     pub protocol_fees: i128,
+}
+
+/// Oracle quote for an asset, including scale and freshness metadata.
+///
+/// `price` is an integer scaled by `decimals` (e.g. price=`150_000_000`,
+/// decimals=`7` represents `15.0` in base units). Same-asset health ratios
+/// cancel the scale factor; multi-asset valuation should normalize by
+/// `decimals` before comparing across reserves.
+///
+/// # Failure behavior (collateral-sensitive paths)
+/// - Missing quote → `OraclePriceMissing`
+/// - `max_staleness > 0` and `now - updated_at > max_staleness` → `OraclePriceStale`
+/// - Invalid decimals on write → `InvalidOracleDecimals`
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct OraclePriceData {
+    pub price: i128,
+    pub decimals: u32,
+    pub updated_at: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -142,6 +170,10 @@ pub enum VeilLendError {
     CircuitBreakerTriggered = 16,
     /// Reserve balance is too low for the requested action
     InsufficientReserve = 17,
+    /// Oracle price is older than the configured max staleness
+    OraclePriceStale = 18,
+    /// Oracle decimals must be non-zero (and within a sane upper bound)
+    InvalidOracleDecimals = 19,
 }
 
 #[contractevent(topics = ["veillend", "asset_configured"])]
@@ -252,6 +284,10 @@ impl VeilLendContract {
         env.storage()
             .instance()
             .set(&DataKey::MinCollateralRatioBps, &min_collateral_ratio_bps);
+        env.storage().instance().set(
+            &DataKey::OracleMaxStalenessSecs,
+            &DEFAULT_ORACLE_MAX_STALENESS_SECS,
+        );
 
         // Initialize circuit breaker as not paused
         env.storage().persistent().set(&DataKey::Paused, &false);
@@ -305,42 +341,85 @@ impl VeilLendContract {
         }
     }
 
-    /// Set the oracle price for a supported asset (admin only)
+    /// Set the oracle price for a supported asset (admin only).
     ///
-    /// This function allows the admin to set the price of an asset as reported by an oracle.
-    /// The price is used in collateral calculations to determine borrowing power.
+    /// Stores price metadata required for safe collateral valuation:
+    /// integer `price`, `decimals` scale, and ledger `updated_at`.
     ///
     /// # Arguments
     /// * `admin` - The admin address (must match stored admin)
     /// * `asset` - The asset address to set the price for
-    /// * `price` - The oracle price (must be positive, in base units e.g., cents)
-    pub fn set_oracle_price(env: Env, admin: Address, asset: Address, price: i128) {
+    /// * `price` - Positive integer price scaled by `decimals`
+    /// * `decimals` - Non-zero decimal places for `price` (max 18)
+    ///
+    /// # Errors
+    /// * `Unauthorized` - caller is not admin
+    /// * `InvalidAmount` / `ZeroAmount` - non-positive price
+    /// * `InvalidOracleDecimals` - decimals is 0 or > 18
+    pub fn set_oracle_price(
+        env: Env,
+        admin: Address,
+        asset: Address,
+        price: i128,
+        decimals: u32,
+    ) {
         let stored_admin = Self::admin(env.clone());
         if admin != stored_admin {
             panic_with_error!(&env, VeilLendError::Unauthorized);
         }
 
-        if price <= 0 {
+        if price == 0 {
+            panic_with_error!(&env, VeilLendError::ZeroAmount);
+        }
+        if price < 0 {
             panic_with_error!(&env, VeilLendError::InvalidAmount);
+        }
+        // 0 decimals is ambiguous for valuation; >18 is rejected as unreasonably large.
+        if decimals == 0 || decimals > 18 {
+            panic_with_error!(&env, VeilLendError::InvalidOracleDecimals);
         }
 
         admin.require_auth();
+        let quote = OraclePriceData {
+            price,
+            decimals,
+            updated_at: env.ledger().timestamp(),
+        };
         env.storage()
             .persistent()
-            .set(&DataKey::OraclePrice(asset.clone()), &price);
+            .set(&DataKey::OraclePrice(asset.clone()), &quote);
     }
 
-    /// Get the oracle price for an asset
+    /// Get the oracle quote for an asset (price, decimals, updated_at), if set.
     ///
-    /// Returns the oracle price for the specified asset if set, otherwise None.
-    ///
-    /// # Arguments
-    /// * `asset` - The asset address to get the price for
-    ///
-    /// # Returns
-    /// * `Option<i128>` - The oracle price if set, None otherwise
-    pub fn get_oracle_price(env: Env, asset: Address) -> Option<i128> {
+    /// Does **not** enforce freshness — use collateral-sensitive entrypoints
+    /// (borrow/withdraw) for that, or call `get_oracle_max_staleness` and compare
+    /// `updated_at` off-chain.
+    pub fn get_oracle_price(env: Env, asset: Address) -> Option<OraclePriceData> {
         env.storage().persistent().get(&DataKey::OraclePrice(asset))
+    }
+
+    /// Configure how old an oracle quote may be for collateral checks.
+    ///
+    /// * `max_staleness_secs = 0` disables the staleness guard (price still required).
+    /// * Default at init: `DEFAULT_ORACLE_MAX_STALENESS_SECS` (1 hour).
+    pub fn set_oracle_max_staleness(env: Env, admin: Address, max_staleness_secs: u64) {
+        let stored_admin = Self::admin(env.clone());
+        if admin != stored_admin {
+            panic_with_error!(&env, VeilLendError::Unauthorized);
+        }
+        admin.require_auth();
+        env.storage()
+            .instance()
+            .set(&DataKey::OracleMaxStalenessSecs, &max_staleness_secs);
+    }
+
+    /// Returns the configured max oracle age in seconds (`0` = guard disabled).
+    pub fn get_oracle_max_staleness(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::OracleMaxStalenessSecs)
+            .unwrap_or(DEFAULT_ORACLE_MAX_STALENESS_SECS)
     }
 
     /// Update per-asset deposit and borrow caps (admin only)
@@ -917,20 +996,44 @@ impl VeilLendContract {
 
         let collateral_ratio_bps = Self::min_collateral_ratio_bps(env.clone()) as i128;
 
-        // Get oracle price for the asset — fail explicitly if not set
-        let price: i128 = env
-            .storage()
-            .persistent()
-            .get(&DataKey::OraclePrice(asset.clone()))
-            .unwrap_or_else(|| panic_with_error!(env, VeilLendError::OraclePriceMissing));
+        // Require a present, non-stale oracle quote before valuing collateral.
+        let quote = Self::require_fresh_oracle_price(env, asset);
+        let price = quote.price;
 
-        // Calculate collateral value using oracle price
+        // Same-asset health: decimals cancel between collateral and debt legs.
         let collateral_value = position.deposited * price;
         let borrowed_value = position.borrowed * price;
 
         if collateral_value * 10_000 < borrowed_value * collateral_ratio_bps {
             panic_with_error!(env, VeilLendError::InsufficientCollateral);
         }
+    }
+
+    /// Load oracle metadata and enforce missing/staleness guards used by
+    /// borrow and withdraw (any path that depends on collateral valuation).
+    fn require_fresh_oracle_price(env: &Env, asset: &Address) -> OraclePriceData {
+        let quote: OraclePriceData = env
+            .storage()
+            .persistent()
+            .get(&DataKey::OraclePrice(asset.clone()))
+            .unwrap_or_else(|| panic_with_error!(env, VeilLendError::OraclePriceMissing));
+
+        let max_staleness = env
+            .storage()
+            .instance()
+            .get(&DataKey::OracleMaxStalenessSecs)
+            .unwrap_or(DEFAULT_ORACLE_MAX_STALENESS_SECS);
+
+        // `0` means the admin disabled the freshness window; price must still exist.
+        if max_staleness > 0 {
+            let now = env.ledger().timestamp();
+            // Guard against clock anomalies (updated_at in the future is treated as fresh).
+            if now > quote.updated_at && now - quote.updated_at > max_staleness {
+                panic_with_error!(env, VeilLendError::OraclePriceStale);
+            }
+        }
+
+        quote
     }
 }
 
@@ -979,15 +1082,17 @@ mod tests {
         assert_eq!(VeilLendError::InvalidCap as u32, 15);
         assert_eq!(VeilLendError::CircuitBreakerTriggered as u32, 16);
         assert_eq!(VeilLendError::InsufficientReserve as u32, 17);
+        assert_eq!(VeilLendError::OraclePriceStale as u32, 18);
+        assert_eq!(VeilLendError::InvalidOracleDecimals as u32, 19);
     }
 
     #[test]
     fn test_contract_metadata_identifies_current_storage_shape() {
         let metadata = VeilLendContract::contract_metadata(Env::default());
 
-        assert_eq!(metadata.contract_version, 2);
-        assert_eq!(metadata.storage_schema_version, 2);
-        assert_eq!(metadata.storage_schema_id, symbol_short!("VLENDV2"));
+        assert_eq!(metadata.contract_version, 3);
+        assert_eq!(metadata.storage_schema_version, 3);
+        assert_eq!(metadata.storage_schema_id, symbol_short!("VLENDV3"));
     }
 
     #[test]
@@ -1011,6 +1116,8 @@ mod tests {
             VeilLendError::InvalidCap as u32,
             VeilLendError::CircuitBreakerTriggered as u32,
             VeilLendError::InsufficientReserve as u32,
+            VeilLendError::OraclePriceStale as u32,
+            VeilLendError::InvalidOracleDecimals as u32,
         ];
         let mut sorted = codes.to_vec();
         sorted.sort();
