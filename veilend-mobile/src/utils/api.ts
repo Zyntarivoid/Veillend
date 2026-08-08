@@ -1,13 +1,9 @@
 import axios from 'axios';
 import { useStore } from '../store/store';
 import { reportError } from './errorReporting';
-import { getRuntimePlatform } from './runtimePlatform';
+import { getApiBaseUrl } from './config';
 
-const platform = getRuntimePlatform();
-
-const API_URL = platform.OS === 'web' 
-  ? 'http://localhost:3000' 
-  : 'http://10.0.2.2:3000';
+const API_URL = getApiBaseUrl();
 
 const api = axios.create({
   baseURL: API_URL,
@@ -46,6 +42,7 @@ api.interceptors.response.use(
         method,
         status,
         hasResponse: !!error?.response,
+        apiBaseUrl: API_URL,
       },
     });
 
@@ -54,3 +51,4 @@ api.interceptors.response.use(
 );
 
 export default api;
+export { API_URL };
