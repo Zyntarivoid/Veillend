@@ -268,6 +268,18 @@
                         "val": {
                           "u32": 15000
                         }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "OracleMaxStalenessSecs"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u64": "3600"
+                        }
                       }
                     ]
                   }
