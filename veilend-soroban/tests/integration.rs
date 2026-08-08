@@ -523,7 +523,10 @@ fn test_stale_oracle_blocks_borrow() {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.borrow(&user, &asset, &100);
     }));
-    assert!(result.is_err(), "borrow must fail when oracle quote is stale");
+    assert!(
+        result.is_err(),
+        "borrow must fail when oracle quote is stale"
+    );
 
     // Refresh the quote at the new ledger time; borrow should succeed.
     client.set_oracle_price(&admin, &asset, &100, &7u32);
@@ -548,7 +551,10 @@ fn test_missing_oracle_blocks_borrow() {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.borrow(&user, &asset, &100);
     }));
-    assert!(result.is_err(), "borrow must fail when oracle price is missing");
+    assert!(
+        result.is_err(),
+        "borrow must fail when oracle price is missing"
+    );
 }
 
 #[test]

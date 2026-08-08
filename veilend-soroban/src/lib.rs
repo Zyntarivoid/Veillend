@@ -356,13 +356,7 @@ impl VeilLendContract {
     /// * `Unauthorized` - caller is not admin
     /// * `InvalidAmount` / `ZeroAmount` - non-positive price
     /// * `InvalidOracleDecimals` - decimals is 0 or > 18
-    pub fn set_oracle_price(
-        env: Env,
-        admin: Address,
-        asset: Address,
-        price: i128,
-        decimals: u32,
-    ) {
+    pub fn set_oracle_price(env: Env, admin: Address, asset: Address, price: i128, decimals: u32) {
         let stored_admin = Self::admin(env.clone());
         if admin != stored_admin {
             panic_with_error!(&env, VeilLendError::Unauthorized);
