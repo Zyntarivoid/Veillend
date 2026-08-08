@@ -1,169 +1,197 @@
 # VeilLend Backend
 
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+NestJS API for VeilLend on Stellar/Soroban: wallet auth, portfolios, assets, protocol config, transaction history, and on-chain indexing.
 
-## Description
+## Prerequisites
 
-The VeilLend NestJS backend provides the core infrastructure for the VeilLend platform on Stellar/Soroban. It handles off-chain computations, indexing of on-chain events, user portfolios, asset tracking, and authentication.
+| Tool | Version | Notes |
+| :--- | :--- | :--- |
+| Node.js | **20+** | Matches CI (`20.x`) |
+| npm | 10+ | Ships with Node |
+| PostgreSQL | **16+** | Or use Docker Compose |
+| Docker Compose | optional | Recommended for first-time setup |
 
-## Module Layout
-
-The application architecture is organized into distinct domain modules to clearly separate responsibilities:
-
-### Core Modules
-
-- **Auth (`src/auth`)**
-  - **Responsibility**: Manages wallet-based authentication, verifying Stellar signatures, and role-based access control (RBAC). Issues database-backed sessions that can be inspected (`GET /auth/session`) and revoked (`POST /auth/logout`) independently of JWT expiry — see [`SESSION.md`](./SESSION.md) for the full lifecycle.
-
-- **Portfolios (`src/portfolios`)**
-  - **Responsibility**: Manages user portfolios, aggregates positions, calculates health factors, and groups assets per user or wallet address.
-
-- **Assets (`src/assets`)**
-  - **Responsibility**: Tracks individual assets and tokens supported by the protocol. Manages price feeds, token metadata, and reserve configurations.
-
-- **Transactions (`src/transactions`)**
-  - **Responsibility**: Orchestrates the transaction lifecycle (borrowing, lending, liquidations). Simulates Soroban transactions and maintains transaction history.
-
-- **Indexing (`src/indexer`)**
-  - **Responsibility**: Listens to Stellar and Soroban ledger events, parses on-chain activity, and synchronizes the protocol state to the local database.
-
-- **Admin Configuration (`src/admin`)**
-  - **Responsibility**: Manages protocol-wide settings, risk parameters (e.g., LTV, liquidation thresholds), and administrative operations.
-
-## Contract Synchronization & Validation
-
-To maintain alignment between the backend and the evolving Soroban contract interface, two npm scripts are provided:
-
-- **Sync Contracts**: `npm run sync-contracts`
-  Run this command to refresh and generate updated artifacts if the smart contract logic changes. (Note: Currently relies on existing shapes per configuration, but serves as the standard refresh command for contributors).
-- **Validate Contracts**: `npm run validate-contracts`
-  Run this command during development or in CI to statically detect contract shape drift. It ensures the indexer natively handles all expected contract events without missing critical handlers.
-
-## Shared Contracts and DTO Conventions
-
-To maintain a consistent API structure, we enforce strict Data Transfer Object (DTO) validation and response formatting.
-
-### Directory Structure
-
-Shared contracts and common code reside in `src/common`.
-
-### DTO Validation
-
-- All controllers use NestJS `ValidationPipe`.
-- DTOs strictly define boundaries using `class-validator` decorators (e.g., `@IsString()`, `@IsNumber()`).
-- Data transformation uses `class-transformer` decorators (e.g., `@Type()`).
-
-### Standardized Responses
-
-We utilize standard API wrapper formats to ensure predictable frontend consumption.
-
-- **Success/Error Wrapper**: `ApiResponseDto<T>` (e.g., `{ success: true, data: { ... } }`)
-
-### Pagination
-
-For list-based endpoints, the following conventions apply:
-
-- **Request**: `PageOptionsDto` defines query options (`page`, `take`, `order`).
-- **Response**: `PageDto<T>` wraps an array of data alongside pagination metadata (`PageMetaDto`).
-
-## Project setup
-
-### Prerequisites
-
-- **Node.js 20+** and npm
-- **PostgreSQL 16+** (or Docker for the Compose workflow)
-- _(Optional)_ **Docker & Docker Compose** for the containerized workflow
-
-### Option A: Local (no Docker)
+## Quick start (Docker Compose)
 
 ```bash
-# 1. Copy environment template and adjust values
-cp .env.example .env
+cd veilend-backend
 
-# 2. Install dependencies
-npm install
-
-# 3. Generate Prisma Client
-npx prisma generate
-
-# 4. Run database migrations (requires a running Postgres instance)
-npx prisma migrate deploy
-
-# 5. (Optional) Seed demo data for dashboard / history testing
-npm run seed
-```
-
-### Option B: Docker Compose (recommended for contributors)
-
-The fastest way to get the full stack running locally:
-
-```bash
-# Start Postgres + backend
+# Start Postgres + API
 docker compose up -d
 
 # Follow logs
 docker compose logs -f backend
 
-# Seed demo data into the running container
+# Seed demo data (optional)
 docker compose exec backend npx prisma db seed
 
-# Tear down (keeps Postgres data volume)
+# Tear down (keep DB volume)
 docker compose down
 
-# Tear down and remove all data
+# Tear down and wipe DB volume
 docker compose down -v
 ```
 
-The backend will be available at **http://localhost:3000**.
-Health check: `curl http://localhost:3000/health`
+- API: **http://localhost:3000**
+- Health: `curl http://localhost:3000/health`
 
-### Option C: Build & run the Docker image manually
-
-```bash
-docker build -t veilend-backend .
-
-docker run -p 3000:3000 \
-  -e DATABASE_URL=postgresql://user:pass@host:5432/veilend \
-  -e JWT_SECRET=dev_secret \
-  veilend-backend
-```
-
-## Compile and run the project
+## Quick start (local Node + local Postgres)
 
 ```bash
-# development
-$ npm run start
+cd veilend-backend
 
-# watch mode
-$ npm run start:dev
+# 1. Environment
+cp .env.example .env
+# Edit DATABASE_URL / JWT_SECRET as needed
 
-# production mode
-$ npm run start:prod
+# 2. Install
+npm install
+
+# 3. Prisma client + migrations (Postgres must already be running)
+npx prisma generate
+npx prisma migrate deploy
+
+# 4. Optional seed
+npm run seed
+
+# 5. Dev server (watch mode)
+npm run start:dev
 ```
 
-## Run tests
+## Environment variables
+
+See [`.env.example`](./.env.example) for a complete template. Important keys:
+
+| Variable | Required | Default / example | Purpose |
+| :--- | :---: | :--- | :--- |
+| `PORT` | no | `3000` | HTTP listen port |
+| `DATABASE_URL` | **yes** | `postgresql://…/veilend` | Prisma Postgres connection |
+| `JWT_SECRET` | **yes** (prod) | `change_me_in_production` | Signs session JWTs |
+| `STELLAR_NETWORK` | no | `testnet` | Label for health / config |
+| `STELLAR_HORIZON_URL` | no | Horizon testnet URL | Account / history reads |
+| `STELLAR_SOROBAN_RPC_URL` | no | Soroban testnet RPC | Contract RPC |
+| `STELLAR_NETWORK_PASSPHRASE` | no | Test SDF Network… | Signature verification |
+| `STELLAR_CONTRACT_ID` | no | placeholder `C…` | Indexer target contract |
+| `STELLAR_INDEXER_START_LEDGER` | no | `1` | Indexer bootstrap ledger |
+| `STELLAR_INDEXER_POLL_INTERVAL_MS` | no | `5000` | Indexer poll interval |
+| `THROTTLE_TTL` / `THROTTLE_LIMIT` | no | `60000` / `100` | Global rate limit |
+| `AUTH_THROTTLE_*` | no | `60000` / `5` | Auth-route rate limit |
+| `ERROR_MONITORING_WEBHOOK` | no | _(empty)_ | Optional 5xx webhook |
+
+Docker Compose injects a working `DATABASE_URL` and `JWT_SECRET` for you.
+
+## npm scripts (match `package.json`)
+
+| Command | What it does |
+| :--- | :--- |
+| `npm run start` | Start once (compiled via Nest CLI) |
+| `npm run start:dev` | Watch mode for local development |
+| `npm run start:prod` | `node dist/main` after `npm run build` |
+| `npm run build` | Compile TypeScript → `dist/` |
+| `npm run lint` | ESLint with `--fix` |
+| `npm test` | Jest unit tests |
+| `npm run test:e2e` | E2E suite (`test/jest-e2e.json`; needs Postgres) |
+| `npm run test:cov` | Unit tests with coverage |
+| `npm run seed` | `ts-node prisma/seed.ts` |
+| `npm run validate-contracts` | Static check of `veilend.spec.json` vs indexer |
+| `npm run sync-contracts` | Placeholder refresh hook for contract artifacts |
+
+## Module layout
+
+| Module | Path | Responsibility |
+| :--- | :--- | :--- |
+| Auth | `src/auth` | Wallet signature login, JWT sessions, RBAC — see [`SESSION.md`](./SESSION.md) |
+| Portfolios | `src/portfolios` | Wallet-scoped balances / positions for dashboards |
+| Assets | `src/assets` | Supported asset registry and metadata |
+| Transactions | `src/transactions` | History / activity reads |
+| Indexer | `src/indexer` | Ledger event ingestion into Postgres |
+| Admin | `src/admin` | Protocol admin operations |
+| Protocol | `src/protocol` | Public protocol config + risk params |
+| Common | `src/common` | DTOs, logging, interceptors, contract specs |
+
+### DTO & response conventions
+
+- Controllers use Nest `ValidationPipe` (`whitelist`, `forbidNonWhitelisted`, `transform`).
+- Success bodies are typically wrapped as `ApiResponseDto<T>`: `{ success, data, meta }`.
+- List endpoints use `PageOptionsDto` / `PageDto` / `PageMetaDto` when paginated.
+
+### Contract sync
+
+- `npm run validate-contracts` — fail CI if indexer handlers drift from `src/common/contracts/veilend.spec.json`
+- `npm run sync-contracts` — documented refresh entrypoint for contributors
+
+## Troubleshooting
+
+### `P1001: Can't reach database server` / Prisma connection errors
+
+- Confirm Postgres is up: `docker compose ps` or `pg_isready -h localhost -p 5432`
+- Match `DATABASE_URL` user/password/db name to your instance  
+  Compose defaults: `postgresql://veilend:veilend@localhost:5432/veilend`
+- From inside the backend container, host is `postgres` not `localhost`
+
+### `Environment variable not found: DATABASE_URL`
+
+- You skipped copying the template: `cp .env.example .env`
+- Nest/Prisma load `.env` from `veilend-backend/` — run commands from that directory
+
+### `Migration failed` / schema out of date
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests (requires a running Postgres – set DATABASE_URL in .env)
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+npx prisma generate
+npx prisma migrate deploy
 ```
 
-## CI Pipeline
+If developing a new migration locally:
 
-Every pull request triggers the **VeilLend Backend CI** workflow which runs three jobs in parallel:
+```bash
+npx prisma migrate dev --name describe_change
+```
 
-| Job                    | What it does                                                                        |
-| ---------------------- | ----------------------------------------------------------------------------------- |
-| **Lint, Build & Test** | `npm ci` → `prisma generate` → lint → build → unit tests → contract-spec validation |
-| **E2E Tests**          | Spins up a Postgres service container, runs migrations, then executes the E2E suite |
-| **Docker Build**       | Builds the Docker image to catch Dockerfile regressions early                       |
+### Port 3000 already in use
 
-All jobs must pass before a PR can be merged.
+- Change `PORT` in `.env`, or stop the other process
+- Compose maps host `3000:3000` — adjust `docker-compose.yml` ports if needed
+
+### Auth / JWT failures (`Unauthorized`)
+
+- Ensure `JWT_SECRET` is identical across restarts (changing it invalidates all tokens)
+- Confirm the client sends `Authorization: Bearer <token>` from `POST /auth/verify`
+
+### Horizon / portfolio empty or slow
+
+- Testnet Horizon outages return soft empty balances; check `STELLAR_HORIZON_URL`
+- Unfunded accounts correctly return empty portfolios (not 500)
+
+### Unit tests pass but E2E fails
+
+- E2E needs a live Postgres and a valid `DATABASE_URL`
+- Prefer Compose Postgres + `npm run test:e2e` from the host with  
+  `DATABASE_URL=postgresql://veilend:veilend@localhost:5432/veilend`
+
+### Docker build fails on Prisma
+
+- Build context must be `veilend-backend/` (Dockerfile expects `package.json` + `prisma/` there)
+- Run `docker compose build --no-cache backend` after lockfile changes
+
+### Lint / format CI noise
+
+```bash
+npm run lint
+npx prettier --check "src/**/*.ts" "test/**/*.ts"
+```
+
+## CI pipeline
+
+Every PR runs **VeilLend Backend CI**:
+
+| Job | Steps |
+| :--- | :--- |
+| Lint, Build & Test | `npm ci` → `prisma generate` → lint → build → unit tests → contract validation |
+| E2E Tests | Postgres service → migrate → `npm run test:e2e` |
+| Docker Build | Image build smoke test |
+
+## Related docs
+
+- Session lifecycle: [`SESSION.md`](./SESSION.md)
+- Indexer notes: [`INDEXER.md`](./INDEXER.md)
+- Root monorepo overview: [`../README.md`](../README.md)
