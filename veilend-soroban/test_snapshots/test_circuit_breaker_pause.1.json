@@ -69,6 +69,9 @@
                 },
                 {
                   "i128": "100"
+                },
+                {
+                  "u32": 7
                 }
               ]
             }
@@ -847,7 +850,32 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "i128": "100"
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "decimals"
+                      },
+                      "val": {
+                        "u32": 7
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "price"
+                      },
+                      "val": {
+                        "i128": "100"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "updated_at"
+                      },
+                      "val": {
+                        "u64": "0"
+                      }
+                    }
+                  ]
                 }
               }
             },
@@ -1159,6 +1187,18 @@
                         },
                         "val": {
                           "u32": 15000
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "OracleMaxStalenessSecs"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u64": "3600"
                         }
                       }
                     ]

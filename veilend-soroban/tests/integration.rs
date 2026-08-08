@@ -49,7 +49,7 @@ fn test_update_asset_caps() {
     let client = VeilLendContractClient::new(&env, &contract_id);
 
     client.configure_asset(&admin, &asset, &true);
-    client.set_oracle_price(&admin, &asset, &100);
+    client.set_oracle_price(&admin, &asset, &100, &7u32);
 
     // Set caps
     client.update_asset_caps(&admin, &asset, &1000, &500);
@@ -93,7 +93,7 @@ fn test_circuit_breaker_pause() {
     let client = VeilLendContractClient::new(&env, &contract_id);
 
     client.configure_asset(&admin, &asset, &true);
-    client.set_oracle_price(&admin, &asset, &100);
+    client.set_oracle_price(&admin, &asset, &100, &7u32);
 
     // Pause the contract
     client.set_paused(&admin, &true);
@@ -157,7 +157,7 @@ fn test_deposit_and_borrow_with_caps() {
     let client = VeilLendContractClient::new(&env, &contract_id);
 
     client.configure_asset(&admin, &asset, &true);
-    client.set_oracle_price(&admin, &asset, &100);
+    client.set_oracle_price(&admin, &asset, &100, &7u32);
 
     // Set caps
     client.update_asset_caps(&admin, &asset, &2000, &1000);
@@ -202,7 +202,7 @@ fn test_unlimited_caps() {
     let client = VeilLendContractClient::new(&env, &contract_id);
 
     client.configure_asset(&admin, &asset, &true);
-    client.set_oracle_price(&admin, &asset, &100);
+    client.set_oracle_price(&admin, &asset, &100, &7u32);
 
     // Set caps to unlimited (-1)
     client.update_asset_caps(&admin, &asset, &-1, &-1);
@@ -291,7 +291,7 @@ fn test_deposit_then_borrow_then_time_advances_grows_debt_matching_formula() {
     let client = VeilLendContractClient::new(&env, &contract_id);
 
     client.configure_asset(&admin, &asset, &true);
-    client.set_oracle_price(&admin, &asset, &1);
+    client.set_oracle_price(&admin, &asset, &1, &7u32);
 
     // 50% utilization: borrow_rate = 200 + (5000 * 2000 / 10000) = 1200 bps (12% APR)
     // supply_rate = 1200 * 5000 / 10000 = 600 bps (6% APR)
@@ -319,7 +319,7 @@ fn test_accrue_interest_grows_indexes_with_no_position_touch() {
     let client = VeilLendContractClient::new(&env, &contract_id);
 
     client.configure_asset(&admin, &asset, &true);
-    client.set_oracle_price(&admin, &asset, &1);
+    client.set_oracle_price(&admin, &asset, &1, &7u32);
     client.deposit(&user, &asset, &1_000_000);
     client.borrow(&user, &asset, &500_000);
 
@@ -352,7 +352,7 @@ fn test_repay_and_withdraw_operate_on_accrued_amounts() {
     let client = VeilLendContractClient::new(&env, &contract_id);
 
     client.configure_asset(&admin, &asset, &true);
-    client.set_oracle_price(&admin, &asset, &1);
+    client.set_oracle_price(&admin, &asset, &1, &7u32);
     client.deposit(&user, &asset, &1_000_000);
     client.borrow(&user, &asset, &500_000);
 
@@ -394,7 +394,7 @@ fn test_conservation_of_value_between_suppliers_and_borrower() {
     let client = VeilLendContractClient::new(&env, &contract_id);
 
     client.configure_asset(&admin, &asset, &true);
-    client.set_oracle_price(&admin, &asset, &1);
+    client.set_oracle_price(&admin, &asset, &1, &7u32);
 
     // Pure supplier: deposits only, never borrows.
     client.deposit(&supplier, &asset, &500_000);
@@ -431,7 +431,7 @@ fn test_two_accrual_calls_at_same_timestamp_are_idempotent() {
     let client = VeilLendContractClient::new(&env, &contract_id);
 
     client.configure_asset(&admin, &asset, &true);
-    client.set_oracle_price(&admin, &asset, &1);
+    client.set_oracle_price(&admin, &asset, &1, &7u32);
     client.deposit(&user, &asset, &1_000_000);
     client.borrow(&user, &asset, &500_000);
 
@@ -457,4 +457,124 @@ fn test_two_accrual_calls_at_same_timestamp_are_idempotent() {
         client.get_total_borrowed(&asset),
         total_borrowed_after_first
     );
+}
+
+#[test]
+fn test_oracle_price_stores_decimals_and_timestamp() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1_700_000_000);
+    let admin = Address::generate(&env);
+    let asset = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    assert_eq!(
+        client.get_oracle_max_staleness(),
+        veillend_contract::DEFAULT_ORACLE_MAX_STALENESS_SECS
+    );
+
+    client.set_oracle_price(&admin, &asset, &150_000_000, &7u32);
+    let quote = client.get_oracle_price(&asset).expect("quote set");
+    assert_eq!(quote.price, 150_000_000);
+    assert_eq!(quote.decimals, 7);
+    assert_eq!(quote.updated_at, 1_700_000_000);
+}
+
+#[test]
+fn test_oracle_rejects_invalid_decimals() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let asset = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    let zero_decimals = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.set_oracle_price(&admin, &asset, &100, &0u32);
+    }));
+    assert!(zero_decimals.is_err());
+
+    let too_many = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.set_oracle_price(&admin, &asset, &100, &19u32);
+    }));
+    assert!(too_many.is_err());
+}
+
+#[test]
+fn test_stale_oracle_blocks_borrow() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1_000);
+    let admin = Address::generate(&env);
+    let asset = Address::generate(&env);
+    let user = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    client.configure_asset(&admin, &asset, &true);
+    client.set_oracle_price(&admin, &asset, &100, &7u32);
+    client.set_oracle_max_staleness(&admin, &60u64); // 1 minute window
+    client.deposit(&user, &asset, &1_000);
+
+    // Advance past max staleness without refreshing the quote.
+    env.ledger().set_timestamp(1_000 + 61);
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.borrow(&user, &asset, &100);
+    }));
+    assert!(
+        result.is_err(),
+        "borrow must fail when oracle quote is stale"
+    );
+
+    // Refresh the quote at the new ledger time; borrow should succeed.
+    client.set_oracle_price(&admin, &asset, &100, &7u32);
+    client.borrow(&user, &asset, &100);
+    let position = client.get_position(&user, &asset);
+    assert_eq!(position.borrowed, 100);
+}
+
+#[test]
+fn test_missing_oracle_blocks_borrow() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let asset = Address::generate(&env);
+    let user = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    client.configure_asset(&admin, &asset, &true);
+    client.deposit(&user, &asset, &1_000);
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.borrow(&user, &asset, &100);
+    }));
+    assert!(
+        result.is_err(),
+        "borrow must fail when oracle price is missing"
+    );
+}
+
+#[test]
+fn test_staleness_guard_can_be_disabled() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1_000);
+    let admin = Address::generate(&env);
+    let asset = Address::generate(&env);
+    let user = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    client.configure_asset(&admin, &asset, &true);
+    client.set_oracle_price(&admin, &asset, &100, &7u32);
+    client.set_oracle_max_staleness(&admin, &0u64); // disable freshness window
+    client.deposit(&user, &asset, &1_000);
+
+    env.ledger().set_timestamp(1_000 + 86_400);
+
+    client.borrow(&user, &asset, &100);
+    assert_eq!(client.get_position(&user, &asset).borrowed, 100);
 }
