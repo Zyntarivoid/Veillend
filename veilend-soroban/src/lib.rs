@@ -8,13 +8,33 @@ use soroban_sdk::{
 };
 
 /// Increment this only when a contract interface change requires consumers to adapt.
-pub const CONTRACT_VERSION: u32 = 2;
+pub const CONTRACT_VERSION: u32 = 3;
 
 /// Increment this only when the serialized `DataKey` or stored value layout changes.
 pub const STORAGE_SCHEMA_VERSION: u32 = 2;
 
 /// A compact, stable identifier for the current `DataKey` storage layout.
 const STORAGE_SCHEMA_ID: Symbol = symbol_short!("VLENDV2");
+
+// --- Persistent / instance TTL bump policy ---------------------------------
+// Network ledgers are ~5s; 17_280 ledgers ≈ 1 day. Values are conservative
+// defaults for a lending protocol: extend when remaining lifetime drops below
+// ~7 days, and restore lifetime to ~30 days. Adjust with network limits if the
+// protocol later needs longer retention windows.
+//
+// `extend_ttl(threshold, extend_to)` only spends resources when current TTL
+// is below `threshold`; otherwise it is a no-op.
+
+/// Ledgers per day (approx, 5s close time).
+pub const LEDGERS_PER_DAY: u32 = 17_280;
+/// Extend when remaining TTL is below this many ledgers (~7 days).
+pub const INSTANCE_TTL_THRESHOLD: u32 = 7 * LEDGERS_PER_DAY;
+/// Target remaining TTL after an instance bump (~30 days).
+pub const INSTANCE_TTL_EXTEND_TO: u32 = 30 * LEDGERS_PER_DAY;
+/// Extend persistent protocol keys when remaining TTL is below ~7 days.
+pub const PERSISTENT_TTL_THRESHOLD: u32 = 7 * LEDGERS_PER_DAY;
+/// Target remaining TTL after a persistent key bump (~30 days).
+pub const PERSISTENT_TTL_EXTEND_TO: u32 = 30 * LEDGERS_PER_DAY;
 
 /// Queryable metadata describing the contract interface and its storage layout.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -252,9 +272,12 @@ impl VeilLendContract {
         env.storage()
             .instance()
             .set(&DataKey::MinCollateralRatioBps, &min_collateral_ratio_bps);
+        Self::extend_instance_ttl(&env);
 
         // Initialize circuit breaker as not paused
-        env.storage().persistent().set(&DataKey::Paused, &false);
+        let paused_key = DataKey::Paused;
+        env.storage().persistent().set(&paused_key, &false);
+        Self::extend_persistent_ttl(&env, &paused_key);
     }
 
     pub fn configure_asset(env: Env, admin: Address, asset: Address, supported: bool) {
@@ -264,26 +287,22 @@ impl VeilLendContract {
         }
 
         admin.require_auth();
-        env.storage()
-            .persistent()
-            .set(&DataKey::SupportedAsset(asset.clone()), &supported);
+        let support_key = DataKey::SupportedAsset(asset.clone());
+        env.storage().persistent().set(&support_key, &supported);
+        Self::extend_persistent_ttl(&env, &support_key);
+        Self::extend_instance_ttl(&env);
 
         // Initialize caps to unlimited (-1) when adding new asset
         if supported {
-            env.storage()
-                .persistent()
-                .set(&DataKey::DepositCap(asset.clone()), &-1i128);
-            env.storage()
-                .persistent()
-                .set(&DataKey::BorrowCap(asset.clone()), &-1i128);
-
-            // Initialize totals to 0
-            env.storage()
-                .persistent()
-                .set(&DataKey::TotalDeposited(asset.clone()), &0i128);
-            env.storage()
-                .persistent()
-                .set(&DataKey::TotalBorrowed(asset.clone()), &0i128);
+            for (key, value) in [
+                (DataKey::DepositCap(asset.clone()), -1i128),
+                (DataKey::BorrowCap(asset.clone()), -1i128),
+                (DataKey::TotalDeposited(asset.clone()), 0i128),
+                (DataKey::TotalBorrowed(asset.clone()), 0i128),
+            ] {
+                env.storage().persistent().set(&key, &value);
+                Self::extend_persistent_ttl(&env, &key);
+            }
         }
 
         AssetConfigured {
@@ -325,9 +344,10 @@ impl VeilLendContract {
         }
 
         admin.require_auth();
-        env.storage()
-            .persistent()
-            .set(&DataKey::OraclePrice(asset.clone()), &price);
+        let key = DataKey::OraclePrice(asset.clone());
+        env.storage().persistent().set(&key, &price);
+        Self::extend_persistent_ttl(&env, &key);
+        Self::extend_instance_ttl(&env);
     }
 
     /// Get the oracle price for an asset
@@ -378,12 +398,13 @@ impl VeilLendContract {
 
         admin.require_auth();
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::DepositCap(asset.clone()), &deposit_cap);
-        env.storage()
-            .persistent()
-            .set(&DataKey::BorrowCap(asset.clone()), &borrow_cap);
+        let deposit_key = DataKey::DepositCap(asset.clone());
+        let borrow_key = DataKey::BorrowCap(asset.clone());
+        env.storage().persistent().set(&deposit_key, &deposit_cap);
+        env.storage().persistent().set(&borrow_key, &borrow_cap);
+        Self::extend_persistent_ttl(&env, &deposit_key);
+        Self::extend_persistent_ttl(&env, &borrow_key);
+        Self::extend_instance_ttl(&env);
 
         CapsUpdated {
             admin,
@@ -462,7 +483,10 @@ impl VeilLendContract {
         }
 
         admin.require_auth();
-        env.storage().persistent().set(&DataKey::Paused, &paused);
+        let key = DataKey::Paused;
+        env.storage().persistent().set(&key, &paused);
+        Self::extend_persistent_ttl(&env, &key);
+        Self::extend_instance_ttl(&env);
 
         CircuitBreakerEvent { admin, paused }.publish(&env);
     }
@@ -505,9 +529,7 @@ impl VeilLendContract {
 
         // Update total deposits
         let total = Self::get_total_deposited(env.clone(), asset.clone()) + amount;
-        env.storage()
-            .persistent()
-            .set(&DataKey::TotalDeposited(asset.clone()), &total);
+        Self::write_total_deposited(&env, &asset, total);
 
         DepositEvent {
             user,
@@ -547,9 +569,7 @@ impl VeilLendContract {
 
         // Update total borrows
         let total = Self::get_total_borrowed(env.clone(), asset.clone()) + amount;
-        env.storage()
-            .persistent()
-            .set(&DataKey::TotalBorrowed(asset.clone()), &total);
+        Self::write_total_borrowed(&env, &asset, total);
 
         BorrowEvent {
             user,
@@ -584,9 +604,7 @@ impl VeilLendContract {
 
         // Update total borrows
         let total = Self::get_total_borrowed(env.clone(), asset.clone()) - amount;
-        env.storage()
-            .persistent()
-            .set(&DataKey::TotalBorrowed(asset.clone()), &total);
+        Self::write_total_borrowed(&env, &asset, total);
 
         RepayEvent {
             user,
@@ -625,9 +643,7 @@ impl VeilLendContract {
 
         // Update total deposits
         let total = Self::get_total_deposited(env.clone(), asset.clone()) - amount;
-        env.storage()
-            .persistent()
-            .set(&DataKey::TotalDeposited(asset.clone()), &total);
+        Self::write_total_deposited(&env, &asset, total);
 
         WithdrawEvent {
             user,
@@ -716,9 +732,73 @@ impl VeilLendContract {
             .get(&DataKey::MinCollateralRatioBps)
             .unwrap_or(15_000)
     }
+
+    /// Keep-alive: bump the contract instance TTL when it is below threshold.
+    ///
+    /// Callable by anyone — extending TTL is not privileged and prevents the
+    /// instance (admin + config) from archiving between user interactions.
+    pub fn bump_instance_ttl(env: Env) {
+        Self::extend_instance_ttl(&env);
+    }
+
+    /// Keep-alive: bump persistent keys tied to an asset (support flag, caps,
+    /// totals, reserve, interest state, oracle price when present).
+    pub fn bump_asset_storage_ttl(env: Env, asset: Address) {
+        Self::extend_instance_ttl(&env);
+        Self::extend_asset_keys_ttl(&env, &asset);
+    }
+
+    /// Keep-alive: bump a user's position entry for `(user, asset)`.
+    pub fn bump_position_ttl(env: Env, user: Address, asset: Address) {
+        Self::extend_instance_ttl(&env);
+        let key = DataKey::Position(user, asset);
+        if env.storage().persistent().has(&key) {
+            Self::extend_persistent_ttl(&env, &key);
+        }
+    }
 }
 
 impl VeilLendContract {
+    /// Extend instance storage when remaining TTL drops below the threshold.
+    fn extend_instance_ttl(env: &Env) {
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
+    }
+
+    /// Extend a single persistent key when remaining TTL is below threshold.
+    fn extend_persistent_ttl(env: &Env, key: &DataKey) {
+        env.storage().persistent().extend_ttl(
+            key,
+            PERSISTENT_TTL_THRESHOLD,
+            PERSISTENT_TTL_EXTEND_TO,
+        );
+    }
+
+    /// Bump the set of persistent keys that define an asset's protocol state.
+    fn extend_asset_keys_ttl(env: &Env, asset: &Address) {
+        let keys = [
+            DataKey::SupportedAsset(asset.clone()),
+            DataKey::AssetReserve(asset.clone()),
+            DataKey::DepositCap(asset.clone()),
+            DataKey::BorrowCap(asset.clone()),
+            DataKey::TotalDeposited(asset.clone()),
+            DataKey::TotalBorrowed(asset.clone()),
+            DataKey::InterestState(asset.clone()),
+            DataKey::OraclePrice(asset.clone()),
+        ];
+        for key in keys.iter() {
+            if env.storage().persistent().has(key) {
+                Self::extend_persistent_ttl(env, key);
+            }
+        }
+        // Circuit breaker is protocol-global but cheap to keep alive alongside assets.
+        let paused = DataKey::Paused;
+        if env.storage().persistent().has(&paused) {
+            Self::extend_persistent_ttl(env, &paused);
+        }
+    }
+
     fn read_asset_reserve(env: &Env, asset: &Address) -> AssetReserve {
         env.storage()
             .persistent()
@@ -730,9 +810,22 @@ impl VeilLendContract {
     }
 
     fn write_asset_reserve(env: &Env, asset: &Address, reserve: &AssetReserve) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::AssetReserve(asset.clone()), reserve);
+        let key = DataKey::AssetReserve(asset.clone());
+        env.storage().persistent().set(&key, reserve);
+        Self::extend_persistent_ttl(env, &key);
+        Self::extend_instance_ttl(env);
+    }
+
+    fn write_total_deposited(env: &Env, asset: &Address, total: i128) {
+        let key = DataKey::TotalDeposited(asset.clone());
+        env.storage().persistent().set(&key, &total);
+        Self::extend_persistent_ttl(env, &key);
+    }
+
+    fn write_total_borrowed(env: &Env, asset: &Address, total: i128) {
+        let key = DataKey::TotalBorrowed(asset.clone());
+        env.storage().persistent().set(&key, &total);
+        Self::extend_persistent_ttl(env, &key);
     }
 
     fn publish_asset_reserve_updated(
@@ -762,6 +855,13 @@ impl VeilLendContract {
             })
     }
 
+    fn write_position(env: &Env, user: &Address, asset: &Address, position: &Position) {
+        let key = DataKey::Position(user.clone(), asset.clone());
+        env.storage().persistent().set(&key, position);
+        Self::extend_persistent_ttl(env, &key);
+        Self::extend_instance_ttl(env);
+    }
+
     fn read_interest_state(env: &Env, asset: &Address) -> InterestState {
         env.storage()
             .persistent()
@@ -774,9 +874,10 @@ impl VeilLendContract {
     }
 
     fn write_interest_state(env: &Env, asset: &Address, state: &InterestState) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::InterestState(asset.clone()), state);
+        let key = DataKey::InterestState(asset.clone());
+        env.storage().persistent().set(&key, state);
+        Self::extend_persistent_ttl(env, &key);
+        Self::extend_instance_ttl(env);
     }
 
     /// Accrues time-based interest for `asset`'s reserve, persisting the
@@ -799,16 +900,10 @@ impl VeilLendContract {
 
         Self::write_interest_state(env, asset, &result.state);
         if result.interest_to_suppliers != 0 {
-            env.storage().persistent().set(
-                &DataKey::TotalDeposited(asset.clone()),
-                &(total_supplied + result.interest_to_suppliers),
-            );
+            Self::write_total_deposited(env, asset, total_supplied + result.interest_to_suppliers);
         }
         if result.interest_to_borrowers != 0 {
-            env.storage().persistent().set(
-                &DataKey::TotalBorrowed(asset.clone()),
-                &(total_borrowed + result.interest_to_borrowers),
-            );
+            Self::write_total_borrowed(env, asset, total_borrowed + result.interest_to_borrowers);
         }
 
         result.state
@@ -824,12 +919,6 @@ impl VeilLendContract {
         let now = env.ledger().timestamp();
 
         interest::compute_accrual(&state, total_supplied, total_borrowed, now).state
-    }
-
-    fn write_position(env: &Env, user: &Address, asset: &Address, position: &Position) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::Position(user.clone(), asset.clone()), position);
     }
 
     fn require_supported_asset(env: &Env, asset: &Address) {
@@ -985,7 +1074,7 @@ mod tests {
     fn test_contract_metadata_identifies_current_storage_shape() {
         let metadata = VeilLendContract::contract_metadata(Env::default());
 
-        assert_eq!(metadata.contract_version, 2);
+        assert_eq!(metadata.contract_version, 3);
         assert_eq!(metadata.storage_schema_version, 2);
         assert_eq!(metadata.storage_schema_id, symbol_short!("VLENDV2"));
     }

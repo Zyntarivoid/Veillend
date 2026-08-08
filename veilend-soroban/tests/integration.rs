@@ -1,3 +1,4 @@
+use soroban_sdk::testutils::storage::{Instance as _, Persistent as _};
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{Address, Env};
 use veillend_contract::{VeilLendContract, VeilLendContractClient};
@@ -457,4 +458,104 @@ fn test_two_accrual_calls_at_same_timestamp_are_idempotent() {
         client.get_total_borrowed(&asset),
         total_borrowed_after_first
     );
+}
+
+#[test]
+fn test_ttl_bump_extends_instance_and_asset_keys() {
+    use veillend_contract::{INSTANCE_TTL_EXTEND_TO, PERSISTENT_TTL_EXTEND_TO};
+
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 100_000;
+        li.min_persistent_entry_ttl = 500;
+        li.min_temp_entry_ttl = 100;
+        li.max_entry_ttl = 1_000_000;
+    });
+
+    let admin = Address::generate(&env);
+    let asset = Address::generate(&env);
+    let user = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    client.configure_asset(&admin, &asset, &true);
+    client.set_oracle_price(&admin, &asset, &100);
+    client.deposit(&user, &asset, &1_000);
+
+    // Advance past the 7-day threshold so extend_ttl is not a no-op.
+    // After a full bump, remaining TTL is ~30 days; burn ~25 days.
+    let burn = 25 * veillend_contract::LEDGERS_PER_DAY;
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 100_000 + burn;
+    });
+
+    client.bump_instance_ttl();
+    client.bump_asset_storage_ttl(&asset);
+    client.bump_position_ttl(&user, &asset);
+
+    env.as_contract(&contract_id, || {
+        assert_eq!(env.storage().instance().get_ttl(), INSTANCE_TTL_EXTEND_TO);
+        assert_eq!(
+            env.storage()
+                .persistent()
+                .get_ttl(&veillend_contract::DataKey::SupportedAsset(asset.clone())),
+            PERSISTENT_TTL_EXTEND_TO
+        );
+        assert_eq!(
+            env.storage()
+                .persistent()
+                .get_ttl(&veillend_contract::DataKey::Position(
+                    user.clone(),
+                    asset.clone()
+                )),
+            PERSISTENT_TTL_EXTEND_TO
+        );
+        assert_eq!(
+            env.storage()
+                .persistent()
+                .get_ttl(&veillend_contract::DataKey::OraclePrice(asset.clone())),
+            PERSISTENT_TTL_EXTEND_TO
+        );
+    });
+}
+
+#[test]
+fn test_mutating_entrypoints_refresh_position_ttl() {
+    use veillend_contract::PERSISTENT_TTL_EXTEND_TO;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 50_000;
+        li.min_persistent_entry_ttl = 500;
+        li.max_entry_ttl = 1_000_000;
+    });
+
+    let admin = Address::generate(&env);
+    let asset = Address::generate(&env);
+    let user = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    client.configure_asset(&admin, &asset, &true);
+    client.set_oracle_price(&admin, &asset, &100);
+    client.deposit(&user, &asset, &2_000);
+
+    // Age past the threshold so the borrow write re-extends TTL.
+    let burn = 25 * veillend_contract::LEDGERS_PER_DAY;
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 50_000 + burn;
+    });
+
+    client.borrow(&user, &asset, &100);
+
+    env.as_contract(&contract_id, || {
+        assert_eq!(
+            env.storage()
+                .persistent()
+                .get_ttl(&veillend_contract::DataKey::Position(user, asset)),
+            PERSISTENT_TTL_EXTEND_TO
+        );
+    });
 }

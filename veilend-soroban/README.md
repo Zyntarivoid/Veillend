@@ -156,6 +156,27 @@ Schema `VLENDV1` uses these keys:
 
 When changing the public interface, increment `CONTRACT_VERSION`. When changing a `DataKey` variant or any stored value shape, increment `STORAGE_SCHEMA_VERSION` and assign a new `STORAGE_SCHEMA_ID`. Keep this table in sync with the implementation.
 
+### Storage TTL / bump strategy
+
+Soroban persistent and instance entries expire unless their TTL is extended. VeilLend uses a single policy:
+
+| Constant | Default | Meaning |
+| :--- | :--- | :--- |
+| `INSTANCE_TTL_THRESHOLD` | ~7 days of ledgers | Extend instance only if remaining TTL is below this |
+| `INSTANCE_TTL_EXTEND_TO` | ~30 days of ledgers | Target remaining TTL after an instance bump |
+| `PERSISTENT_TTL_THRESHOLD` | ~7 days | Same for persistent keys |
+| `PERSISTENT_TTL_EXTEND_TO` | ~30 days | Target remaining TTL after a persistent bump |
+
+**Automatic bumps:** mutating writes (`write_position`, `write_asset_reserve`, totals, configure, oracle, pause) call `extend_ttl` so hot paths keep live data alive.
+
+**Manual keep-alive (permissionless):**
+
+- `bump_instance_ttl()` — instance (admin + config)
+- `bump_asset_storage_ttl(asset)` — support flag, caps, totals, reserve, interest, oracle, paused
+- `bump_position_ttl(user, asset)` — one position entry
+
+Contributors: prefer writing through the helpers above instead of raw `storage().persistent().set` so TTL stays consistent.
+
 ## Development Workflow
 
 1. Write code in `src/lib.rs`
