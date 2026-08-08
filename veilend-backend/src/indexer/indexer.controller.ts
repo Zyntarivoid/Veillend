@@ -1,8 +1,10 @@
 import { Controller, Get, Post, Param, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { IndexerService } from './indexer.service';
 import { IndexerRepository } from './indexer.repository';
 
+@ApiTags('indexer')
 @Controller('indexer')
 export class IndexerController {
   private readonly logger = new Logger(IndexerController.name);
@@ -14,6 +16,19 @@ export class IndexerController {
   ) {}
 
   @Get('status')
+  @ApiOperation({ summary: 'Indexer checkpoint and config status' })
+  @ApiOkResponse({
+    schema: {
+      example: {
+        success: true,
+        data: {
+          status: 'active',
+          contractId: 'C…',
+          lastIndexedLedger: 123456,
+        },
+      },
+    },
+  })
   async getStatus() {
     const checkpoint = await this.repository.getCheckpoint();
     const contractId = this.configService.get<string>('indexer.contractId', '');

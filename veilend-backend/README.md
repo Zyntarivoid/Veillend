@@ -118,6 +118,18 @@ docker compose down -v
 
 The backend will be available at **http://localhost:3000**.
 Health check: `curl http://localhost:3000/health`
+Swagger UI: **http://localhost:3000/api/docs** (OpenAPI JSON at `/api/docs-json`)
+
+### API versioning
+
+| Item | Value |
+| :--- | :--- |
+| Current major | **v1** |
+| Path style | Root-mounted (`/auth`, `/portfolios`, …) so existing clients stay compatible |
+| Discovery | Every response includes `X-API-Version: 1` |
+| Next breaking release | Will introduce a URI prefix such as `/api/v2` |
+
+Treat today's routes as the v1 contract. Additive endpoints may ship on v1; breaking changes require a new major path.
 
 ### Option C: Build & run the Docker image manually
 
