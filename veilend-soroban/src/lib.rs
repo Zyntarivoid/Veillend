@@ -8,13 +8,13 @@ use soroban_sdk::{
 };
 
 /// Increment this only when a contract interface change requires consumers to adapt.
-pub const CONTRACT_VERSION: u32 = 2;
+pub const CONTRACT_VERSION: u32 = 3;
 
 /// Increment this only when the serialized `DataKey` or stored value layout changes.
-pub const STORAGE_SCHEMA_VERSION: u32 = 2;
+pub const STORAGE_SCHEMA_VERSION: u32 = 3;
 
 /// A compact, stable identifier for the current `DataKey` storage layout.
-const STORAGE_SCHEMA_ID: Symbol = symbol_short!("VLENDV2");
+const STORAGE_SCHEMA_ID: Symbol = symbol_short!("VLENDV3");
 
 /// Queryable metadata describing the contract interface and its storage layout.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -25,9 +25,10 @@ pub struct ContractMetadata {
     pub storage_schema_id: Symbol,
 }
 
-/// Keys and value shapes that make up storage schema `VLENDV2`.
+/// Keys and value shapes that make up storage schema `VLENDV3`.
 ///
-/// Instance storage: `Admin: Address`, `MinCollateralRatioBps: u32`.
+/// Instance storage: `Admin: Address`, `MinCollateralRatioBps: u32`,
+/// `PendingAdmin: PendingAdminTransfer`.
 /// Persistent storage: `SupportedAsset(Address): bool`,
 /// `Position(Address, Address): Position`, `OraclePrice(Address): i128`,
 /// `DepositCap(Address)`/`BorrowCap(Address): i128`,
@@ -54,6 +55,8 @@ pub enum DataKey {
     Paused,
     /// Time-based interest accrual indexes for an asset
     InterestState(Address),
+    /// Two-step admin rotation nomination (instance storage)
+    PendingAdmin,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -90,6 +93,18 @@ pub struct AssetCaps {
 pub struct AssetReserve {
     pub total_balance: i128,
     pub protocol_fees: i128,
+}
+
+/// Pending two-step admin rotation.
+///
+/// `execute_after` is a ledger timestamp. The nominee may accept only when
+/// `env.ledger().timestamp() >= execute_after`. A delay of `0` at proposal
+/// time yields `execute_after == now`, so acceptance is immediately available.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct PendingAdminTransfer {
+    pub nominee: Address,
+    pub execute_after: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -142,6 +157,12 @@ pub enum VeilLendError {
     CircuitBreakerTriggered = 16,
     /// Reserve balance is too low for the requested action
     InsufficientReserve = 17,
+    /// No pending admin nomination exists
+    NoPendingAdmin = 18,
+    /// Nominee tried to accept before the activation delay elapsed
+    AdminTransferNotReady = 19,
+    /// Nominee cannot be the current admin
+    InvalidAdminNominee = 20,
 }
 
 #[contractevent(topics = ["veillend", "asset_configured"])]
@@ -211,6 +232,34 @@ pub struct CircuitBreakerEvent {
     #[topic]
     pub admin: Address,
     pub paused: bool,
+}
+
+#[contractevent(topics = ["veillend", "admin_proposed"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminTransferProposed {
+    #[topic]
+    pub current_admin: Address,
+    #[topic]
+    pub nominee: Address,
+    pub execute_after: u64,
+}
+
+#[contractevent(topics = ["veillend", "admin_accepted"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminTransferAccepted {
+    #[topic]
+    pub previous_admin: Address,
+    #[topic]
+    pub new_admin: Address,
+}
+
+#[contractevent(topics = ["veillend", "admin_cancelled"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminTransferCancelled {
+    #[topic]
+    pub admin: Address,
+    #[topic]
+    pub nominee: Address,
 }
 
 #[contractevent(topics = ["veillend", "asset_reserve_updated"])]
@@ -716,6 +765,101 @@ impl VeilLendContract {
             .get(&DataKey::MinCollateralRatioBps)
             .unwrap_or(15_000)
     }
+
+    /// Nominate a new admin. Authority does **not** transfer until the nominee
+    /// calls [`Self::accept_admin_transfer`] after `delay_secs` elapse.
+    ///
+    /// * `delay_secs = 0` — nominee may accept immediately (`execute_after = now`)
+    /// * Replaces any existing pending nomination
+    /// * Nominee must not equal the current admin
+    pub fn propose_admin_transfer(env: Env, admin: Address, nominee: Address, delay_secs: u64) {
+        let stored_admin = Self::admin(env.clone());
+        if admin != stored_admin {
+            panic_with_error!(&env, VeilLendError::Unauthorized);
+        }
+        if nominee == stored_admin {
+            panic_with_error!(&env, VeilLendError::InvalidAdminNominee);
+        }
+
+        admin.require_auth();
+
+        let execute_after = env.ledger().timestamp().saturating_add(delay_secs);
+        let pending = PendingAdminTransfer {
+            nominee: nominee.clone(),
+            execute_after,
+        };
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingAdmin, &pending);
+
+        AdminTransferProposed {
+            current_admin: admin,
+            nominee,
+            execute_after,
+        }
+        .publish(&env);
+    }
+
+    /// Nominee accepts a pending admin transfer after the activation delay.
+    ///
+    /// # Errors
+    /// * `NoPendingAdmin` — nothing to accept
+    /// * `Unauthorized` — caller is not the nominated address
+    /// * `AdminTransferNotReady` — ledger time is still before `execute_after`
+    pub fn accept_admin_transfer(env: Env, nominee: Address) {
+        let pending: PendingAdminTransfer = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingAdmin)
+            .unwrap_or_else(|| panic_with_error!(&env, VeilLendError::NoPendingAdmin));
+
+        if nominee != pending.nominee {
+            panic_with_error!(&env, VeilLendError::Unauthorized);
+        }
+        if env.ledger().timestamp() < pending.execute_after {
+            panic_with_error!(&env, VeilLendError::AdminTransferNotReady);
+        }
+
+        nominee.require_auth();
+
+        let previous_admin = Self::admin(env.clone());
+        env.storage().instance().set(&DataKey::Admin, &nominee);
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+
+        AdminTransferAccepted {
+            previous_admin,
+            new_admin: nominee,
+        }
+        .publish(&env);
+    }
+
+    /// Current admin cancels a pending nomination (if any).
+    pub fn cancel_admin_transfer(env: Env, admin: Address) {
+        let stored_admin = Self::admin(env.clone());
+        if admin != stored_admin {
+            panic_with_error!(&env, VeilLendError::Unauthorized);
+        }
+
+        let pending: PendingAdminTransfer = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingAdmin)
+            .unwrap_or_else(|| panic_with_error!(&env, VeilLendError::NoPendingAdmin));
+
+        admin.require_auth();
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+
+        AdminTransferCancelled {
+            admin,
+            nominee: pending.nominee,
+        }
+        .publish(&env);
+    }
+
+    /// Returns the pending admin nomination, if any.
+    pub fn get_pending_admin_transfer(env: Env) -> Option<PendingAdminTransfer> {
+        env.storage().instance().get(&DataKey::PendingAdmin)
+    }
 }
 
 impl VeilLendContract {
@@ -979,15 +1123,18 @@ mod tests {
         assert_eq!(VeilLendError::InvalidCap as u32, 15);
         assert_eq!(VeilLendError::CircuitBreakerTriggered as u32, 16);
         assert_eq!(VeilLendError::InsufficientReserve as u32, 17);
+        assert_eq!(VeilLendError::NoPendingAdmin as u32, 18);
+        assert_eq!(VeilLendError::AdminTransferNotReady as u32, 19);
+        assert_eq!(VeilLendError::InvalidAdminNominee as u32, 20);
     }
 
     #[test]
     fn test_contract_metadata_identifies_current_storage_shape() {
         let metadata = VeilLendContract::contract_metadata(Env::default());
 
-        assert_eq!(metadata.contract_version, 2);
-        assert_eq!(metadata.storage_schema_version, 2);
-        assert_eq!(metadata.storage_schema_id, symbol_short!("VLENDV2"));
+        assert_eq!(metadata.contract_version, 3);
+        assert_eq!(metadata.storage_schema_version, 3);
+        assert_eq!(metadata.storage_schema_id, symbol_short!("VLENDV3"));
     }
 
     #[test]
@@ -1011,6 +1158,9 @@ mod tests {
             VeilLendError::InvalidCap as u32,
             VeilLendError::CircuitBreakerTriggered as u32,
             VeilLendError::InsufficientReserve as u32,
+            VeilLendError::NoPendingAdmin as u32,
+            VeilLendError::AdminTransferNotReady as u32,
+            VeilLendError::InvalidAdminNominee as u32,
         ];
         let mut sorted = codes.to_vec();
         sorted.sort();

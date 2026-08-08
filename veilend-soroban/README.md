@@ -140,19 +140,30 @@ Call `contract_metadata()` on a deployed contract before writing a migration or 
 
 | Metadata field | Current value | Meaning |
 | :--- | :--- | :--- |
-| `contract_version` | `1` | The public contract interface version. |
-| `storage_schema_version` | `1` | The version of serialized storage keys and values. |
-| `storage_schema_id` | `VLENDV1` | A compact, stable identifier for this storage layout. |
+| `contract_version` | `3` | The public contract interface version. |
+| `storage_schema_version` | `3` | The version of serialized storage keys and values. |
+| `storage_schema_id` | `VLENDV3` | A compact, stable identifier for this storage layout. |
 
-Schema `VLENDV1` uses these keys:
+Schema `VLENDV3` uses these keys (see `DataKey` in `src/lib.rs` for the full set):
 
 | Durability | Key | Value |
 | :--- | :--- | :--- |
 | Instance | `Admin` | `Address` |
 | Instance | `MinCollateralRatioBps` | `u32` |
+| Instance | `PendingAdmin` | `PendingAdminTransfer { nominee, execute_after }` |
 | Persistent | `SupportedAsset(Address)` | `bool` |
-| Persistent | `Position(Address, Address)` | `Position { deposited: i128, borrowed: i128 }` |
+| Persistent | `Position(Address, Address)` | `Position { deposited, borrowed, index snapshots }` |
 | Persistent | `OraclePrice(Address)` | `i128` |
+
+### Two-step admin transfer
+
+Authority rotation is intentionally not single-step:
+
+1. **`propose_admin_transfer(admin, nominee, delay_secs)`** — current admin nominates; optional delay sets `execute_after = now + delay_secs` (`0` = immediate acceptance window).
+2. **`accept_admin_transfer(nominee)`** — nominee accepts only after `execute_after`; becomes admin and clears pending state.
+3. **`cancel_admin_transfer(admin)`** — current admin aborts a pending nomination.
+
+Unauthorized propose/accept/cancel and self-nomination fail with stable error codes (`Unauthorized`, `InvalidAdminNominee`, `NoPendingAdmin`, `AdminTransferNotReady`).
 
 When changing the public interface, increment `CONTRACT_VERSION`. When changing a `DataKey` variant or any stored value shape, increment `STORAGE_SCHEMA_VERSION` and assign a new `STORAGE_SCHEMA_ID`. Keep this table in sync with the implementation.
 
