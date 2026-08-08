@@ -9,7 +9,7 @@ describe('LoggingInterceptor', () => {
   let logger: { log: jest.Mock; warn: jest.Mock };
 
   function makeContext(): ExecutionContext {
-    const req = { method: 'GET', url: '/things' };
+    const req = { method: 'GET', url: '/things?token=secret', originalUrl: '/things?token=secret' };
     const res = { statusCode: 200 };
     return {
       switchToHttp: () => ({
@@ -24,15 +24,27 @@ describe('LoggingInterceptor', () => {
     interceptor = new LoggingInterceptor(logger as unknown as AppLoggerService);
   });
 
-  it('logs request entry and successful exit', (done) => {
+  it('logs structured request entry and successful exit without query strings', (done) => {
     const context = makeContext();
     const handler: CallHandler = { handle: () => of('result') };
 
     interceptor.intercept(context, handler).subscribe({
       complete: () => {
         expect(logger.log).toHaveBeenCalledTimes(2);
-        expect(logger.log.mock.calls[0][0]).toContain('--> GET /things');
-        expect(logger.log.mock.calls[1][0]).toContain('<-- GET /things 200');
+        expect(logger.log.mock.calls[0][0]).toEqual(
+          expect.objectContaining({
+            event: 'request_start',
+            method: 'GET',
+            path: '/things',
+          }),
+        );
+        expect(logger.log.mock.calls[1][0]).toEqual(
+          expect.objectContaining({
+            event: 'request_end',
+            statusCode: 200,
+            path: '/things',
+          }),
+        );
         done();
       },
     });
@@ -47,7 +59,13 @@ describe('LoggingInterceptor', () => {
     interceptor.intercept(context, handler).subscribe({
       error: () => {
         expect(logger.warn).toHaveBeenCalledTimes(1);
-        expect(logger.warn.mock.calls[0][0]).toContain('<-x GET /things');
+        expect(logger.warn.mock.calls[0][0]).toEqual(
+          expect.objectContaining({
+            event: 'request_failed',
+            method: 'GET',
+            path: '/things',
+          }),
+        );
         done();
       },
     });

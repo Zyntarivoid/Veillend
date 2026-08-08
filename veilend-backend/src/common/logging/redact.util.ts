@@ -7,11 +7,20 @@ export const SENSITIVE_KEYS = new Set([
   'accesstoken',
   'refreshtoken',
   'secret',
+  'secretkey',
+  'privatekey',
+  'seed',
+  'mnemonic',
+  'cookie',
+  'set-cookie',
   'apikey',
   'authorization',
   'signature',
   'nonce',
   'jwt',
+  'jwtsecret',
+  'clientsecret',
+  'rawerror',
 ]);
 
 const BEARER_RE = /^Bearer\s+.+$/i;

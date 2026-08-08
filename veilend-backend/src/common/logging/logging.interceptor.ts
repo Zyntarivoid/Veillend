@@ -16,25 +16,46 @@ export class LoggingInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     const req = context.switchToHttp().getRequest<Request>();
     const start = Date.now();
+    const path = this.safePath(req);
 
-    this.logger.log(`--> ${req.method} ${req.url}`, 'HTTP');
+    this.logger.log(
+      { event: 'request_start', method: req.method, path },
+      'HTTP',
+    );
 
     return next.handle().pipe(
       tap({
         next: () => {
           const res = context.switchToHttp().getResponse<Response>();
           this.logger.log(
-            `<-- ${req.method} ${req.url} ${res.statusCode} ${Date.now() - start}ms`,
+            {
+              event: 'request_end',
+              method: req.method,
+              path,
+              statusCode: res.statusCode,
+              durationMs: Date.now() - start,
+            },
             'HTTP',
           );
         },
         error: () => {
           this.logger.warn(
-            `<-x ${req.method} ${req.url} ${Date.now() - start}ms`,
+            {
+              event: 'request_failed',
+              method: req.method,
+              path,
+              durationMs: Date.now() - start,
+            },
             'HTTP',
           );
         },
       }),
     );
+  }
+
+  private safePath(req: Request): string {
+    const raw = req.originalUrl ?? req.url ?? '';
+    const q = raw.indexOf('?');
+    return q === -1 ? raw : raw.slice(0, q);
   }
 }

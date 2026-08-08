@@ -19,6 +19,7 @@ import { ConfigModule } from './config/config.module';
 import { AppLoggerService } from './common/logging/app-logger.service';
 import { LoggingInterceptor } from './common/logging/logging.interceptor';
 import { AllExceptionsFilter } from './common/logging/all-exceptions.filter';
+import { ErrorMonitoringService } from './common/logging/error-monitoring.service';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import {
   CORRELATION_ID_HEADER,
@@ -62,6 +63,7 @@ import {
   providers: [
     AppService,
     AppLoggerService,
+    ErrorMonitoringService,
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
