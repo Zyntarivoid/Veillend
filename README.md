@@ -45,11 +45,13 @@ Located in `/veilend-soroban`, the current Soroban codebase is the new VeilLend 
 
 ### Current contract foundation
 - Initializes the contract with an admin and minimum collateral ratio.
-- Tracks supported assets for lending actions.
+- Tracks supported assets for lending actions with per-asset borrow/deposit caps.
 - Stores per-user positions with deposited and borrowed balances.
 - Exposes basic `deposit`, `borrow`, `repay`, and `withdraw` state transitions.
 - Emits events for indexing and analytics.
 - **Oracle-backed collateral valuation** using configurable asset prices for accurate borrowing power calculations.
+- **Global pause mechanism** (`set_paused` / `is_paused`): freezes all admin and accrual entrypoints while leaving `repay` and `withdraw` open so users can always exit. See the soroban README for the full pause table.
+- **Protocol fee tracking** (`record_protocol_fee` / `get_protocol_fee`) and interest accrual scaffold (`accrue_interest`), both pause-checked.
 
 ### Planned next layer
 - Stellar token transfer integration for real asset movement.

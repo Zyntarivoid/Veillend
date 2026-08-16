@@ -7,12 +7,43 @@ This directory is the active Rust/Soroban contract workspace for VeilLend on Ste
 The contract currently provides an initial VeilLend lending scaffold with:
 
 - contract initialization with an admin and minimum collateral ratio
-- supported-asset configuration
+- supported-asset configuration with per-asset borrow/deposit caps
 - position storage per user and asset
 - basic `deposit`, `borrow`, `repay`, and `withdraw` state transitions
+- oracle-backed collateral valuation (`set_oracle_price` / `get_oracle_price`)
+- protocol fee tracking (`record_protocol_fee` / `get_protocol_fee`)
+- interest accrual scaffold (`accrue_interest`)
+- **global pause mechanism** (`set_paused` / `is_paused` / `require_not_paused`)
 - typed contract events for key lending actions
 
-This is a protocol foundation, not the full privacy implementation yet. Token transfers, price oracles, liquidation logic, and shielded proof verification still need to be added in follow-up iterations.
+This is a protocol foundation, not the full privacy implementation yet. Token transfers, liquidation logic, and shielded proof verification still need to be added in follow-up iterations.
+
+## Pause Mechanism
+
+The contract exposes a global emergency pause controlled by the admin.
+`set_paused(admin, true)` freezes all state-mutating entrypoints **except**
+`repay` and `withdraw`, which remain open so users can always exit their
+positions even during an incident.
+
+### Pause-checked entrypoints
+
+| Entrypoint            | Pause-checked | Rationale                                                      |
+|-----------------------|:-------------:|----------------------------------------------------------------|
+| `__constructor`       | ✗             | One-shot initialiser                                           |
+| `set_paused`          | ✗             | The pause switch itself must stay usable                       |
+| `configure_asset`     | ✓             | Admin mutation — blocked so a compromised key can't reconfig   |
+| `update_asset_caps`   | ✓             | Admin mutation — blocked during incidents                      |
+| `set_oracle_price`    | ✓             | Admin mutation — blocked to prevent oracle manipulation        |
+| `record_protocol_fee` | ✓             | Fee accrual — blocked during incidents                         |
+| `accrue_interest`     | ✓             | Permissionless debt clock — stopped so debt doesn't grow while users can't act |
+| `deposit`             | ✓             | New capital inflow — halted during incidents                   |
+| `borrow`              | ✓             | New debt creation — halted during incidents                    |
+| `repay`               | ✗ (intentional) | Users must always be able to reduce debt                     |
+| `withdraw`            | ✗ (intentional) | Users must always be able to exit their positions            |
+
+The `✗` gaps on `repay` / `withdraw` are **deliberate**: blocking exits would
+trap users in leveraged positions during exactly the scenarios where pausing is
+most likely.
 
 ## Prerequisites
 
