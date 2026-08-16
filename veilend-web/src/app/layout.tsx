@@ -1,5 +1,6 @@
-import type { Metadata, Viewport } from 'next';
+﻿import type { Metadata, Viewport } from 'next';
 import { Geist, Geist_Mono, Inter } from 'next/font/google';
+import { headers } from 'next/headers';
 import './globals.css';
 import { cn } from "@/lib/utils";
 import { WalletProvider } from '@/context/WalletContext';
@@ -60,11 +61,14 @@ export const viewport: Viewport = {
   colorScheme: 'dark',
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- reserved for future inline <Script nonce={nonce}> usage
+  const nonce = (await headers()).get('x-nonce') ?? undefined;
+
   return (
     <html lang="en" className={cn("h-full", "antialiased", geistSans.variable, geistMono.variable, "font-sans", inter.variable)}>
       <body className="min-h-full flex flex-col">
