@@ -13,6 +13,9 @@ pub const CONTRACT_VERSION: u32 = 4;
 /// Increment this only when the serialized `DataKey` or stored value layout changes.
 pub const STORAGE_SCHEMA_VERSION: u32 = 3;
 
+/// Values <= this amount after repay/withdraw are rounded to zero.
+pub const DUST_THRESHOLD: i128 = 100;
+
 /// A compact, stable identifier for the current `DataKey` storage layout.
 const STORAGE_SCHEMA_ID: Symbol = symbol_short!("VLENDV3");
 
@@ -972,11 +975,18 @@ impl VeilLendContract {
 
         position.borrowed -= amount;
         reserve.total_balance += amount;
+
+        let mut dust_delta = 0;
+        if position.borrowed > 0 && position.borrowed <= DUST_THRESHOLD {
+            dust_delta = position.borrowed;
+            position.borrowed = 0;
+        }
+
         Self::write_position(&env, &user, &asset, &position);
         Self::write_asset_reserve(&env, &asset, &reserve);
 
         // Update total borrows
-        let total = Self::get_total_borrowed(env.clone(), asset.clone()) - amount;
+        let total = Self::get_total_borrowed(env.clone(), asset.clone()) - amount - dust_delta;
         env.storage()
             .persistent()
             .set(&DataKey::TotalBorrowed(asset.clone()), &total);
@@ -1383,22 +1393,46 @@ impl VeilLendContract {
             .persistent()
             .set(&DataKey::SupportedAsset(asset.clone()), &supported);
 
-        // Initialize caps to unlimited (-1) when adding new asset
+        // Initialize caps to unlimited (-1) when adding new asset, preserving existing caps
         if supported {
-            env.storage()
+            if !env
+                .storage()
                 .persistent()
-                .set(&DataKey::DepositCap(asset.clone()), &-1i128);
-            env.storage()
+                .has(&DataKey::DepositCap(asset.clone()))
+            {
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::DepositCap(asset.clone()), &-1i128);
+            }
+            if !env
+                .storage()
                 .persistent()
-                .set(&DataKey::BorrowCap(asset.clone()), &-1i128);
+                .has(&DataKey::BorrowCap(asset.clone()))
+            {
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::BorrowCap(asset.clone()), &-1i128);
+            }
 
-            // Initialize totals to 0
-            env.storage()
+            // Initialize totals to 0, preserving existing totals
+            if !env
+                .storage()
                 .persistent()
-                .set(&DataKey::TotalDeposited(asset.clone()), &0i128);
-            env.storage()
+                .has(&DataKey::TotalDeposited(asset.clone()))
+            {
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::TotalDeposited(asset.clone()), &0i128);
+            }
+            if !env
+                .storage()
                 .persistent()
-                .set(&DataKey::TotalBorrowed(asset.clone()), &0i128);
+                .has(&DataKey::TotalBorrowed(asset.clone()))
+            {
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::TotalBorrowed(asset.clone()), &0i128);
+            }
         }
 
         AssetConfigured {
@@ -1699,9 +1733,15 @@ impl VeilLendContract {
     }
 
     fn write_position(env: &Env, user: &Address, asset: &Address, position: &Position) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::Position(user.clone(), asset.clone()), position);
+        if position.deposited == 0 && position.borrowed == 0 {
+            env.storage()
+                .persistent()
+                .remove(&DataKey::Position(user.clone(), asset.clone()));
+        } else {
+            env.storage()
+                .persistent()
+                .set(&DataKey::Position(user.clone(), asset.clone()), position);
+        }
     }
 
     fn require_supported_asset(env: &Env, asset: &Address) {

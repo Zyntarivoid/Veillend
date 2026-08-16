@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument */
 import { Test, TestingModule } from '@nestjs/testing';
 import { Prisma } from '@prisma/client';
 import { IndexerRepository, IndexerTransaction } from './indexer.repository';
@@ -27,6 +27,8 @@ describe('IndexerRepository', () => {
       deleteMany: jest.Mock;
     };
     $transaction: jest.Mock;
+    $queryRaw: jest.Mock;
+    $executeRaw: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -54,6 +56,8 @@ describe('IndexerRepository', () => {
         if (Array.isArray(arg)) return Promise.all(arg);
         return (arg as (tx: typeof prisma) => Promise<unknown>)(prisma);
       }),
+      $queryRaw: jest.fn(),
+      $executeRaw: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -99,7 +103,7 @@ describe('IndexerRepository', () => {
     });
   });
 
-  describe('saveTransaction', () => {
+  describe('applyEvent', () => {
     const tx: IndexerTransaction = {
       id: 'evt-1',
       userAddress: 'GABC',
@@ -111,13 +115,20 @@ describe('IndexerRepository', () => {
       timestamp: '2026-01-01T00:00:00.000Z',
     };
 
-    it('creates a new row and returns true when not seen before', async () => {
+    // Prisma.sql templates expose the interpolated values on `.values`.
+    const sqlValues = (call: unknown[]): unknown[] =>
+      (call[0] as { values: unknown[] }).values;
+    const sqlText = (call: unknown[]): string =>
+      (call[0] as { strings: string[] }).strings.join(' ');
+
+    it('creates a new row and applies the position delta, returning true when new', async () => {
       prisma.transactionHistory.findUnique.mockResolvedValue(null);
       prisma.user.upsert.mockResolvedValue({ id: 'user-1' });
       prisma.asset.upsert.mockResolvedValue({ id: 'asset-1' });
       prisma.transactionHistory.create.mockResolvedValue({});
+      prisma.$queryRaw.mockResolvedValue([]);
 
-      const result = await repository.saveTransaction(tx);
+      const result = await repository.applyEvent(tx, 100n, 0n);
 
       expect(result).toBe(true);
       expect(prisma.transactionHistory.create).toHaveBeenCalledWith({
@@ -129,15 +140,20 @@ describe('IndexerRepository', () => {
           amountUsd: 0,
         }),
       });
+      // Position write happened: ensure-exists insert + locked update.
+      expect(prisma.$executeRaw).toHaveBeenCalledTimes(2);
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
     });
 
-    it('returns false without creating when already seen (duplicate)', async () => {
+    it('returns false without writing when already seen (duplicate)', async () => {
       prisma.transactionHistory.findUnique.mockResolvedValue({ id: 'row-1' });
 
-      const result = await repository.saveTransaction(tx);
+      const result = await repository.applyEvent(tx, 100n, 0n);
 
       expect(result).toBe(false);
       expect(prisma.transactionHistory.create).not.toHaveBeenCalled();
+      expect(prisma.$executeRaw).not.toHaveBeenCalled();
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
     });
 
     it('returns false (not throw) on a race-condition unique violation', async () => {
@@ -151,64 +167,68 @@ describe('IndexerRepository', () => {
         }),
       );
 
-      const result = await repository.saveTransaction(tx);
+      const result = await repository.applyEvent(tx, 100n, 0n);
 
       expect(result).toBe(false);
+      expect(prisma.$executeRaw).not.toHaveBeenCalled();
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
     });
-  });
 
-  describe('updatePosition', () => {
-    beforeEach(() => {
+    it('accumulates deltas onto an existing position under a row lock', async () => {
+      prisma.transactionHistory.findUnique.mockResolvedValue(null);
       prisma.user.upsert.mockResolvedValue({ id: 'user-1' });
       prisma.asset.upsert.mockResolvedValue({ id: 'asset-1' });
-    });
+      prisma.transactionHistory.create.mockResolvedValue({});
+      prisma.$queryRaw.mockResolvedValue([
+        { depositedRaw: 100n, borrowedRaw: 50n },
+      ]);
 
-    it('accumulates deltas onto an existing position', async () => {
-      prisma.position.findUnique.mockResolvedValue({
-        depositedRaw: 100n,
-        borrowedRaw: 50n,
-      });
+      await repository.applyEvent(tx, 20n, -10n);
 
-      await repository.updatePosition('GABC', 'CONTRACT1', 20n, -10n);
-
-      expect(prisma.position.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          update: expect.objectContaining({
-            depositedRaw: 120n,
-            borrowedRaw: 40n,
-          }),
-        }),
-      );
+      expect(sqlText(prisma.$queryRaw.mock.calls[0])).toContain('FOR UPDATE');
+      // Second $executeRaw is the locked UPDATE with the accumulated values.
+      expect(sqlValues(prisma.$executeRaw.mock.calls[1])).toEqual([
+        120n,
+        40n,
+        'user-1',
+        'asset-1',
+      ]);
     });
 
     it('clamps balances to a minimum of 0', async () => {
-      prisma.position.findUnique.mockResolvedValue({
-        depositedRaw: 5n,
-        borrowedRaw: 5n,
-      });
+      prisma.transactionHistory.findUnique.mockResolvedValue(null);
+      prisma.user.upsert.mockResolvedValue({ id: 'user-1' });
+      prisma.asset.upsert.mockResolvedValue({ id: 'asset-1' });
+      prisma.transactionHistory.create.mockResolvedValue({});
+      prisma.$queryRaw.mockResolvedValue([
+        { depositedRaw: 5n, borrowedRaw: 5n },
+      ]);
 
-      await repository.updatePosition('GABC', 'CONTRACT1', -100n, -100n);
+      await repository.applyEvent(tx, -100n, -100n);
 
-      expect(prisma.position.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          update: expect.objectContaining({
-            depositedRaw: 0n,
-            borrowedRaw: 0n,
-          }),
-        }),
-      );
+      expect(sqlValues(prisma.$executeRaw.mock.calls[1])).toEqual([
+        0n,
+        0n,
+        'user-1',
+        'asset-1',
+      ]);
     });
 
     it('starts from 0 when no position exists yet', async () => {
-      prisma.position.findUnique.mockResolvedValue(null);
+      prisma.transactionHistory.findUnique.mockResolvedValue(null);
+      prisma.user.upsert.mockResolvedValue({ id: 'user-1' });
+      prisma.asset.upsert.mockResolvedValue({ id: 'asset-1' });
+      prisma.transactionHistory.create.mockResolvedValue({});
+      prisma.$queryRaw.mockResolvedValue([]);
 
-      await repository.updatePosition('GABC', 'CONTRACT1', 30n, 0n);
+      await repository.applyEvent(tx, 30n, 0n);
 
-      expect(prisma.position.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          create: expect.objectContaining({ depositedRaw: 30n }),
-        }),
-      );
+      expect(sqlValues(prisma.$executeRaw.mock.calls[1])).toEqual([
+        30n,
+        0n,
+        'user-1',
+        'asset-1',
+      ]);
     });
   });
 

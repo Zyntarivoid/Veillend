@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { Prisma, TransactionStatus, TransactionType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -57,6 +58,16 @@ const TX_TYPE_REVERSE_MAP: Record<TransactionType, IndexerTransaction['type']> =
     LIQUIDATION: 'withdraw', // indexer never produces this today; kept exhaustive for the enum
   };
 
+/**
+ * True when an error is a Prisma unique-constraint violation (P2002).
+ */
+function isUniqueConstraintError(error: unknown): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === 'P2002'
+  );
+}
+
 const CHECKPOINT_ID = 'global';
 
 @Injectable()
@@ -74,9 +85,12 @@ export class IndexerRepository {
    * TransactionHistory rows always have a valid userId FK even if the
    * wallet has never called /auth/verify.
    */
-  private async resolveUser(walletAddress: string) {
+  private async resolveUser(
+    db: Prisma.TransactionClient,
+    walletAddress: string,
+  ) {
     const normalized = this.normalize(walletAddress);
-    return this.prisma.user.upsert({
+    return db.user.upsert({
       where: { walletAddress: normalized },
       create: { walletAddress: normalized },
       update: {},
@@ -89,9 +103,12 @@ export class IndexerRepository {
    * metadata (code/symbol/name) — those are placeholder values until a
    * real admin asset-configuration flow exists to fill them in.
    */
-  private async resolveAsset(assetAddress: string) {
+  private async resolveAsset(
+    db: Prisma.TransactionClient,
+    assetAddress: string,
+  ) {
     const normalized = this.normalize(assetAddress);
-    return this.prisma.asset.upsert({
+    return db.asset.upsert({
       where: { contractId: normalized },
       create: {
         contractId: normalized,
@@ -223,55 +240,133 @@ export class IndexerRepository {
   }
 
   /**
-   * Persists a transaction if it hasn't been seen before. Returns true if
-   * this call newly created the row, false if it was already indexed
-   * (duplicate delivery/replay) — callers must skip position updates when
-   * this returns false, to avoid double-counting balances.
+   * Atomically applies a single indexed event: dedupes on the event's
+   * sorobanEventId, inserts the TransactionHistory row, and applies the
+   * Position delta in ONE database transaction.
+   *
+   * Returns `true` when this call newly indexed the event (and updated the
+   * position); returns `false` when the event's sorobanEventId was already
+   * indexed (duplicate delivery/replay), in which case nothing is written.
+   *
+   * The Position read-modify-write acquires a row-level lock (SELECT … FOR
+   * UPDATE) so concurrent writers on the same (user, asset) cannot lose
+   * deltas.
    */
-  async saveTransaction(tx: IndexerTransaction): Promise<boolean> {
-    const existing = await this.prisma.transactionHistory.findUnique({
-      where: { sorobanEventId: tx.id },
-    });
-    if (existing) {
-      return false;
-    }
-
-    const user = await this.resolveUser(tx.userAddress);
-    const asset = await this.resolveAsset(tx.assetAddress);
+  async applyEvent(
+    tx: IndexerTransaction,
+    depositedDelta: bigint,
+    borrowedDelta: bigint,
+  ): Promise<boolean> {
     const timestamp = new Date(tx.timestamp);
+    let isNew = false;
 
     try {
-      await this.prisma.transactionHistory.create({
-        data: {
-          userId: user.id,
-          assetId: asset.id,
-          type: TX_TYPE_MAP[tx.type],
-          // Indexed events are already-confirmed on-chain activity.
-          status: TransactionStatus.CONFIRMED,
-          amountRaw: BigInt(tx.amount),
-          // No price-oracle integration exists yet anywhere in the codebase;
-          // defaulted to 0 pending that separate, unscoped effort.
-          amountUsd: 0,
-          txHash: tx.txHash || null,
-          ledgerSequence: tx.ledger,
-          contractId: this.normalize(tx.assetAddress),
-          sorobanEventId: tx.id,
-          createdAt: timestamp,
-          confirmedAt: timestamp,
-        },
+      await this.prisma.$transaction(async (db) => {
+        const existing = await db.transactionHistory.findUnique({
+          where: { sorobanEventId: tx.id },
+        });
+        if (existing) {
+          // Duplicate delivery/replay: do not double-count balances.
+          return;
+        }
+
+        const user = await this.resolveUser(db, tx.userAddress);
+        const asset = await this.resolveAsset(db, tx.assetAddress);
+
+        await db.transactionHistory.create({
+          data: {
+            userId: user.id,
+            assetId: asset.id,
+            type: TX_TYPE_MAP[tx.type],
+            // Indexed events are already-confirmed on-chain activity.
+            status: TransactionStatus.CONFIRMED,
+            amountRaw: BigInt(tx.amount),
+            // No price-oracle integration exists yet anywhere in the codebase;
+            // defaulted to 0 pending that separate, unscoped effort.
+            amountUsd: 0,
+            txHash: tx.txHash || null,
+            ledgerSequence: tx.ledger,
+            contractId: this.normalize(tx.assetAddress),
+            sorobanEventId: tx.id,
+            createdAt: timestamp,
+            confirmedAt: timestamp,
+          },
+        });
+
+        await this.applyPositionDelta(
+          db,
+          user.id,
+          asset.id,
+          depositedDelta,
+          borrowedDelta,
+        );
+
+        isNew = true;
       });
-      return true;
     } catch (error) {
-      // Race: another writer inserted the same sorobanEventId between our
-      // existence check and this create. Treat as a duplicate, not a failure.
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === 'P2002'
-      ) {
+      // Race: another writer committed the same sorobanEventId between our
+      // existence check and this create. The whole transaction rolls back, so
+      // neither the TransactionHistory row nor the Position delta survives.
+      if (isUniqueConstraintError(error)) {
         return false;
       }
       throw error;
     }
+
+    return isNew;
+  }
+
+  /**
+   * Applies deltas to a user's position for one asset under a row-level lock,
+   * clamping balances to a minimum of 0. The ensure-exists insert + SELECT …
+   * FOR UPDATE + UPDATE sequence is safe under concurrency: concurrent
+   * writers on the same (user, asset) serialize on the row lock and therefore
+   * cannot lose each other's deltas.
+   */
+  private async applyPositionDelta(
+    db: Prisma.TransactionClient,
+    userId: string,
+    assetId: string,
+    depositedDelta: bigint,
+    borrowedDelta: bigint,
+  ): Promise<void> {
+    // Ensure the row exists so the FOR UPDATE lock below is taken on a real
+    // row even for brand-new positions (idempotent; concurrent callers race
+    // benignly on the unique index).
+    await db.$executeRaw(Prisma.sql`
+      INSERT INTO "Position" ("id", "userId", "assetId", "updatedAt")
+      VALUES (${randomUUID()}, ${userId}, ${assetId}, CURRENT_TIMESTAMP)
+      ON CONFLICT ("userId", "assetId") DO NOTHING
+    `);
+
+    // Row-level lock: serialize concurrent read-modify-writes on this
+    // (user, asset) pair.
+    const rows = await db.$queryRaw<
+      Array<{ depositedRaw: bigint; borrowedRaw: bigint }>
+    >(Prisma.sql`
+      SELECT "depositedRaw", "borrowedRaw"
+      FROM "Position"
+      WHERE "userId" = ${userId} AND "assetId" = ${assetId}
+      FOR UPDATE
+    `);
+
+    const currentDeposited = BigInt(rows[0]?.depositedRaw ?? 0n);
+    const currentBorrowed = BigInt(rows[0]?.borrowedRaw ?? 0n);
+
+    let nextDeposited = currentDeposited + depositedDelta;
+    let nextBorrowed = currentBorrowed + borrowedDelta;
+
+    if (nextDeposited < 0n) nextDeposited = 0n;
+    if (nextBorrowed < 0n) nextBorrowed = 0n;
+
+    await db.$executeRaw(Prisma.sql`
+      UPDATE "Position"
+      SET "depositedRaw" = ${nextDeposited},
+          "borrowedRaw" = ${nextBorrowed},
+          "isStale" = false,
+          "lastSyncAt" = CURRENT_TIMESTAMP
+      WHERE "userId" = ${userId} AND "assetId" = ${assetId}
+    `);
   }
 
   async getPositions(userAddress: string): Promise<IndexerPosition[]> {
@@ -287,56 +382,6 @@ export class IndexerRepository {
       borrowed: row.borrowedRaw.toString(),
       updatedAt: row.updatedAt.toISOString(),
     }));
-  }
-
-  /**
-   * Applies deltas to a user's position for one asset, clamping balances to
-   * a minimum of 0. The read-modify-write here relies on the indexer's poll
-   * loop processing events strictly serially (single writer) — if indexing
-   * is ever parallelized, this needs row-level locking or an atomic
-   * increment-then-clamp instead.
-   */
-  async updatePosition(
-    userAddress: string,
-    assetAddress: string,
-    depositedDelta: bigint,
-    borrowedDelta: bigint,
-  ): Promise<void> {
-    const user = await this.resolveUser(userAddress);
-    const asset = await this.resolveAsset(assetAddress);
-
-    await this.prisma.$transaction(async (tx) => {
-      const existing = await tx.position.findUnique({
-        where: { userId_assetId: { userId: user.id, assetId: asset.id } },
-      });
-
-      const currentDeposited = existing?.depositedRaw ?? 0n;
-      const currentBorrowed = existing?.borrowedRaw ?? 0n;
-
-      let nextDeposited = currentDeposited + depositedDelta;
-      let nextBorrowed = currentBorrowed + borrowedDelta;
-
-      if (nextDeposited < 0n) nextDeposited = 0n;
-      if (nextBorrowed < 0n) nextBorrowed = 0n;
-
-      await tx.position.upsert({
-        where: { userId_assetId: { userId: user.id, assetId: asset.id } },
-        create: {
-          userId: user.id,
-          assetId: asset.id,
-          depositedRaw: nextDeposited,
-          borrowedRaw: nextBorrowed,
-          isStale: false,
-          lastSyncAt: new Date(),
-        },
-        update: {
-          depositedRaw: nextDeposited,
-          borrowedRaw: nextBorrowed,
-          isStale: false,
-          lastSyncAt: new Date(),
-        },
-      });
-    });
   }
 
   async getAssets(): Promise<IndexerAsset[]> {
