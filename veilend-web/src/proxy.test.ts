@@ -1,8 +1,8 @@
-﻿import { describe, expect, it, vi, afterEach } from "vitest";
+import { describe, expect, it, vi, afterEach } from "vitest";
 import { NextRequest } from "next/server";
-import { middleware } from "./middleware";
+import { proxy } from "./proxy";
 
-describe("Security Middleware", () => {
+describe("Security Proxy", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });
@@ -11,7 +11,7 @@ describe("Security Middleware", () => {
     it("sets required security headers in production", () => {
       vi.stubEnv("NODE_ENV", "production");
       const req = new NextRequest("http://localhost:3000/");
-      const res = middleware(req);
+      const res = proxy(req);
 
       expect(res.headers.get("content-security-policy")).toBeTruthy();
       expect(res.headers.get("content-security-policy")).toContain(
@@ -29,7 +29,7 @@ describe("Security Middleware", () => {
     it("omits Strict-Transport-Security in development", () => {
       vi.stubEnv("NODE_ENV", "development");
       const req = new NextRequest("http://localhost:3000/");
-      const res = middleware(req);
+      const res = proxy(req);
 
       expect(res.headers.get("strict-transport-security")).toBeNull();
       expect(res.headers.get("content-security-policy")).toContain(
@@ -42,7 +42,7 @@ describe("Security Middleware", () => {
     it("sets required security headers in production", () => {
       vi.stubEnv("NODE_ENV", "production");
       const req = new NextRequest("http://localhost:3000/dashboard");
-      const res = middleware(req);
+      const res = proxy(req);
 
       expect(res.headers.get("content-security-policy")).toBeTruthy();
       expect(res.headers.get("strict-transport-security")).toBeTruthy();
@@ -55,8 +55,8 @@ describe("Security Middleware", () => {
     const req1 = new NextRequest("http://localhost:3000/");
     const req2 = new NextRequest("http://localhost:3000/");
 
-    const csp1 = middleware(req1).headers.get("content-security-policy");
-    const csp2 = middleware(req2).headers.get("content-security-policy");
+    const csp1 = proxy(req1).headers.get("content-security-policy");
+    const csp2 = proxy(req2).headers.get("content-security-policy");
 
     const nonce1 = csp1?.match(/'nonce-([^']+)'/)?.[1];
     const nonce2 = csp2?.match(/'nonce-([^']+)'/)?.[1];
