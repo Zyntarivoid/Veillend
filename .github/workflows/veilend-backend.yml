@@ -2,11 +2,25 @@ name: VeilLend Backend CI
 
 on:
   push:
+    branches:
+      - main
     paths:
       - 'veilend-backend/**'
+      - '.github/workflows/veilend-backend.yml'
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
     paths:
       - 'veilend-backend/**'
+      - '.github/workflows/veilend-backend.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: backend-ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-and-test:
