@@ -1,6 +1,8 @@
 'use client';
 
+import { useEffect } from 'react';
 import ErrorFallback from '@/components/error/ErrorFallback';
+import { captureException } from '@/lib/server/telemetry';
 
 interface RootErrorProps {
   error: Error & { digest?: string };
@@ -8,6 +10,10 @@ interface RootErrorProps {
 }
 
 export default function RootError({ error, reset }: RootErrorProps) {
+  useEffect(() => {
+    captureException(error);
+  }, [error]);
+
   return (
     <ErrorFallback
       error={error}

@@ -33,7 +33,11 @@ export class TransactionsController {
     @Query() query: GetTransactionsQueryDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<PageDto<TransactionRecordDto>> {
-    await assertWalletAccess(this.prisma, req.user.walletAddress, walletAddress);
+    await assertWalletAccess(
+      this.prisma,
+      req.user.walletAddress,
+      walletAddress,
+    );
     return this.transactionsService.getTransactions(walletAddress, query);
   }
 }

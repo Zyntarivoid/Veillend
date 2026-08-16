@@ -1,37 +1,47 @@
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { parseOr422 } from '@/lib/server/validation';
+import { captureEvent } from '@/lib/server/telemetry';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 15;
 
-const campaignEvents = [
+const CAMPAIGN_EVENT_TYPES = [
   'campaign_page_visit',
   'campaign_cta_click',
   'campaign_contributor_interest',
 ] as const;
 
-type CampaignEventName = (typeof campaignEvents)[number];
+// Rejects payloads over ~1MB so a bad client can't flood the dedup cache
+// or logs with oversized JSON blobs.
+const MAX_PAYLOAD_BYTES = 1_000_000;
 
-type CampaignEventRequest = {
-  id?: string;
-  sessionId?: string;
-  ts?: string;
-  type?: CampaignEventName;
-  event?: CampaignEventName;
-  campaign?: string;
-  timestamp?: string;
-  payload?: Record<string, unknown>;
-};
+export const CampaignEventSchema = z
+  .object({
+    id: z.string().uuid(),
+    sessionId: z.string().uuid(),
+    ts: z.number().int().positive(),
+    type: z.enum(CAMPAIGN_EVENT_TYPES),
+    campaign: z.literal('grantfox-oss-stellar').default('grantfox-oss-stellar'),
+    payload: z
+      .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))
+      .optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.payload && JSON.stringify(data.payload).length > MAX_PAYLOAD_BYTES) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.too_big,
+        maximum: MAX_PAYLOAD_BYTES,
+        type: 'string',
+        inclusive: true,
+        path: ['payload'],
+        message: `Payload exceeds ${MAX_PAYLOAD_BYTES} byte limit`,
+      });
+    }
+  });
 
-type SanitizedPayload = {
-  path?: string;
-  referrer?: string;
-  source?: string;
-  ctaId?: string;
-  ctaLabel?: string;
-  targetUrl?: string;
-  interestArea?: string;
-};
+export type CampaignEventInput = z.infer<typeof CampaignEventSchema>;
 
 // Per-IP Rate Limiting (60 requests per 1 minute window)
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
@@ -62,36 +72,6 @@ function isDuplicateEvent(id: string): boolean {
   }
   dedupCache.set(id, Date.now());
   return false;
-}
-
-function isCampaignEventName(event: unknown): event is CampaignEventName {
-  return typeof event === 'string' && campaignEvents.includes(event as CampaignEventName);
-}
-
-function sanitizeString(value: unknown, maxLength = 160) {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const trimmedValue = value.trim();
-  if (!trimmedValue) {
-    return undefined;
-  }
-  return trimmedValue.slice(0, maxLength);
-}
-
-function sanitizePayload(payload: CampaignEventRequest['payload']): SanitizedPayload {
-  if (!payload) {
-    return {};
-  }
-  return {
-    path: sanitizeString(payload.path),
-    referrer: sanitizeString(payload.referrer, 240),
-    source: sanitizeString(payload.source),
-    ctaId: sanitizeString(payload.ctaId),
-    ctaLabel: sanitizeString(payload.ctaLabel),
-    targetUrl: sanitizeString(payload.targetUrl, 240),
-    interestArea: sanitizeString(payload.interestArea),
-  };
 }
 
 function isAllowedOrigin(originHeader: string | null): boolean {
@@ -166,43 +146,36 @@ export async function POST(request: Request) {
   }
 
   // 3. Parse JSON Body
-  let body: CampaignEventRequest;
+  let body: unknown;
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: 'Invalid JSON payload' }, { status: 400 });
   }
 
-  const eventName = body.type || body.event;
-  const campaign = body.campaign || 'grantfox-oss-stellar';
-
-  if (!isCampaignEventName(eventName) || campaign !== 'grantfox-oss-stellar') {
-    return NextResponse.json({ error: 'Unsupported campaign event' }, { status: 400 });
+  // 4. Validate against the Zod schema (422 + flattened issues on failure,
+  //    telemetry already captured inside parseOr422)
+  let parsed: { data: CampaignEventInput };
+  try {
+    parsed = await parseOr422(CampaignEventSchema, body);
+  } catch (err) {
+    if (err instanceof Response) {
+      return err;
+    }
+    throw err;
   }
 
-  const eventId = body.id || sanitizeString(body.id);
-  if (!eventId) {
-    return NextResponse.json({ error: 'Missing event ID' }, { status: 400 });
-  }
+  const event = parsed.data;
 
-  // 4. In-Memory Dedup Check (409 Conflict if duplicate)
-  if (isDuplicateEvent(eventId)) {
+  // 5. In-Memory Dedup Check (409 Conflict if duplicate)
+  if (isDuplicateEvent(event.id)) {
     return NextResponse.json(
-      { error: 'Duplicate event ID', id: eventId },
+      { error: 'Duplicate event ID', id: event.id },
       { status: 409 }
     );
   }
 
-  const analyticsEvent = {
-    id: eventId,
-    sessionId: body.sessionId || 'unknown_session',
-    ts: body.ts || body.timestamp || new Date().toISOString(),
-    type: eventName,
-    payload: sanitizePayload(body.payload),
-  };
+  captureEvent({ kind: 'campaign_event', ...event });
 
-  console.info('[campaign-analytics]', analyticsEvent);
-
-  return NextResponse.json({ ok: true, id: eventId });
+  return NextResponse.json({ ok: true, id: event.id });
 }
-

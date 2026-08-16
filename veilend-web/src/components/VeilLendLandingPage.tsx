@@ -70,6 +70,7 @@ export default function VeilLendLandingPage() {
       <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-indigo-500/10 rounded-full blur-[120px] pointer-events-none animate-pulse duration-[8s]" />
       <div className="absolute top-1/3 right-1/4 w-[600px] h-[600px] bg-emerald-500/5 rounded-full blur-[160px] pointer-events-none animate-pulse duration-[12s]" />
 
+      <main>
       {/* HERO SECTION */}
       <header className="relative max-w-7xl mx-auto px-6 pt-24 pb-20 sm:pt-32 sm:pb-28 text-center space-y-8">
         <div className="flex justify-center">
@@ -325,6 +326,7 @@ export default function VeilLendLandingPage() {
           )}
         </div>
       </section>
+      </main>
 
       {/* VISUAL FOOTER */}
       <footer className="max-w-7xl mx-auto px-6 py-12 border-t border-slate-900 text-center sm:text-left flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 text-xs font-mono text-slate-400">

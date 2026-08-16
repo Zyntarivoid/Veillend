@@ -1,6 +1,8 @@
 'use client';
 
+import { useEffect } from 'react';
 import ErrorFallback from '@/components/error/ErrorFallback';
+import { captureException } from '@/lib/server/telemetry';
 
 interface DashboardGroupErrorProps {
   error: Error & { digest?: string };
@@ -8,6 +10,10 @@ interface DashboardGroupErrorProps {
 }
 
 export default function DashboardGroupError({ error, reset }: DashboardGroupErrorProps) {
+  useEffect(() => {
+    captureException(error);
+  }, [error]);
+
   return (
     <ErrorFallback
       error={error}

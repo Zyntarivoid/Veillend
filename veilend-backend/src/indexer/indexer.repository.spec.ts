@@ -239,6 +239,52 @@ describe('IndexerRepository', () => {
     });
   });
 
+  describe('getTransactionsForUser', () => {
+    it('queries transaction history with limit clamping and returns paginated result', async () => {
+      const now = new Date('2026-01-01T00:00:00.000Z');
+      prisma.transactionHistory.findMany.mockResolvedValue([
+        {
+          id: 'row-1',
+          sorobanEventId: 'evt-1',
+          type: 'DEPOSIT',
+          contractId: 'contract1',
+          amountRaw: 500n,
+          ledgerSequence: 10,
+          txHash: 'hash1',
+          createdAt: now,
+        },
+      ]);
+
+      const result = await repository.getTransactionsForUser('GABC', {
+        limit: 300,
+      });
+
+      expect(result.nextCursor).toBeNull();
+      expect(result.transactions).toHaveLength(1);
+      expect(result.transactions[0]).toEqual({
+        id: 'evt-1',
+        userAddress: 'GABC',
+        type: 'deposit',
+        assetAddress: 'contract1',
+        amount: '500',
+        ledger: 10,
+        txHash: 'hash1',
+        timestamp: now.toISOString(),
+      });
+      expect(prisma.transactionHistory.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          take: 201, // clamped from 300 to 200 + 1
+        }),
+      );
+    });
+
+    it('throws BadRequestException for invalid cursor', async () => {
+      await expect(
+        repository.getTransactionsForUser('GABC', { cursor: 'invalid-cursor' }),
+      ).rejects.toThrow('Invalid cursor');
+    });
+  });
+
   describe('resetDatabase', () => {
     it('only clears indexer-owned rows, not users/assets/admins', async () => {
       await repository.resetDatabase();

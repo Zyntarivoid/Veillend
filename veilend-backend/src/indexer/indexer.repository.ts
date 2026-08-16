@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { Prisma, TransactionStatus, TransactionType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -15,6 +15,16 @@ export interface IndexerTransaction {
   ledger: number;
   txHash: string;
   timestamp: string;
+}
+
+export interface GetTransactionsOptions {
+  cursor?: string;
+  limit?: number;
+}
+
+export interface PaginatedIndexerTransactions {
+  transactions: IndexerTransaction[];
+  nextCursor: string | null;
 }
 
 export interface IndexerPosition {
@@ -125,6 +135,91 @@ export class IndexerRepository {
       txHash: row.txHash ?? '',
       timestamp: row.createdAt.toISOString(),
     }));
+  }
+
+  async getTransactionsForUser(
+    userAddress: string,
+    options?: GetTransactionsOptions,
+  ): Promise<PaginatedIndexerTransactions> {
+    const normalized = this.normalize(userAddress);
+    const limit =
+      typeof options?.limit === 'number' && !isNaN(options.limit)
+        ? Math.min(Math.max(Math.floor(options.limit), 1), 200)
+        : 50;
+
+    let cursorPayload: { timestamp: string; id: string } | null = null;
+    if (options?.cursor) {
+      try {
+        const json = Buffer.from(options.cursor, 'base64').toString('utf8');
+        const parsed = JSON.parse(json) as unknown;
+        if (
+          parsed &&
+          typeof parsed === 'object' &&
+          'timestamp' in parsed &&
+          'id' in parsed &&
+          typeof (parsed as Record<string, unknown>).timestamp === 'string' &&
+          typeof (parsed as Record<string, unknown>).id === 'string' &&
+          !isNaN(
+            Date.parse((parsed as Record<string, unknown>).timestamp as string),
+          )
+        ) {
+          cursorPayload = parsed as { timestamp: string; id: string };
+        } else {
+          throw new Error('Invalid cursor payload structure');
+        }
+      } catch {
+        throw new BadRequestException('Invalid cursor');
+      }
+    }
+
+    const cursorDate = cursorPayload ? new Date(cursorPayload.timestamp) : null;
+
+    const rows = await this.prisma.transactionHistory.findMany({
+      where: {
+        user: { walletAddress: normalized },
+        ...(cursorPayload && cursorDate
+          ? {
+              OR: [
+                { createdAt: { lt: cursorDate } },
+                {
+                  createdAt: cursorDate,
+                  id: { gt: cursorPayload.id },
+                },
+              ],
+            }
+          : {}),
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+      take: limit + 1,
+    });
+
+    const hasMore = rows.length > limit;
+    const pageRows = hasMore ? rows.slice(0, limit) : rows;
+
+    let nextCursor: string | null = null;
+    if (hasMore && pageRows.length > 0) {
+      const lastRow = pageRows[pageRows.length - 1];
+      const cursorObj = {
+        timestamp: lastRow.createdAt.toISOString(),
+        id: lastRow.id,
+      };
+      nextCursor = Buffer.from(JSON.stringify(cursorObj), 'utf8').toString(
+        'base64',
+      );
+    }
+
+    const transactions: IndexerTransaction[] = pageRows.map((row) => ({
+      id: row.sorobanEventId ?? row.id,
+      userAddress,
+      type: TX_TYPE_REVERSE_MAP[row.type],
+      assetAddress: row.contractId ?? '',
+      amount: row.amountRaw.toString(),
+      ledger: row.ledgerSequence ?? 0,
+      txHash: row.txHash ?? '',
+      timestamp: row.createdAt.toISOString(),
+    }));
+
+    return { transactions, nextCursor };
   }
 
   /**

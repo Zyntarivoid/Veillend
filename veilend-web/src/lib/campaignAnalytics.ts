@@ -16,7 +16,7 @@ export type CampaignEventPayload = {
 export type CampaignEvent = {
   id: string;
   sessionId: string;
-  ts: string;
+  ts: number;
   type: CampaignEventName;
   payload: CampaignEventPayload;
   // Backwards compatibility fields
@@ -170,7 +170,8 @@ export function trackCampaignEvent(
   const fullEvent: CampaignEvent = {
     id,
     sessionId: getSessionId(),
-    ts: timestamp,
+    // Numeric epoch-ms, matching the server's CampaignEventSchema.
+    ts: Date.now(),
     type: event,
     payload: {
       path: window.location.pathname,

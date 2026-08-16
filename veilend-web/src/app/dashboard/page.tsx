@@ -85,7 +85,7 @@ export default async function DashboardPage() {
   preloadDashboardData(walletAddress);
 
   return (
-    <div className="min-h-screen bg-background">
+    <main className="min-h-screen bg-background">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, '\\u003c') }}
@@ -139,6 +139,6 @@ export default async function DashboardPage() {
           </Suspense>
         </Section>
       </Container>
-    </div>
+    </main>
   );
 }

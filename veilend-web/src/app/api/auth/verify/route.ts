@@ -1,15 +1,36 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
+import { z } from 'zod';
+import { parseOr422 } from '@/lib/server/validation';
+import { captureException } from '@/lib/server/telemetry';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
+// Reuses the same shared helper as /api/campaign-events; new auth
+// endpoints (connect/logout) should follow this pattern too.
+const VerifyRequestSchema = z.object({
+  walletAddress: z.string().min(1),
+  signature: z.string().min(1),
+});
+
 export async function POST(request: Request) {
   try {
-    const { walletAddress, signature } = await request.json();
-
-    if (!walletAddress || !signature) {
-      return NextResponse.json({ error: 'walletAddress and signature are required' }, { status: 400 });
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON payload' }, { status: 400 });
     }
+
+    let parsed: { data: z.infer<typeof VerifyRequestSchema> };
+    try {
+      parsed = await parseOr422(VerifyRequestSchema, body);
+    } catch (err) {
+      if (err instanceof Response) return err;
+      throw err;
+    }
+
+    const { walletAddress, signature } = parsed.data;
 
     const cookieStore = await cookies();
     const nonceCookie = cookieStore.get(`nonce_${walletAddress}`);
@@ -57,7 +78,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(data);
   } catch (error) {
-    console.error('Verify error:', error);
+    captureException(error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }

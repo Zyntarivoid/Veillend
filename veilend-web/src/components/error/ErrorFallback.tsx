@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Bug, Home, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -9,7 +9,7 @@ const REPORT_ISSUE_URL =
 
 interface ErrorFallbackProps {
   error: Error & { digest?: string };
-  reset: () => void;
+  reset: () => void | Promise<void>;
   title?: string;
   description?: string;
   showHome?: boolean;
@@ -33,14 +33,24 @@ export default function ErrorFallback({
   showReport = true,
 }: ErrorFallbackProps) {
   const [isResetting, setIsResetting] = useState(false);
+  const resettingRef = useRef(false);
 
   useEffect(() => {
     captureError(error);
   }, [error]);
 
-  const handleReset = () => {
+  const handleReset = async () => {
+    // The ref guards against duplicate submissions even when two clicks land
+    // in the same tick before React commits the state update.
+    if (resettingRef.current) return;
+    resettingRef.current = true;
     setIsResetting(true);
-    reset();
+    try {
+      await reset();
+    } finally {
+      resettingRef.current = false;
+      setIsResetting(false);
+    }
   };
 
   return (
@@ -54,7 +64,7 @@ export default function ErrorFallback({
         <p className="mb-6 font-mono text-xs text-muted-foreground">Error ID: {error.digest}</p>
       )}
       <div className="flex flex-wrap items-center justify-center gap-3">
-        <Button onClick={handleReset} aria-busy={isResetting} className="gap-2">
+        <Button onClick={handleReset} aria-busy={isResetting} aria-label="Retry loading" className="gap-2">
           <RefreshCw className={isResetting ? 'animate-spin' : ''} aria-hidden="true" />
           Try Again
         </Button>

@@ -137,6 +137,9 @@ export function WalletConnect({
         onClick={() => setIsModalOpen(true)}
         disabled={isLoading || isConnecting}
         className={className}
+        aria-haspopup="dialog"
+        aria-expanded={isModalOpen}
+        aria-controls="wallet-connect-dialog"
       >
         {isLoading || isConnecting ? (
           <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -181,6 +184,9 @@ export function WalletConnect({
               disabled={isLoading || isConnecting}
               className="w-full flex items-center justify-center gap-2 py-6 text-base"
               size="lg"
+              aria-haspopup="dialog"
+              aria-expanded={isModalOpen}
+              aria-controls="wallet-connect-dialog"
             >
               {isLoading || isConnecting ? (
                 <Loader2 className="h-5 w-5 animate-spin" />
@@ -227,6 +233,9 @@ export function WalletConnect({
         onClick={() => setIsModalOpen(true)}
         disabled={isLoading || isConnecting}
         className={className}
+        aria-haspopup="dialog"
+        aria-expanded={isModalOpen}
+        aria-controls="wallet-connect-dialog"
       >
         {isLoading || isConnecting ? (
           <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -238,6 +247,7 @@ export function WalletConnect({
 
       <Dialog open={isModalOpen} onOpenChange={handleOpenChange}>
         <DialogContent
+          id="wallet-connect-dialog"
           className="sm:max-w-md bg-slate-950 border-slate-800 text-slate-100"
           aria-describedby="wallet-connect-description"
         >

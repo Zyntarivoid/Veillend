@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Container, Flex, Section } from '@/components/Layout';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -12,6 +12,9 @@ interface ErrorProps {
 }
 
 export default function DashboardError({ error, reset }: ErrorProps) {
+  const [isResetting, setIsResetting] = useState(false);
+  const resettingRef = useRef(false);
+
   useEffect(() => {
     // Log the error to an error reporting service
     console.error('Dashboard Error:', error);
@@ -19,6 +22,18 @@ export default function DashboardError({ error, reset }: ErrorProps) {
 
   const isAuthError = error.message?.includes('address') || error.message?.includes('wallet');
   const isNetworkError = error.message?.includes('fetch') || error.message?.includes('network');
+
+  const handleReset = async () => {
+    if (resettingRef.current) return;
+    resettingRef.current = true;
+    setIsResetting(true);
+    try {
+      await reset();
+    } finally {
+      resettingRef.current = false;
+      setIsResetting(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -38,7 +53,7 @@ export default function DashboardError({ error, reset }: ErrorProps) {
                     ? 'Unable to load dashboard data. Please ensure your wallet is properly connected and try again.'
                     : isNetworkError
                     ? 'Network connection issue. Please check your internet connection and try again.'
-                    : error.message || 'An unexpected error occurred while loading the dashboard.'
+                    : 'An unexpected error occurred while loading the dashboard.'
                   }
                 </p>
                 {error.digest && (
@@ -51,10 +66,12 @@ export default function DashboardError({ error, reset }: ErrorProps) {
 
             <div className="flex gap-4">
               <Button
-                onClick={reset}
+                onClick={handleReset}
+                aria-busy={isResetting}
+                aria-label="Retry loading dashboard"
                 className="flex items-center gap-2"
               >
-                <RefreshCw className="h-4 w-4" />
+                <RefreshCw className={`h-4 w-4 ${isResetting ? 'animate-spin' : ''}`} aria-hidden="true" />
                 Try Again
               </Button>
               <Button

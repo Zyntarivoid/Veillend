@@ -10,6 +10,11 @@ export interface WalletInfo {
   publicKey: string;
 }
 
+export interface WalletHealthInfo {
+  available: boolean;
+  address: string | null;
+}
+
 export interface WalletConnectionMessage {
   title: string;
   description: string;
@@ -59,6 +64,32 @@ export const getWalletConnectionMessage = (
 export const isFreighterInstalled = (): boolean => {
   if (typeof window === "undefined") return false;
   return !!(window as Window & { freighter?: unknown }).freighter;
+};
+
+/**
+ * Lightweight, non-interactive wallet health probe.
+ *
+ * Reports whether Freighter is installed, unlocked/authorised, and which
+ * address it currently exposes. It never throws and never prompts the user,
+ * so it is safe to run on a polling interval. Any failure (extension missing,
+ * wallet locked, address unavailable) collapses into `available: false`.
+ */
+export const getFreighterHealth = async (): Promise<WalletHealthInfo> => {
+  if (!isFreighterInstalled()) {
+    return { available: false, address: null };
+  }
+
+  try {
+    const connected = await isConnected();
+    if (!connected || !connected.isConnected) {
+      return { available: false, address: null };
+    }
+
+    const address = await getFreighterAddress();
+    return { available: Boolean(address), address: address || null };
+  } catch {
+    return { available: false, address: null };
+  }
 };
 
 /**

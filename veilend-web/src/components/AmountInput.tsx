@@ -90,7 +90,8 @@ export function AmountInput({
             type="button"
             onClick={handleMax}
             disabled={disabled}
-            className="text-[10px] font-mono font-bold uppercase tracking-wider text-indigo-400 hover:text-indigo-300 disabled:opacity-40"
+            aria-label="Use maximum available amount"
+            className="rounded text-[10px] font-mono font-bold uppercase tracking-wider text-indigo-400 hover:text-indigo-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:opacity-40"
           >
             Max
           </button>
