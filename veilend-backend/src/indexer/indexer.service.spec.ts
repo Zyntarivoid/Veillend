@@ -1,12 +1,13 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
 import { Test, TestingModule } from '@nestjs/testing';
+import { ConflictException } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
 import { IndexerService } from './indexer.service';
 import { IndexerRepository } from './indexer.repository';
 import { SorobanRpcService } from '../stellar/soroban-rpc.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { scValToNative } from '@stellar/stellar-sdk';
 
-// Mock the scValToNative helper from SDK
 jest.mock('@stellar/stellar-sdk', () => {
   const original = jest.requireActual('@stellar/stellar-sdk');
   return {
@@ -29,6 +30,10 @@ describe('IndexerService', () => {
     updatePosition: jest.Mock;
     setAssetSupported: jest.Mock;
     resetDatabase: jest.Mock;
+    resetDatabaseScoped: jest.Mock;
+  };
+  let mockPrisma: {
+    adminAuditLog: { create: jest.Mock };
   };
 
   beforeEach(async () => {
@@ -51,6 +56,11 @@ describe('IndexerService', () => {
       updatePosition: jest.fn().mockResolvedValue(undefined),
       setAssetSupported: jest.fn().mockResolvedValue(undefined),
       resetDatabase: jest.fn().mockResolvedValue(undefined),
+      resetDatabaseScoped: jest.fn().mockResolvedValue(undefined),
+    };
+
+    mockPrisma = {
+      adminAuditLog: { create: jest.fn().mockResolvedValue({}) },
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -86,6 +96,10 @@ describe('IndexerService', () => {
             getClient: jest.fn().mockReturnValue(mockRpcClient),
           },
         },
+        {
+          provide: PrismaService,
+          useValue: mockPrisma,
+        },
       ],
     }).compile();
 
@@ -103,7 +117,6 @@ describe('IndexerService', () => {
       });
       mockRpcClient.getLatestLedger.mockResolvedValueOnce({ sequence: 25 });
 
-      // Mock an event return
       const mockEvent = {
         id: 'evt-1',
         topic: ['veillend', 'deposit', 'user-addr', 'asset-addr'],
@@ -118,7 +131,6 @@ describe('IndexerService', () => {
         cursor: 'next-page-cursor',
       });
 
-      // Mock mock scValToNative return behavior
       const mockScValToNative = scValToNative as jest.Mock;
       mockScValToNative.mockImplementation((val) => val);
 
@@ -158,7 +170,6 @@ describe('IndexerService', () => {
 
       await service.runIndexer();
 
-      // Should check events starting from 20 (oldestLedger)
       expect(mockRpcClient.getEvents).toHaveBeenCalledWith(
         expect.objectContaining({
           startLedger: 20,
@@ -263,7 +274,6 @@ describe('IndexerService', () => {
       };
       mockRpcClient.getEvents.mockResolvedValueOnce({ events: [mockEvent] });
 
-      // Return false to simulate a duplicate event
       mockRepository.saveTransaction.mockResolvedValueOnce(false);
 
       await service.runIndexer();
@@ -274,8 +284,172 @@ describe('IndexerService', () => {
           amount: '500',
         }),
       );
-      // It should NOT call updatePosition
       expect(mockRepository.updatePosition).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('forceReplay', () => {
+    it('calls resetDatabase for full scope', async () => {
+      await service.forceReplay({
+        scope: 'full',
+        actorWallet: 'GADMIN',
+        confirmFullWipe: true,
+      });
+
+      expect(mockRepository.resetDatabase).toHaveBeenCalled();
+      expect(mockRepository.resetDatabaseScoped).not.toHaveBeenCalled();
+      expect(mockPrisma.adminAuditLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            actorWallet: 'GADMIN',
+            action: 'INDEXER_REPLAY',
+          }),
+        }),
+      );
+    });
+
+    it('calls resetDatabaseScoped for bad-only scope', async () => {
+      await service.forceReplay({
+        scope: 'bad-only',
+        actorWallet: 'GADMIN',
+        confirmFullWipe: false,
+      });
+
+      expect(mockRepository.resetDatabaseScoped).toHaveBeenCalled();
+      expect(mockRepository.resetDatabase).not.toHaveBeenCalled();
+    });
+
+    it('throws ConflictException when isProcessing is true', async () => {
+      // Simulate indexer running by calling runIndexer which sets isProcessing
+      mockRpcClient.getLatestLedger.mockResolvedValue({ sequence: 0 });
+      mockRepository.getCheckpoint.mockResolvedValue({ lastIndexedLedger: 0 });
+
+      // Start runIndexer but don't await it (it will set isProcessing = true)
+      const runPromise = service.runIndexer();
+
+      await expect(
+        service.forceReplay({
+          scope: 'bad-only',
+          actorWallet: 'GADMIN',
+          confirmFullWipe: false,
+        }),
+      ).rejects.toThrow(ConflictException);
+
+      // Wait for runIndexer to complete
+      await runPromise;
+    });
+
+    it('throws ConflictException when replay is already in progress', async () => {
+      // Start a replay but delay its completion
+      let resolveReset: () => void;
+      mockRepository.resetDatabaseScoped.mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveReset = resolve;
+          }),
+      );
+
+      const replay1 = service
+        .forceReplay({
+          scope: 'bad-only',
+          actorWallet: 'GADMIN1',
+          confirmFullWipe: false,
+        })
+        .catch(() => {});
+
+      // Give the first replay time to acquire the lock
+      await new Promise((r) => setTimeout(r, 10));
+
+      await expect(
+        service.forceReplay({
+          scope: 'bad-only',
+          actorWallet: 'GADMIN2',
+          confirmFullWipe: false,
+        }),
+      ).rejects.toThrow(ConflictException);
+
+      // Release the first replay
+      resolveReset!();
+      await replay1;
+    });
+
+    it('releases replay guard after failure', async () => {
+      mockRepository.resetDatabaseScoped.mockRejectedValueOnce(
+        new Error('db error'),
+      );
+
+      await expect(
+        service.forceReplay({
+          scope: 'bad-only',
+          actorWallet: 'GADMIN',
+          confirmFullWipe: false,
+        }),
+      ).rejects.toThrow('db error');
+
+      // Audit log should still be created with failure outcome
+      expect(mockPrisma.adminAuditLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            payload: expect.objectContaining({
+              outcome: 'failure',
+              failureReason: 'db error',
+            }),
+          }),
+        }),
+      );
+
+      // Guard should be released — a second call should proceed
+      mockRepository.resetDatabaseScoped.mockResolvedValueOnce(undefined);
+      await service.forceReplay({
+        scope: 'bad-only',
+        actorWallet: 'GADMIN',
+        confirmFullWipe: false,
+      });
+
+      expect(mockRepository.resetDatabaseScoped).toHaveBeenCalledTimes(2);
+    });
+
+    it('audit log includes timing and scope information', async () => {
+      await service.forceReplay({
+        scope: 'full',
+        actorWallet: 'GADMIN',
+        confirmFullWipe: true,
+      });
+
+      expect(mockPrisma.adminAuditLog.create).toHaveBeenCalledWith({
+        data: {
+          actorWallet: 'GADMIN',
+          action: 'INDEXER_REPLAY',
+          target: 'replay:full',
+          payload: {
+            scope: 'full',
+            confirmFullWipe: true,
+            startTime: expect.any(String),
+            endTime: expect.any(String),
+            durationMs: expect.any(Number),
+            outcome: 'success',
+            failureReason: null,
+          },
+        },
+      });
+    });
+  });
+
+  describe('getIsProcessing', () => {
+    it('returns false initially', () => {
+      expect(service.getIsProcessing()).toBe(false);
+    });
+
+    it('returns true while indexer is running', async () => {
+      mockRpcClient.getLatestLedger.mockResolvedValue({ sequence: 0 });
+      mockRepository.getCheckpoint.mockResolvedValue({ lastIndexedLedger: 0 });
+
+      const runPromise = service.runIndexer();
+      // Check immediately (before await) — isProcessing should be true
+      expect(service.getIsProcessing()).toBe(true);
+
+      await runPromise;
+      expect(service.getIsProcessing()).toBe(false);
     });
   });
 });

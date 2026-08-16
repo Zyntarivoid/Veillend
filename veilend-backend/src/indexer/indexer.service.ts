@@ -3,27 +3,44 @@ import {
   Logger,
   OnApplicationBootstrap,
   OnModuleDestroy,
+  ConflictException,
 } from '@nestjs/common';
+import { AdminAction } from '@prisma/client';
 import { AppConfigService } from '../config/app-config.service';
 import { scValToNative, rpc, xdr } from '@stellar/stellar-sdk';
 import { SorobanRpcService } from '../stellar/soroban-rpc.service';
+import { PrismaService } from '../prisma/prisma.service';
 import {
   IndexerRepository,
   IndexerTransaction,
   IndexerPosition,
 } from './indexer.repository';
 
+export type ReplayScope = 'full' | 'bad-only';
+
+export interface ReplayOptions {
+  scope: ReplayScope;
+  actorWallet: string;
+  confirmFullWipe: boolean;
+}
+
 @Injectable()
 export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(IndexerService.name);
   private isProcessing = false;
+  private replayRunning = false;
   private pollTimeout?: NodeJS.Timeout;
 
   constructor(
     private readonly configService: AppConfigService,
     private readonly rpcService: SorobanRpcService,
     private readonly repository: IndexerRepository,
+    private readonly prisma: PrismaService,
   ) {}
+
+  getIsProcessing(): boolean {
+    return this.isProcessing;
+  }
 
   onApplicationBootstrap() {
     this.logger.log('Starting Soroban event indexer polling loop...');
@@ -302,11 +319,71 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
     return this.repository.getPositions(userAddress);
   }
 
-  async forceReplay(): Promise<void> {
-    await this.repository.resetDatabase();
-    this.logger.log(
-      'Force replay requested. Database reset and indexing from start ledger.',
-    );
+  async forceReplay(options: ReplayOptions): Promise<void> {
+    if (this.isProcessing) {
+      throw new ConflictException(
+        'Indexer already running; replay not started',
+      );
+    }
+
+    // Atomic check-and-set: synchronous, no await between check and set.
+    if (this.replayRunning) {
+      throw new ConflictException('Replay already in progress');
+    }
+    this.replayRunning = true;
+
+    const startTime = new Date();
+    let outcome: string = 'unknown';
+    let failureReason: string | null = null;
+
+    try {
+      if (options.scope === 'full') {
+        await this.repository.resetDatabase();
+      } else {
+        await this.repository.resetDatabaseScoped();
+      }
+
+      this.logger.log(
+        `Force replay requested (scope=${options.scope}). Database reset and indexing from start ledger.`,
+      );
+
+      outcome = 'success';
+    } catch (error) {
+      outcome = 'failure';
+      failureReason = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Replay failed: ${failureReason}`);
+      throw error;
+    } finally {
+      const endTime = new Date();
+      const durationMs = endTime.getTime() - startTime.getTime();
+
+      // Audit log every replay attempt regardless of outcome
+      try {
+        await this.prisma.adminAuditLog.create({
+          data: {
+            actorWallet: options.actorWallet,
+            action: AdminAction.INDEXER_REPLAY,
+            target: `replay:${options.scope}`,
+            payload: {
+              scope: options.scope,
+              confirmFullWipe: options.confirmFullWipe,
+              startTime: startTime.toISOString(),
+              endTime: endTime.toISOString(),
+              durationMs,
+              outcome,
+              failureReason,
+            },
+          },
+        });
+      } catch (auditError) {
+        this.logger.error(
+          `Failed to write replay audit log: ${auditError instanceof Error ? auditError.message : String(auditError)}`,
+        );
+      }
+
+      this.replayRunning = false;
+    }
+
     // Trigger run immediately in the background
     void this.runIndexer();
   }

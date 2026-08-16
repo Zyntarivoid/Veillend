@@ -1,9 +1,11 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import { BadRequestException } from '@nestjs/common';
 import { IndexerController } from './indexer.controller';
 import { IndexerService } from './indexer.service';
 import { IndexerRepository } from './indexer.repository';
+import { PrismaService } from '../prisma/prisma.service';
 
 describe('IndexerController', () => {
   let controller: IndexerController;
@@ -11,15 +13,21 @@ describe('IndexerController', () => {
     getPositions: jest.Mock;
     getTransactions: jest.Mock;
     forceReplay: jest.Mock;
+    getIsProcessing: jest.Mock;
   };
   let repository: { getCheckpoint: jest.Mock };
   let configService: { get: jest.Mock };
+
+  const mockAdminReq = {
+    user: { walletAddress: 'GADMIN123' },
+  };
 
   beforeEach(async () => {
     indexerService = {
       getPositions: jest.fn(),
       getTransactions: jest.fn(),
       forceReplay: jest.fn(),
+      getIsProcessing: jest.fn().mockReturnValue(false),
     };
     repository = { getCheckpoint: jest.fn() };
     configService = {
@@ -32,6 +40,7 @@ describe('IndexerController', () => {
         { provide: IndexerService, useValue: indexerService },
         { provide: IndexerRepository, useValue: repository },
         { provide: ConfigService, useValue: configService },
+        { provide: PrismaService, useValue: {} },
       ],
     }).compile();
 
@@ -70,12 +79,57 @@ describe('IndexerController', () => {
     });
   });
 
-  it('POST /indexer/replay triggers a replay and returns a message', async () => {
-    const result = await controller.triggerReplay();
+  describe('POST /indexer/replay', () => {
+    it('triggers a scoped replay with default parameters', async () => {
+      indexerService.forceReplay.mockResolvedValue(undefined);
 
-    expect(indexerService.forceReplay).toHaveBeenCalled();
-    expect(result).toEqual(
-      expect.objectContaining({ message: expect.any(String) }),
-    );
+      const result = await controller.triggerReplay(
+        'bad-only',
+        undefined,
+        mockAdminReq as any,
+      );
+
+      expect(indexerService.forceReplay).toHaveBeenCalledWith({
+        scope: 'bad-only',
+        actorWallet: 'GADMIN123',
+        confirmFullWipe: false,
+      });
+      expect(result).toEqual(
+        expect.objectContaining({
+          message: expect.stringContaining('bad-only'),
+        }),
+      );
+    });
+
+    it('triggers a full wipe when scope=full and confirmation header is yes', async () => {
+      indexerService.forceReplay.mockResolvedValue(undefined);
+
+      const result = await controller.triggerReplay(
+        'full',
+        'yes',
+        mockAdminReq as any,
+      );
+
+      expect(indexerService.forceReplay).toHaveBeenCalledWith({
+        scope: 'full',
+        actorWallet: 'GADMIN123',
+        confirmFullWipe: true,
+      });
+      expect(result).toEqual(
+        expect.objectContaining({ message: expect.stringContaining('full') }),
+      );
+    });
+
+    it('throws BadRequestException when scope=full without confirmation header', async () => {
+      await expect(
+        controller.triggerReplay('full', undefined, mockAdminReq as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException for an invalid scope value', async () => {
+      await expect(
+        controller.triggerReplay('invalid', undefined, mockAdminReq as any),
+      ).rejects.toThrow(BadRequestException);
+    });
   });
 });

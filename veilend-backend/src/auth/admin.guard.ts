@@ -2,6 +2,7 @@ import {
   Injectable,
   CanActivate,
   ExecutionContext,
+  ForbiddenException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
@@ -38,7 +39,7 @@ export class AdminGuard implements CanActivate {
     });
 
     if (!admin) {
-      throw new UnauthorizedException('User is not an admin');
+      throw new ForbiddenException('User is not an admin');
     }
 
     return true;

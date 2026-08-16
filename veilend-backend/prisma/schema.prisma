@@ -193,6 +193,7 @@ enum AdminAction {
   CONFIGURE_ASSET
   SET_ORACLE_PRICE
   SET_MIN_COLLATERAL_RATIO
+  INDEXER_REPLAY
 }
 
 model AdminAuditLog {

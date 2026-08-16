@@ -299,4 +299,41 @@ describe('IndexerRepository', () => {
       expect(prisma.user.upsert).not.toHaveBeenCalled();
     });
   });
+
+  describe('resetDatabaseScoped', () => {
+    it('only deletes post-checkpoint transactions and unsupported-asset positions', async () => {
+      prisma.indexerCheckpoint.findUnique.mockResolvedValue({
+        id: 'global',
+        lastIndexedLedger: 50,
+      });
+
+      await repository.resetDatabaseScoped();
+
+      expect(prisma.transactionHistory.deleteMany).toHaveBeenCalledWith({
+        where: {
+          sorobanEventId: { not: null },
+          ledgerSequence: { gt: 50 },
+        },
+      });
+      expect(prisma.position.deleteMany).toHaveBeenCalledWith({
+        where: { asset: { isSupported: false } },
+      });
+      expect(prisma.indexerCheckpoint.deleteMany).toHaveBeenCalledWith({
+        where: { id: 'global' },
+      });
+    });
+
+    it('uses ledger 0 as checkpoint when no checkpoint exists', async () => {
+      prisma.indexerCheckpoint.findUnique.mockResolvedValue(null);
+
+      await repository.resetDatabaseScoped();
+
+      expect(prisma.transactionHistory.deleteMany).toHaveBeenCalledWith({
+        where: {
+          sorobanEventId: { not: null },
+          ledgerSequence: { gt: 0 },
+        },
+      });
+    });
+  });
 });

@@ -388,4 +388,32 @@ export class IndexerRepository {
       }),
     ]);
   }
+
+  /**
+   * Scoped reset: only removes rows beyond the current checkpoint and
+   * positions for unsupported assets. Supported-asset data is preserved
+   * unless the caller explicitly requests a full wipe via resetDatabase().
+   */
+  async resetDatabaseScoped(): Promise<void> {
+    this.logger.log(
+      'Performing scoped reset: removing post-checkpoint data only...',
+    );
+    const checkpoint = await this.getCheckpoint();
+    const lastLedger = checkpoint.lastIndexedLedger;
+
+    await this.prisma.$transaction([
+      this.prisma.transactionHistory.deleteMany({
+        where: {
+          sorobanEventId: { not: null },
+          ledgerSequence: { gt: lastLedger },
+        },
+      }),
+      this.prisma.position.deleteMany({
+        where: { asset: { isSupported: false } },
+      }),
+      this.prisma.indexerCheckpoint.deleteMany({
+        where: { id: CHECKPOINT_ID },
+      }),
+    ]);
+  }
 }
