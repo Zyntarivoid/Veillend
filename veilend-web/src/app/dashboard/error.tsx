@@ -18,7 +18,12 @@ export default function DashboardError({ error, reset }: ErrorProps) {
   }, [error]);
 
   const isAuthError = error.message?.includes('address') || error.message?.includes('wallet');
-  const isNetworkError = error.message?.includes('fetch') || error.message?.includes('network');
+  const isNetworkError =
+    error.name === 'NetworkError' ||
+    (error.name === 'HttpError' && error.message.includes('HTTP 5')) ||
+    error.message?.includes('fetch') ||
+    error.message?.includes('network');
+  const isValidationError = error.name === 'ValidationError';
 
   return (
     <div className="min-h-screen bg-background">
@@ -28,16 +33,19 @@ export default function DashboardError({ error, reset }: ErrorProps) {
             <Alert variant="destructive" className="w-full">
               <AlertCircle className="h-4 w-4" />
               <AlertTitle className="text-lg font-semibold">
-                {isAuthError ? 'Wallet Connection Error' : 
-                 isNetworkError ? 'Network Error' : 
+                {isAuthError ? 'Wallet Connection Error' :
+                 isNetworkError ? 'Network Error' :
+                 isValidationError ? 'Invalid Dashboard Data' :
                  'Dashboard Error'}
               </AlertTitle>
               <AlertDescription className="mt-2">
                 <p className="text-sm">
-                  {isAuthError 
+                  {isAuthError
                     ? 'Unable to load dashboard data. Please ensure your wallet is properly connected and try again.'
                     : isNetworkError
                     ? 'Network connection issue. Please check your internet connection and try again.'
+                    : isValidationError
+                    ? 'The indexer returned data that could not be validated. Amounts are shown as placeholders.'
                     : error.message || 'An unexpected error occurred while loading the dashboard.'
                   }
                 </p>
@@ -50,13 +58,23 @@ export default function DashboardError({ error, reset }: ErrorProps) {
             </Alert>
 
             <div className="flex gap-4">
-              <Button
-                onClick={reset}
-                className="flex items-center gap-2"
-              >
-                <RefreshCw className="h-4 w-4" />
-                Try Again
-              </Button>
+              {isNetworkError ? (
+                <Button
+                  onClick={reset}
+                  className="flex items-center gap-2"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  Retry
+                </Button>
+              ) : (
+                <Button
+                  onClick={reset}
+                  className="flex items-center gap-2"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  Try Again
+                </Button>
+              )}
               <Button
                 variant="outline"
                 onClick={() => window.location.href = '/'}

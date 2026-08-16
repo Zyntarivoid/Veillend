@@ -15,27 +15,24 @@
  */
 
 import { Keypair } from "@stellar/stellar-sdk";
+import { fetchJson } from "@/lib/api/fetch-json";
+import { HttpError } from "@/lib/api/errors";
+import {
+  authNonceResponseSchema,
+  authSessionResponseSchema,
+  authSessionStorageSchema,
+  authVerifyResponseSchema,
+  type AuthSession,
+  type AuthVerifyResponse,
+} from "@/lib/schemas/auth";
 
 export const AUTH_STORAGE_KEY = "veillend_auth";
 export const WALLET_ADDRESS_KEY = "veillend_wallet_address";
 
 const DEFAULT_API_URL = "http://localhost:3001";
 
-export interface AuthSession {
-  address: string;
-  publicKey: string;
-  authenticated: boolean;
-  sessionId?: string;
-  accessToken?: string;
-  expiresAt?: string;
-  lastVerifiedAt?: string;
-}
-
-export interface AuthVerificationResult {
-  accessToken: string;
-  sessionId?: string;
-  expiresAt?: string;
-}
+export type { AuthSession };
+export type AuthVerificationResult = AuthVerifyResponse;
 
 export const getApiBaseUrl = (): string =>
   process.env.NEXT_PUBLIC_API_URL || DEFAULT_API_URL;
@@ -54,7 +51,9 @@ const readSession = (storage: Storage): AuthSession | null => {
   const raw = storage.getItem(AUTH_STORAGE_KEY);
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as AuthSession;
+    const parsed: unknown = JSON.parse(raw);
+    const result = authSessionStorageSchema.safeParse(parsed);
+    return result.success ? result.data : null;
   } catch {
     return null;
   }
@@ -79,20 +78,15 @@ export const clearAuthSession = (): void => {
  * Request a fresh one-time nonce bound to the wallet address from the backend.
  */
 export const requestAuthNonce = async (address: string): Promise<string> => {
-  const response = await fetch(`${getApiBaseUrl()}/auth/nonce`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ walletAddress: address }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Challenge request failed (HTTP ${response.status})`);
-  }
-
-  const data = (await response.json()) as { nonce?: string };
-  if (!data.nonce) {
-    throw new Error("Backend did not return a nonce");
-  }
+  const data = await fetchJson(
+    `${getApiBaseUrl()}/auth/nonce`,
+    authNonceResponseSchema,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ walletAddress: address }),
+    }
+  );
 
   return data.nonce;
 };
@@ -106,22 +100,15 @@ export const verifyAuthSignature = async (
   nonce: string,
   signature: string
 ): Promise<AuthVerificationResult> => {
-  const response = await fetch(`${getApiBaseUrl()}/auth/verify`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ walletAddress: address, nonce, signature }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Signature verification failed (HTTP ${response.status})`);
-  }
-
-  const data = (await response.json()) as AuthVerificationResult;
-  if (!data?.accessToken) {
-    throw new Error("Backend did not return an access token");
-  }
-
-  return data;
+  return fetchJson(
+    `${getApiBaseUrl()}/auth/verify`,
+    authVerifyResponseSchema,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ walletAddress: address, nonce, signature }),
+    }
+  );
 };
 
 /**
@@ -131,18 +118,20 @@ export const verifyAuthSignature = async (
 export const fetchSessionStatus = async (
   accessToken: string
 ): Promise<{ walletAddress: string } | null> => {
-  const response = await fetch(`${getApiBaseUrl()}/auth/session`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-
-  if (response.status === 401 || response.status === 403) {
-    return null;
+  try {
+    return await fetchJson(
+      `${getApiBaseUrl()}/auth/session`,
+      authSessionResponseSchema,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }
+    );
+  } catch (error) {
+    if (error instanceof HttpError && (error.status === 401 || error.status === 403)) {
+      return null;
+    }
+    throw error;
   }
-  if (!response.ok) {
-    throw new Error(`Session check failed (HTTP ${response.status})`);
-  }
-
-  return (await response.json()) as { walletAddress: string };
 };
 
 /**

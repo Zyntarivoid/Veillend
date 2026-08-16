@@ -1,28 +1,28 @@
 import { Container, Flex, Grid, Section } from '@/components/Layout';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { AmountDisplay } from '@/components/AmountDisplay';
+import { DashboardPortfolioCards } from '@/components/DashboardPortfolioCards';
+import { DashboardRetryButton } from '@/components/DashboardRetryButton';
 import { fetchDashboardData } from '@/lib/api/dashboard';
+import { HttpError, NetworkError, ValidationError } from '@/lib/api/errors';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 
 export const dynamic = 'force-dynamic';
 
-// Helper to get wallet address from session/cookie
 async function getWalletAddress(): Promise<string | null> {
-  // In a production app, this would get the address from a secure session
-  // For now, we'll check for a wallet address in the headers
   const headersList = await headers();
   const walletAddress = headersList.get('x-wallet-address');
-  
+
   if (walletAddress && walletAddress.startsWith('G')) {
     return walletAddress;
   }
-  
+
   return null;
 }
 
-// Helper functions moved outside component
 const getActionBadgeClassName = (action: string): string | undefined => {
   switch (action) {
     case 'DEPOSIT':
@@ -38,64 +38,47 @@ const getActionBadgeClassName = (action: string): string | undefined => {
   }
 };
 
-const formatUsd = (val: number): string =>
-  new Intl.NumberFormat('en-US', { 
-    style: 'currency', 
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(val);
-
-const formatHealthFactor = (factor: number): string => {
-  if (factor === Infinity) return '∞';
-  return factor.toFixed(2);
-};
-
 export default async function DashboardPage() {
   const walletAddress = await getWalletAddress();
 
-  // Redirect to home if no wallet is connected
   if (!walletAddress) {
     redirect('/');
   }
 
-  let data;
-  let error: string | null = null;
+  let data = null;
+  let error: unknown = null;
 
   try {
     data = await fetchDashboardData(walletAddress);
   } catch (err) {
-    error = err instanceof Error ? err.message : 'Failed to load dashboard data';
+    error = err;
     data = null;
   }
 
-  const { portfolio, recentActivity } = data || {
-    portfolio: {
-      totalBalanceUsd: 0,
-      healthFactor: Infinity,
-      totalDepositedUsd: 0,
-      totalBorrowedUsd: 0,
-      depositedAssets: [],
-      borrowedAssets: [],
-      lastUpdated: new Date().toISOString(),
-    },
-    recentActivity: [],
-  };
+  const isValidationError = error instanceof ValidationError;
+  const isNetworkError =
+    error instanceof NetworkError || (error instanceof HttpError && error.retryable);
 
-  // Handle error state
-  if (error) {
+  if (isNetworkError) {
     return (
       <div className="min-h-screen bg-background">
         <Container className="pb-16 pt-20">
           <Alert variant="destructive">
+            <AlertTitle>Network Error</AlertTitle>
             <AlertDescription>
-              {error}
+              {error instanceof Error ? error.message : 'Failed to load dashboard data'}
             </AlertDescription>
           </Alert>
+          <div className="mt-4">
+            <DashboardRetryButton />
+          </div>
         </Container>
       </div>
     );
   }
+
+  const portfolio = data?.portfolio ?? null;
+  const recentActivity = data?.recentActivity ?? [];
 
   return (
     <div className="min-h-screen bg-background">
@@ -110,62 +93,30 @@ export default async function DashboardPage() {
                   Wallet: {walletAddress.slice(0, 6)}...{walletAddress.slice(-6)}
                 </span>
               </p>
-              <p className="text-xs text-text-muted mt-1">
-                Last updated: {new Date(portfolio.lastUpdated).toLocaleString()}
-              </p>
+              {portfolio ? (
+                <p className="text-xs text-text-muted mt-1">
+                  Last updated: {new Date(portfolio.lastUpdated).toLocaleString()}
+                </p>
+              ) : null}
             </div>
+            {isValidationError ? (
+              <Alert variant="destructive">
+                <AlertTitle>Invalid dashboard data</AlertTitle>
+                <AlertDescription>
+                  Some amounts could not be validated and are shown as placeholders.
+                </AlertDescription>
+              </Alert>
+            ) : null}
           </Flex>
         </Section>
 
-        {/* Portfolio Section */}
         <Section>
-          <Grid columns={3} gap="lg">
-            <Card>
-              <CardHeader>
-                <CardTitle>Total Balance</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className={`text-3xl font-bold ${portfolio.totalBalanceUsd >= 0 ? 'text-text' : 'text-error'}`}>
-                  {formatUsd(portfolio.totalBalanceUsd)}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Total Deposited</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold text-success">
-                  {formatUsd(portfolio.totalDepositedUsd)}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <Flex justify="between" align="center">
-                  <CardTitle>Total Borrowed</CardTitle>
-                  <Badge
-                    variant={portfolio.healthFactor < 1.1 && portfolio.healthFactor !== Infinity ? 'destructive' : 'secondary'}
-                    className={portfolio.healthFactor >= 1.1 || portfolio.healthFactor === Infinity 
-                      ? 'bg-emerald-500/10 text-emerald-400' 
-                      : undefined}
-                  >
-                    Health: {formatHealthFactor(portfolio.healthFactor)}
-                  </Badge>
-                </Flex>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold text-error">
-                  {formatUsd(portfolio.totalBorrowedUsd)}
-                </div>
-              </CardContent>
-            </Card>
-          </Grid>
+          <DashboardPortfolioCards
+            portfolio={portfolio}
+            amountWarning={error instanceof ValidationError ? error.message : undefined}
+          />
         </Section>
 
-        {/* Asset Breakdown */}
         <Section>
           <Grid columns={2} gap="lg">
             <Card>
@@ -173,7 +124,7 @@ export default async function DashboardPage() {
                 <CardTitle>Deposited Assets</CardTitle>
               </CardHeader>
               <CardContent>
-                {portfolio.depositedAssets.length === 0 ? (
+                {!portfolio || portfolio.depositedAssets.length === 0 ? (
                   <p className="text-text-secondary">No deposited assets found.</p>
                 ) : (
                   <Flex direction="col" gap="md">
@@ -191,11 +142,13 @@ export default async function DashboardPage() {
                           <div>
                             <div className="font-semibold text-text">{asset.assetName}</div>
                             <div className="text-sm text-text-secondary">
-                              {asset.balance.toLocaleString(undefined, { maximumFractionDigits: 4 })} {asset.assetSymbol}
+                              <AmountDisplay value={asset.balance} format="plain" /> {asset.assetSymbol}
                             </div>
                           </div>
                         </Flex>
-                        <div className="font-semibold text-text">{formatUsd(asset.usdValue)}</div>
+                        <div className="font-semibold text-text">
+                          <AmountDisplay value={asset.usdValue} />
+                        </div>
                       </Flex>
                     ))}
                   </Flex>
@@ -208,7 +161,7 @@ export default async function DashboardPage() {
                 <CardTitle>Borrowed Assets</CardTitle>
               </CardHeader>
               <CardContent>
-                {portfolio.borrowedAssets.length === 0 ? (
+                {!portfolio || portfolio.borrowedAssets.length === 0 ? (
                   <p className="text-text-secondary">No borrowed assets.</p>
                 ) : (
                   <Flex direction="col" gap="md">
@@ -226,11 +179,13 @@ export default async function DashboardPage() {
                           <div>
                             <div className="font-semibold text-text">{asset.assetName}</div>
                             <div className="text-sm text-text-secondary">
-                              {asset.balance.toLocaleString(undefined, { maximumFractionDigits: 4 })} {asset.assetSymbol}
+                              <AmountDisplay value={asset.balance} format="plain" /> {asset.assetSymbol}
                             </div>
                           </div>
                         </Flex>
-                        <div className="font-semibold text-text">{formatUsd(asset.usdValue)}</div>
+                        <div className="font-semibold text-text">
+                          <AmountDisplay value={asset.usdValue} />
+                        </div>
                       </Flex>
                     ))}
                   </Flex>
@@ -240,7 +195,6 @@ export default async function DashboardPage() {
           </Grid>
         </Section>
 
-        {/* Recent Activity */}
         <Section>
           <Card>
             <CardHeader>
@@ -265,7 +219,7 @@ export default async function DashboardPage() {
                               {activity.action}
                             </Badge>
                             <span className="font-semibold text-text">
-                              {activity.amount.toLocaleString(undefined, { maximumFractionDigits: 4 })} {activity.assetSymbol}
+                              <AmountDisplay value={activity.amount} format="plain" /> {activity.assetSymbol}
                             </span>
                           </Flex>
                           <div className="text-sm text-text-secondary">
@@ -275,7 +229,7 @@ export default async function DashboardPage() {
                       </Flex>
                       <div className="text-right">
                         <div className="font-semibold text-text">
-                          {formatUsd(activity.usdValue)}
+                          <AmountDisplay value={activity.usdValue} />
                         </div>
                         <div className="text-sm text-text-secondary capitalize">
                           {activity.status.toLowerCase()}

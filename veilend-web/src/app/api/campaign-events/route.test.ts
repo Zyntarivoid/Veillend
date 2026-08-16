@@ -51,6 +51,21 @@ describe('API Route: /api/campaign-events', () => {
     });
   });
 
+  describe('Schema validation', () => {
+    it('returns 400 when the body fails the campaign event schema', async () => {
+      const req = new Request('http://localhost:3000/api/campaign-events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: 'evt-bad', type: 'not_a_campaign_event' }),
+      });
+
+      const res = await POST(req);
+      expect(res.status).toBe(400);
+      const json = await res.json();
+      expect(json.error).toBe('Unsupported campaign event');
+    });
+  });
+
   describe('Rate Limiting (Test d)', () => {
     it('returns 429 Too Many Requests on the 61st request from the same IP within 1 minute', async () => {
       const clientIp = '10.0.0.42';

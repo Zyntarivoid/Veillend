@@ -20,8 +20,8 @@ export interface AppConfig {
   apiUrl: string;
 }
 
-/** A single validation failure. */
-interface ValidationError {
+/** A single configuration validation failure. */
+interface ConfigIssue {
   variable: string;
   value: string | undefined;
   message: string;
@@ -72,7 +72,7 @@ function resolve(key: string): string {
  * can fix all issues in one go rather than discovering them one by one.
  */
 export function validateConfig(): AppConfig {
-  const errors: ValidationError[] = [];
+  const errors: ConfigIssue[] = [];
 
   // ── NEXT_PUBLIC_STELLAR_NETWORK ────────────────────────────────────────────
   const stellarNetwork = resolve("NEXT_PUBLIC_STELLAR_NETWORK");

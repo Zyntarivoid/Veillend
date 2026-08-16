@@ -1,23 +1,5 @@
 import { NextResponse } from 'next/server';
-
-const campaignEvents = [
-  'campaign_page_visit',
-  'campaign_cta_click',
-  'campaign_contributor_interest',
-] as const;
-
-type CampaignEventName = (typeof campaignEvents)[number];
-
-type CampaignEventRequest = {
-  id?: string;
-  sessionId?: string;
-  ts?: string;
-  type?: CampaignEventName;
-  event?: CampaignEventName;
-  campaign?: string;
-  timestamp?: string;
-  payload?: Record<string, unknown>;
-};
+import { campaignEventRequestSchema } from '@/lib/schemas/campaign';
 
 type SanitizedPayload = {
   path?: string;
@@ -60,10 +42,6 @@ function isDuplicateEvent(id: string): boolean {
   return false;
 }
 
-function isCampaignEventName(event: unknown): event is CampaignEventName {
-  return typeof event === 'string' && campaignEvents.includes(event as CampaignEventName);
-}
-
 function sanitizeString(value: unknown, maxLength = 160) {
   if (typeof value !== 'string') {
     return undefined;
@@ -75,8 +53,12 @@ function sanitizeString(value: unknown, maxLength = 160) {
   return trimmedValue.slice(0, maxLength);
 }
 
-function sanitizePayload(payload: CampaignEventRequest['payload']): SanitizedPayload {
-  if (!payload) {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function sanitizePayload(payload: unknown): SanitizedPayload {
+  if (!isRecord(payload)) {
     return {};
   }
   return {
@@ -162,17 +144,23 @@ export async function POST(request: Request) {
   }
 
   // 3. Parse JSON Body
-  let body: CampaignEventRequest;
+  let rawBody: unknown;
   try {
-    body = await request.json();
+    rawBody = await request.json();
   } catch {
     return NextResponse.json({ error: 'Invalid JSON payload' }, { status: 400 });
   }
 
+  const parsed = campaignEventRequestSchema.safeParse(rawBody);
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Unsupported campaign event' }, { status: 400 });
+  }
+
+  const body = parsed.data;
   const eventName = body.type || body.event;
   const campaign = body.campaign || 'grantfox-oss-stellar';
 
-  if (!isCampaignEventName(eventName) || campaign !== 'grantfox-oss-stellar') {
+  if (!eventName || campaign !== 'grantfox-oss-stellar') {
     return NextResponse.json({ error: 'Unsupported campaign event' }, { status: 400 });
   }
 

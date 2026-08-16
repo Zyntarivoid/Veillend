@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { DashboardData } from '../types/dashboard';
 import { getDashboardClient } from '../api/dashboard-client';
+import { ValidationError } from '../api/errors';
 
 export interface UseDashboardDataOptions {
   address: string | null;
@@ -99,7 +100,10 @@ export function useDashboardData(options: UseDashboardDataOptions): UseDashboard
       setIsError(true);
       setIsLoading(false);
 
-      // Exponential backoff retry logic using ref call to satisfy ESLint
+      if (err instanceof ValidationError) {
+        return;
+      }
+
       if (retryOnError && retryCount.current < maxRetries) {
         const backoffDelay = Math.min(1000 * Math.pow(2, retryCount.current), 10000);
         retryCount.current += 1;

@@ -5,7 +5,9 @@ import {
   challengeWalletAuth,
   validateStoredSession,
   createAuthSession,
+  requestAuthNonce,
 } from "./auth";
+import { ValidationError } from "@/lib/api/errors";
 
 const TEST_ADDRESS = "GBXFXNDLV4LSWA4VB7YIL5GBD7BVNR22SGBTDKMO2SBZZHDXSKZYCP7L";
 const TEST_TOKEN = "mock-access-token";
@@ -246,6 +248,13 @@ describe("challenge-response wallet handshake", () => {
       expect(session).not.toBeNull();
       expect(session?.address).toBe(TEST_ADDRESS);
       expect(localStorage.getItem(AUTH_STORAGE_KEY)).toContain(TEST_TOKEN);
+    });
+
+    it("rejects a nonce payload that fails schema validation without retrying", async () => {
+      fetchMock.mockResolvedValue(jsonResponse({ nonce: 123 }));
+
+      await expect(requestAuthNonce(TEST_ADDRESS)).rejects.toBeInstanceOf(ValidationError);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     });
   });
 });
