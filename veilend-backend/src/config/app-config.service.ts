@@ -60,4 +60,16 @@ export class AppConfigService {
       jwtSecret: this.configService.get<string>('JWT_SECRET', 'dev_secret'),
     };
   }
+
+  /**
+   * Minimum collateral ratio in basis points (bps). Mirrors the Soroban
+   * contract's `min_collateral_ratio_bps` parameter.
+   *
+   * Default 15000 = 150 % (i.e. must hold 1.5× collateral per $ borrowed).
+   *
+   * Override via env: MIN_COLLATERAL_RATIO_BPS=15000
+   */
+  get minCollateralRatioBps(): number {
+    return this.configService.get<number>('MIN_COLLATERAL_RATIO_BPS', 15000);
+  }
 }
