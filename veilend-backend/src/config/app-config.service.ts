@@ -60,4 +60,15 @@ export class AppConfigService {
       jwtSecret: this.configService.get<string>('JWT_SECRET', 'dev_secret'),
     };
   }
+
+  get adminActions(): {
+    watcherPollIntervalMs: number;
+  } {
+    return {
+      watcherPollIntervalMs: this.configService.get<number>(
+        'ADMIN_ACTION_WATCHER_POLL_INTERVAL_MS',
+        10000,
+      ),
+    };
+  }
 }

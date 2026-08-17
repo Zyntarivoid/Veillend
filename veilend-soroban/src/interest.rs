@@ -1,4 +1,5 @@
-use crate::{InterestState, Position};
+use crate::{InterestState, Position, VeilLendError};
+use soroban_sdk::{panic_with_error, Env};
 
 /// Fixed-point scale representing 1.0x. Indexes are expressed as multiples
 /// of this.
@@ -19,6 +20,10 @@ pub struct AccrualResult {
     pub interest_to_suppliers: i128,
     /// Interest to add to the aggregate total borrowed for this asset.
     pub interest_to_borrowers: i128,
+    /// Truncation dust: interest_to_borrowers - interest_to_suppliers.
+    /// This must be added to protocol reserves so the conservation invariant
+    /// holds exactly.
+    pub dust_to_reserves: i128,
 }
 
 /// Returns (utilization_bps, borrow_rate_bps, supply_rate_bps).
@@ -26,14 +31,24 @@ pub struct AccrualResult {
 /// supply_rate is derived from borrow_rate * utilization so that interest
 /// accrued to borrowers over any period exactly equals interest credited to
 /// suppliers over that period (100% pass-through, no protocol fee skim).
-fn compute_rates_bps(total_supplied: i128, total_borrowed: i128) -> (i128, i128, i128) {
+fn compute_rates_bps(env: &Env, total_supplied: i128, total_borrowed: i128) -> (i128, i128, i128) {
     let utilization_bps = if total_supplied == 0 {
         0
     } else {
-        total_borrowed * 10_000 / total_supplied
+        total_borrowed
+            .checked_mul(10_000)
+            .and_then(|v| v.checked_div(total_supplied))
+            .unwrap_or_else(|| panic_with_error!(env, VeilLendError::ArithmeticOverflow))
     };
-    let borrow_rate_bps = BASE_RATE_BPS + (utilization_bps * SLOPE_BPS) / 10_000;
-    let supply_rate_bps = borrow_rate_bps * utilization_bps / 10_000;
+    let borrow_rate_bps = utilization_bps
+        .checked_mul(SLOPE_BPS)
+        .and_then(|v| v.checked_div(10_000))
+        .and_then(|v| v.checked_add(BASE_RATE_BPS))
+        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::ArithmeticOverflow));
+    let supply_rate_bps = borrow_rate_bps
+        .checked_mul(utilization_bps)
+        .and_then(|v| v.checked_div(10_000))
+        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::ArithmeticOverflow));
     (utilization_bps, borrow_rate_bps, supply_rate_bps)
 }
 
@@ -49,6 +64,7 @@ fn compute_rates_bps(total_supplied: i128, total_borrowed: i128) -> (i128, i128,
 /// Idempotent: if `now <= state.last_accrual_timestamp`, returns the state
 /// unchanged with zero interest (elapsed == 0 short-circuit).
 pub fn compute_accrual(
+    env: &Env,
     state: &InterestState,
     total_supplied: i128,
     total_borrowed: i128,
@@ -60,20 +76,49 @@ pub fn compute_accrual(
             state: state.clone(),
             interest_to_suppliers: 0,
             interest_to_borrowers: 0,
+            dust_to_reserves: 0,
         };
     }
 
     let (_utilization_bps, borrow_rate_bps, supply_rate_bps) =
-        compute_rates_bps(total_supplied, total_borrowed);
+        compute_rates_bps(env, total_supplied, total_borrowed);
 
-    let borrow_growth = (borrow_rate_bps * RATE_SCALE * elapsed) / (10_000 * SECONDS_PER_YEAR);
-    let supply_growth = (supply_rate_bps * RATE_SCALE * elapsed) / (10_000 * SECONDS_PER_YEAR);
+    let borrow_growth = borrow_rate_bps
+        .checked_mul(RATE_SCALE)
+        .and_then(|v| v.checked_mul(elapsed))
+        .and_then(|v| v.checked_div(10_000_i128.checked_mul(SECONDS_PER_YEAR)?))
+        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::ArithmeticOverflow));
+    let supply_growth = supply_rate_bps
+        .checked_mul(RATE_SCALE)
+        .and_then(|v| v.checked_mul(elapsed))
+        .and_then(|v| v.checked_div(10_000_i128.checked_mul(SECONDS_PER_YEAR)?))
+        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::ArithmeticOverflow));
 
-    let new_borrow_index = state.borrow_index + (state.borrow_index * borrow_growth) / RATE_SCALE;
-    let new_supply_index = state.supply_index + (state.supply_index * supply_growth) / RATE_SCALE;
+    let new_borrow_index = state
+        .borrow_index
+        .checked_mul(borrow_growth)
+        .and_then(|v| v.checked_div(RATE_SCALE))
+        .and_then(|v| v.checked_add(state.borrow_index))
+        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::ArithmeticOverflow));
+    let new_supply_index = state
+        .supply_index
+        .checked_mul(supply_growth)
+        .and_then(|v| v.checked_div(RATE_SCALE))
+        .and_then(|v| v.checked_add(state.supply_index))
+        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::ArithmeticOverflow));
 
-    let interest_to_borrowers = (total_borrowed * borrow_growth) / RATE_SCALE;
-    let interest_to_suppliers = (total_supplied * supply_growth) / RATE_SCALE;
+    let interest_to_borrowers = total_borrowed
+        .checked_mul(borrow_growth)
+        .and_then(|v| v.checked_div(RATE_SCALE))
+        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::ArithmeticOverflow));
+    let interest_to_suppliers = total_supplied
+        .checked_mul(supply_growth)
+        .and_then(|v| v.checked_div(RATE_SCALE))
+        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::ArithmeticOverflow));
+
+    let dust_to_reserves = interest_to_borrowers
+        .checked_sub(interest_to_suppliers)
+        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::ArithmeticOverflow));
 
     AccrualResult {
         state: InterestState {
@@ -83,6 +128,7 @@ pub fn compute_accrual(
         },
         interest_to_suppliers,
         interest_to_borrowers,
+        dust_to_reserves,
     }
 }
 
@@ -94,7 +140,16 @@ pub fn compute_accrual(
 /// accrues no borrow interest regardless of its stale snapshot value; same
 /// for `deposited == 0`), but snapshots are still unconditionally
 /// re-anchored so the next touch measures delta from `now`.
+///
+/// If a position has a zero or negative snapshot index (defensive guard
+/// against corrupt initializer state), the position is returned unchanged
+/// to avoid division-by-zero panics that could make the position
+/// permanently unliquidatable.
 pub fn compute_accrued_position(position: &Position, state: &InterestState) -> Position {
+    if position.borrow_index_snapshot <= 0 || position.supply_index_snapshot <= 0 {
+        return position.clone();
+    }
+
     let borrowed = if position.borrowed > 0 {
         position.borrowed
             + position.borrowed * (state.borrow_index - position.borrow_index_snapshot)
@@ -122,6 +177,7 @@ pub fn compute_accrued_position(position: &Position, state: &InterestState) -> P
 #[cfg(test)]
 mod tests {
     use super::*;
+    use soroban_sdk::Env;
 
     fn fresh_state() -> InterestState {
         InterestState {
@@ -133,8 +189,9 @@ mod tests {
 
     #[test]
     fn elapsed_zero_is_noop() {
+        let env = Env::default();
         let state = fresh_state();
-        let result = compute_accrual(&state, 1_000_000, 500_000, 0);
+        let result = compute_accrual(&env, &state, 1_000_000, 500_000, 0);
 
         assert_eq!(result.state.supply_index, state.supply_index);
         assert_eq!(result.state.borrow_index, state.borrow_index);
@@ -144,10 +201,11 @@ mod tests {
 
     #[test]
     fn zero_supply_yields_zero_growth_despite_base_rate() {
+        let env = Env::default();
         // total_supplied == 0 => utilization_bps == 0 => supply_rate_bps == 0,
         // and there's nothing to apply borrow growth to either.
         let state = fresh_state();
-        let result = compute_accrual(&state, 0, 0, SECONDS_PER_YEAR as u64);
+        let result = compute_accrual(&env, &state, 0, 0, SECONDS_PER_YEAR as u64);
 
         assert_eq!(result.interest_to_suppliers, 0);
         assert_eq!(result.interest_to_borrowers, 0);
@@ -155,6 +213,7 @@ mod tests {
 
     #[test]
     fn known_input_known_output_growth_over_one_year() {
+        let env = Env::default();
         // 50% utilization: borrow_rate = 200 + (5000 * 2000 / 10000) = 1200 bps (12%)
         // supply_rate = 1200 * 5000 / 10000 = 600 bps (6%)
         let state = fresh_state();
@@ -162,6 +221,7 @@ mod tests {
         let total_borrowed = 500_000_000;
 
         let result = compute_accrual(
+            &env,
             &state,
             total_supplied,
             total_borrowed,
@@ -188,10 +248,11 @@ mod tests {
 
     #[test]
     fn conservation_of_value_between_borrowers_and_suppliers() {
+        let env = Env::default();
         // Interest paid by borrowers must equal interest earned by suppliers
         // (no protocol fee skim in this model).
         let state = fresh_state();
-        let result = compute_accrual(&state, 2_000_000, 800_000, SECONDS_PER_YEAR as u64);
+        let result = compute_accrual(&env, &state, 2_000_000, 800_000, SECONDS_PER_YEAR as u64);
 
         // At <100% utilization the two aren't equal in absolute terms since
         // supply_rate = borrow_rate * utilization is applied to a *larger*
@@ -203,8 +264,13 @@ mod tests {
         // expense (from borrowers), and is exactly equal when
         // total_supplied == total_borrowed.
         let equal_state = fresh_state();
-        let equal_result =
-            compute_accrual(&equal_state, 1_000_000, 1_000_000, SECONDS_PER_YEAR as u64);
+        let equal_result = compute_accrual(
+            &env,
+            &equal_state,
+            1_000_000,
+            1_000_000,
+            SECONDS_PER_YEAR as u64,
+        );
         assert_eq!(
             equal_result.interest_to_suppliers,
             equal_result.interest_to_borrowers
@@ -253,5 +319,55 @@ mod tests {
 
         assert_eq!(accrued.deposited, 2000);
         assert_eq!(accrued.borrowed, 1000);
+    }
+
+    #[test]
+    fn zero_snapshot_returns_position_unchanged() {
+        let position = Position {
+            deposited: 500,
+            borrowed: 250,
+            supply_index_snapshot: 0,
+            borrow_index_snapshot: 0,
+        };
+        let state = InterestState {
+            supply_index: RATE_SCALE * 2,
+            borrow_index: RATE_SCALE * 2,
+            last_accrual_timestamp: 100,
+        };
+
+        let accrued = compute_accrued_position(&position, &state);
+
+        assert_eq!(accrued.deposited, 500);
+        assert_eq!(accrued.borrowed, 250);
+        assert_eq!(
+            accrued.supply_index_snapshot,
+            position.supply_index_snapshot
+        );
+        assert_eq!(
+            accrued.borrow_index_snapshot,
+            position.borrow_index_snapshot
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Contract, #30")]
+    fn overflow_elapsed_100_years() {
+        let env = Env::default();
+        // Construct a state with extremely large indexes — simulating a
+        // contract that has been compounding for centuries. With
+        // borrow_index ≈ i128::MAX / 2, even a modest borrow_growth
+        // causes state.borrow_index * borrow_growth to overflow i128.
+        let state = InterestState {
+            supply_index: i128::MAX / 3,
+            borrow_index: i128::MAX / 3,
+            last_accrual_timestamp: 0,
+        };
+        let total_supplied: i128 = 1_000_000;
+        let total_borrowed: i128 = 500_000;
+        // 100 years in seconds ≈ 3.15e9
+        let now: u64 = SECONDS_PER_YEAR as u64 * 100;
+
+        // Must panic with ArithmeticOverflow, not silently wrap.
+        let _ = compute_accrual(&env, &state, total_supplied, total_borrowed, now);
     }
 }

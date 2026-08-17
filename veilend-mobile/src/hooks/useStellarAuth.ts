@@ -1,17 +1,9 @@
 import { useState } from 'react';
 import { Keypair } from '@stellar/stellar-base';
 import { useStore } from '../store/store';
-import * as SecureStoreShim from '../utils/secureStoreShim';
+import { setSecureItem } from '../utils/secureStorage';
 
-let SecureStore: typeof SecureStoreShim;
-try {
-  // @ts-ignore
-  SecureStore = require('expo-secure-store');
-} catch (e) {
-  SecureStore = SecureStoreShim as any;
-}
-
-const SECRET_KEY_STORE = 'stellar_secret_key';
+const SECRET_KEY_STORE = 'stellar_secret_key' as const;
 
 export function useStellarAuth() {
   const [loading, setLoading] = useState(false);
@@ -37,7 +29,7 @@ export function useStellarAuth() {
     try {
       const keypair = Keypair.random();
       const secret = keypair.secret();
-      await SecureStore.setItemAsync(SECRET_KEY_STORE, secret);
+      await setSecureItem(SECRET_KEY_STORE, secret);
       setGeneratedSecretKey(secret);
       await authenticate(keypair);
     } catch (e: any) {
@@ -53,7 +45,7 @@ export function useStellarAuth() {
     setGeneratedSecretKey(null);
     try {
       const keypair = Keypair.fromSecret(secretKey.trim());
-      await SecureStore.setItemAsync(SECRET_KEY_STORE, keypair.secret());
+      await setSecureItem(SECRET_KEY_STORE, keypair.secret());
       await authenticate(keypair);
       return true;
     } catch (e: any) {

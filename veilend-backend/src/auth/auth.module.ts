@@ -6,12 +6,15 @@ import { AuthService } from './auth.service';
 import { WalletModule } from '../wallet/wallet.module';
 import { JwtStrategy } from './jwt.strategy';
 import { AppConfigService } from '../config/app-config.service';
+import { ConfigModule } from '../config/config.module';
 
 @Module({
   imports: [
+    ConfigModule,
     WalletModule,
     PassportModule,
     JwtModule.registerAsync({
+      imports: [ConfigModule],
       inject: [AppConfigService],
       useFactory: (configService: AppConfigService) => ({
         secret: configService.auth.jwtSecret,

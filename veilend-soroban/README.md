@@ -38,7 +38,7 @@ User balances remain in per-user `Position` records, so protocol-owned fees are 
 
 ### Events
 
-The contract continues to emit action-specific user events (`deposit`, `borrow`, `repay`, `withdraw`) and now also emits an `asset_reserve_updated` event whenever reserve accounting changes. This keeps reserve state updates observable and documented consistently for indexers and treasury tooling.
+The contract continues to emit action-specific user events (`deposit`, `borrow`, `repay`, `withdraw`) and also emits an `asset_reserve_updated` event whenever reserve accounting changes, plus a per-asset `interest_accrued` event whenever a non-zero amount of interest accrues (topic prefix `veillend`, event name `interest_accrued`). Accrual is idempotent: calling `accrue_interest` (or any entrypoint) again at the same ledger timestamp is a pure no-op that touches no storage and emits no events. This keeps reserve and interest state updates observable and documented consistently for indexers and treasury tooling.
 
 ## Prerequisites
 

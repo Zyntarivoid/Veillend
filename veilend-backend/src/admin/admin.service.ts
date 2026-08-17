@@ -1,17 +1,36 @@
-import { Injectable, NotImplementedException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConfigureAssetDto } from './dto/configure-asset.dto';
 import { SetOraclePriceDto } from './dto/set-oracle-price.dto';
 import { SetMinCollateralRatioDto } from './dto/set-min-collateral-ratio.dto';
 import { AddAdminDto } from './dto/add-admin.dto';
-import { AdminAction } from '@prisma/client';
+import { AdminActionStatus, AdminActionType, Prisma } from '@prisma/client';
 import { PageOptionsDto } from '../common/dto/page-options.dto';
 import { PageDto } from '../common/dto/page.dto';
 import { PageMetaDto } from '../common/dto/page-meta.dto';
+import { AdminActionRepository } from './admin-action.repository';
+import { AdminTransactionBuilderService } from './admin-transaction-builder.service';
+
+export interface AdminActionDispatchResult {
+  actionId: string;
+  xdr?: string;
+}
 
 @Injectable()
 export class AdminService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(AdminService.name);
+
+  constructor(
+    private prisma: PrismaService,
+    private readonly adminActionRepository: AdminActionRepository,
+    private readonly transactionBuilder: AdminTransactionBuilderService,
+  ) {}
 
   /**
    * Add a new admin and log the action
@@ -27,7 +46,7 @@ export class AdminService {
       await tx.adminAuditLog.create({
         data: {
           actorWallet,
-          action: AdminAction.ADD_ADMIN,
+          action: AdminActionType.ADD_ADMIN,
           target: dto.walletAddress,
           payload: { walletAddress: dto.walletAddress },
         },
@@ -63,7 +82,7 @@ export class AdminService {
       await tx.adminAuditLog.create({
         data: {
           actorWallet,
-          action: AdminAction.REMOVE_ADMIN,
+          action: AdminActionType.REMOVE_ADMIN,
           target: walletAddress,
           payload: {
             removedAdmin: walletAddress,
@@ -81,33 +100,127 @@ export class AdminService {
   }
 
   /**
-   * Configure asset - NOT IMPLEMENTED
-   * Throws NotImplementedException (HTTP 501) as per acceptance criteria
+   * Configure asset support on-chain. Records the intent, builds an unsigned
+   * Soroban transaction XDR for `propose_configure_asset`, and hands it to
+   * the client to sign with Freighter. The backend never holds the admin
+   * secret key.
    */
-  configureAsset(_dto: ConfigureAssetDto, _actorWallet: string) {
-    throw new NotImplementedException(
-      'Asset configuration is not yet implemented. This operation requires integration with the Stellar/Soroban contract layer.',
+  async configureAsset(
+    dto: ConfigureAssetDto,
+    actorWallet: string,
+  ): Promise<AdminActionDispatchResult> {
+    return this.dispatchAction(actorWallet, AdminActionType.CONFIGURE_ASSET, {
+      assetContractId: dto.assetContractId,
+      supported: dto.supported,
+    });
+  }
+
+  /**
+   * Set an asset's oracle price on-chain. Records the intent and builds an
+   * unsigned Soroban transaction XDR for `set_oracle_price`.
+   */
+  async setOraclePrice(
+    dto: SetOraclePriceDto,
+    actorWallet: string,
+  ): Promise<AdminActionDispatchResult> {
+    return this.dispatchAction(actorWallet, AdminActionType.SET_ORACLE_PRICE, {
+      assetContractId: dto.assetContractId,
+      price: dto.price,
+    });
+  }
+
+  /**
+   * Set the protocol minimum collateral ratio on-chain. Records the intent
+   * and builds an unsigned Soroban transaction XDR for
+   * `propose_set_min_collateral_ratio`.
+   */
+  async setMinCollateralRatio(
+    dto: SetMinCollateralRatioDto,
+    actorWallet: string,
+  ): Promise<AdminActionDispatchResult> {
+    return this.dispatchAction(
+      actorWallet,
+      AdminActionType.SET_MIN_COLLATERAL_RATIO,
+      {
+        minCollateralRatioBps: dto.minCollateralRatioBps,
+      },
     );
   }
 
   /**
-   * Set oracle price - NOT IMPLEMENTED
-   * Throws NotImplementedException (HTTP 501) as per acceptance criteria
+   * Common dispatch path for privileged Soroban mutations: (1) persist the
+   * intent as PENDING so every request is audited, (2) build the unsigned
+   * XDR (deterministic from the account nonce + action id), (3) return the
+   * handoff payload. If the XDR cannot be built (e.g. contract not configured
+   * or admin account not funded), the intent is recorded as FAILED and the
+   * error is rethrown so the caller sees it.
    */
-  setOraclePrice(_dto: SetOraclePriceDto, _actorWallet: string) {
-    throw new NotImplementedException(
-      'Oracle price setting is not yet implemented. This operation requires integration with the Stellar/Soroban contract layer.',
-    );
+  private async dispatchAction(
+    adminAddress: string,
+    action: AdminActionType,
+    payload: Record<string, Prisma.InputJsonValue>,
+  ): Promise<AdminActionDispatchResult> {
+    const record = await this.adminActionRepository.create({
+      adminAddress,
+      action,
+      payload,
+    });
+
+    try {
+      const xdr = await this.transactionBuilder.buildActionXdr(
+        record.id,
+        adminAddress,
+        action,
+        payload,
+      );
+      await this.adminActionRepository.updateXdr(record.id, xdr);
+      return { actionId: record.id, xdr };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `Failed to build XDR for admin action ${record.id} (${action}): ${message}`,
+      );
+      await this.adminActionRepository.markFailed(record.id, message);
+      throw error;
+    }
   }
 
   /**
-   * Set minimum collateral ratio - NOT IMPLEMENTED
-   * Throws NotImplementedException (HTTP 501) as per acceptance criteria
+   * Record that the client signed and submitted the transaction for an
+   * intent, transitioning PENDING → SENT. The watcher then resolves the
+   * status from the on-chain outcome of `txHash`.
    */
-  setMinCollateralRatio(_dto: SetMinCollateralRatioDto, _actorWallet: string) {
-    throw new NotImplementedException(
-      'Minimum collateral ratio configuration is not yet implemented. This operation requires integration with the Stellar/Soroban contract layer.',
-    );
+  async submitTransaction(
+    actionId: string,
+    txHash: string,
+    actorWallet: string,
+  ) {
+    const record = await this.adminActionRepository.findById(actionId);
+    if (!record) {
+      throw new NotFoundException('Admin action not found');
+    }
+    if (record.adminAddress !== actorWallet) {
+      throw new ForbiddenException(
+        'Admin action does not belong to the requesting admin',
+      );
+    }
+    if (record.status !== AdminActionStatus.PENDING) {
+      throw new ConflictException(
+        `Admin action is not pending (current status: ${record.status})`,
+      );
+    }
+    return this.adminActionRepository.markSent(actionId, txHash);
+  }
+
+  /**
+   * Fetch a single admin action (intent + status) by id.
+   */
+  async getAction(actionId: string) {
+    const record = await this.adminActionRepository.findById(actionId);
+    if (!record) {
+      throw new NotFoundException('Admin action not found');
+    }
+    return record;
   }
 
   /**

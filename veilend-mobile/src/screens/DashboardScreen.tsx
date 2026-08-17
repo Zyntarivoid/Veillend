@@ -14,8 +14,6 @@ const isSmallScreen = width < 380;
 const CARD_WIDTH = width - 48; // Padding 24 * 2
 const DEFAULT_PROFILE_IMAGE = 'https://i.pravatar.cc/100?img=5';
 
-
-  
 export default function DashboardScreen({ navigation }: any) {
   const {
     address,
@@ -72,6 +70,8 @@ export default function DashboardScreen({ navigation }: any) {
 
   const handleLogout = () => {
     setProfileVisible(false);
+    // logout() already clears profileName/profileImage (state + persisted
+    // SecureStore keys) — see store.ts.
     logout();
     // Fully reset the navigation stack to avoid navigator-scope issues
     // (ConnectWallet lives on the root stack, not inside the tab navigator).

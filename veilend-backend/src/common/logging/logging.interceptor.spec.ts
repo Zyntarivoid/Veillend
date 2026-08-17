@@ -2,14 +2,20 @@
 import { CallHandler, ExecutionContext } from '@nestjs/common';
 import { of, throwError } from 'rxjs';
 import { LoggingInterceptor } from './logging.interceptor';
+import { ClsService } from 'nestjs-cls';
 import { AppLoggerService } from './app-logger.service';
 
 describe('LoggingInterceptor', () => {
   let interceptor: LoggingInterceptor;
   let logger: { log: jest.Mock; warn: jest.Mock };
+  let cls: { isActive: jest.Mock; getId: jest.Mock };
 
   function makeContext(): ExecutionContext {
-    const req = { method: 'GET', url: '/things' };
+    const req = {
+      method: 'GET',
+      url: '/things',
+      user: { walletAddress: 'GBROWSERWALLET', sessionId: 'session-1' },
+    };
     const res = { statusCode: 200 };
     return {
       switchToHttp: () => ({
@@ -21,7 +27,14 @@ describe('LoggingInterceptor', () => {
 
   beforeEach(() => {
     logger = { log: jest.fn(), warn: jest.fn() };
-    interceptor = new LoggingInterceptor(logger as unknown as AppLoggerService);
+    cls = {
+      isActive: jest.fn().mockReturnValue(true),
+      getId: jest.fn().mockReturnValue('corr-123'),
+    };
+    interceptor = new LoggingInterceptor(
+      logger as unknown as AppLoggerService,
+      cls as unknown as ClsService,
+    );
   });
 
   it('logs request entry and successful exit', (done) => {
@@ -30,9 +43,17 @@ describe('LoggingInterceptor', () => {
 
     interceptor.intercept(context, handler).subscribe({
       complete: () => {
-        expect(logger.log).toHaveBeenCalledTimes(2);
-        expect(logger.log.mock.calls[0][0]).toContain('--> GET /things');
-        expect(logger.log.mock.calls[1][0]).toContain('<-- GET /things 200');
+        expect(logger.log).toHaveBeenCalledTimes(1);
+        expect(logger.log.mock.calls[0][0]).toEqual(
+          expect.objectContaining({
+            method: 'GET',
+            url: '/things',
+            statusCode: 200,
+            correlationId: 'corr-123',
+            walletAddress: 'GBROWSERWALLET',
+            sessionId: 'session-1',
+          }),
+        );
         done();
       },
     });
@@ -47,7 +68,14 @@ describe('LoggingInterceptor', () => {
     interceptor.intercept(context, handler).subscribe({
       error: () => {
         expect(logger.warn).toHaveBeenCalledTimes(1);
-        expect(logger.warn.mock.calls[0][0]).toContain('<-x GET /things');
+        expect(logger.warn.mock.calls[0][0]).toEqual(
+          expect.objectContaining({
+            method: 'GET',
+            url: '/things',
+            correlationId: 'corr-123',
+            walletAddress: 'GBROWSERWALLET',
+          }),
+        );
         done();
       },
     });

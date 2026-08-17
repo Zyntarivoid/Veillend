@@ -4,6 +4,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { UnauthorizedException } from '@nestjs/common';
 import { JwtStrategy } from '../auth/jwt.strategy';
 import { AppConfigService } from '../config/app-config.service';
+import { AdminActionRepository } from './admin-action.repository';
+import { AdminTransactionBuilderService } from './admin-transaction-builder.service';
 
 /**
  * Integration test for admin removal and session revocation
@@ -33,6 +35,14 @@ describe('Admin Session Revocation Integration', () => {
         {
           provide: AppConfigService,
           useValue: mockConfigService,
+        },
+        {
+          provide: AdminActionRepository,
+          useValue: {},
+        },
+        {
+          provide: AdminTransactionBuilderService,
+          useValue: {},
         },
       ],
     }).compile();

@@ -1,9 +1,21 @@
-use soroban_sdk::testutils::{Address as _, Ledger as _};
-use soroban_sdk::{Address, Env};
-use veillend_contract::{VeilLendContract, VeilLendContractClient};
+use core::cmp::Ordering;
+
+use soroban_env_common::Compare;
+use soroban_sdk::events::Event;
+use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
+use soroban_sdk::{Address, Env, Val};
+use veillend_contract::{InterestAccrued, VeilLendContract, VeilLendContractClient};
 
 const SECONDS_PER_YEAR: u64 = 31_536_000;
 const DEFAULT_TIMELOCK: u32 = 50;
+
+/// Returns true if two `Val`s are equal per the host's value comparison.
+///
+/// `soroban_sdk::Val` does not implement `PartialEq` in soroban-sdk 23.x, so
+/// event data (a `Val`) must be compared through the host `Compare` trait.
+fn val_eq(env: &Env, a: &Val, b: &Val) -> bool {
+    env.compare(a, b).unwrap() == Ordering::Equal
+}
 
 fn advance_ledgers(env: &Env, n: u32) {
     let current = env.ledger().sequence();
@@ -512,6 +524,79 @@ fn test_two_accrual_calls_at_same_timestamp_are_idempotent() {
     assert_eq!(
         client.get_total_borrowed(&asset),
         total_borrowed_after_first
+    );
+}
+
+#[test]
+fn test_interest_accrued_event_emission_and_values() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let asset = Address::generate(&env);
+    let user = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    configure_asset(&env, &client, &admin, &asset);
+    set_oracle_price(&env, &client, &admin, &asset, &1);
+    client.deposit(&user, &asset, &1_000_000);
+    client.borrow(&user, &asset, &asset, &500_000);
+
+    let ledger_timestamp = env.ledger().timestamp();
+    env.ledger()
+        .set_timestamp(ledger_timestamp + SECONDS_PER_YEAR);
+
+    client.accrue_interest(&asset);
+
+    // 50% utilization: borrow_rate = 12% APR, supply_rate = 6% APR. After one
+    // year the borrow index grows 1.0 -> 1.12 and the supply index grows
+    // 1.0 -> 1.06, accruing 60_000 to both borrowers and suppliers.
+    let expected = InterestAccrued {
+        asset: asset.clone(),
+        interest_to_suppliers: 60_000,
+        interest_to_borrowers: 60_000,
+        supply_index_before: 1_000_000_000,
+        borrow_index_before: 1_000_000_000,
+        supply_index_after: 1_060_000_000,
+        borrow_index_after: 1_120_000_000,
+        timestamp: ledger_timestamp + SECONDS_PER_YEAR,
+    };
+    let expected_topics = expected.topics(&env);
+    let expected_data = expected.data(&env);
+
+    let events = env.events().all();
+    let mut interest_accrued_count = 0u32;
+    for (_, topics, data) in events.iter() {
+        if topics == expected_topics && val_eq(&env, &data, &expected_data) {
+            interest_accrued_count += 1;
+        }
+    }
+    assert_eq!(
+        interest_accrued_count, 1,
+        "expected exactly one InterestAccrued event with matching values"
+    );
+
+    // A second accrual at the same timestamp accrues zero interest, so the
+    // guard must skip storage writes and emit no events at all: no
+    // InterestAccrued event and no reserve-update event. `env.events().all()`
+    // returns only the events of the last contract invocation.
+    client.accrue_interest(&asset);
+
+    let second_events = env.events().all();
+    let mut second_interest_accrued_count = 0u32;
+    for (_, topics, data) in second_events.iter() {
+        if topics == expected_topics && val_eq(&env, &data, &expected_data) {
+            second_interest_accrued_count += 1;
+        }
+    }
+    assert_eq!(
+        second_interest_accrued_count, 0,
+        "no InterestAccrued event should be emitted when interest is zero"
+    );
+    assert_eq!(
+        second_events.len(),
+        0,
+        "a zero-interest accrual must be a pure no-op and emit no events at all"
     );
 }
 
@@ -1654,3 +1739,83 @@ fn test_cross_asset_withdraw_that_breaks_ratio_panics() {
         "withdraw that drops the cross-asset ratio to 149% must panic"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Interest accrual correctness tests (issue #349)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn small_amounts_dust_accrual() {
+    // Tiny balances: total_supplied = 15_000, total_borrowed = 5_000
+    // (33% utilization). Over one year:
+    //   borrow_rate = 200 + (3333 * 2000 / 10_000) = 866 bps
+    //   supply_rate = 866 * 3333 / 10_000 = 288 bps
+    //   borrow_growth = 86_600_000
+    //   supply_growth = 28_800_000
+    //   interest_to_borrowers = 5_000 * 86_600_000 / 1e9 = 433
+    //   interest_to_suppliers = 15_000 * 28_800_000 / 1e9 = 432
+    //   dust = 433 - 432 = 1
+    //
+    // We accrue 100 times (each 1 year apart — limited to 100 to avoid
+    // borrow_index overflow from exponential compounding) and verify:
+    //   1. The aggregate dust across all accruals is non-zero
+    //   2. Final reserve.total_balance == initial deposit + Σ(supplier interest) + Σ(dust)
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let asset = Address::generate(&env);
+    let user = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    configure_asset(&env, &client, &admin, &asset);
+    set_oracle_price(&env, &client, &admin, &asset, &1);
+
+    // Deposit creates the supplier side; borrow creates the borrower side.
+    client.deposit(&user, &asset, &15_000);
+    client.borrow(&user, &asset, &asset, &5_000);
+
+    let initial_reserve = client.get_asset_reserve(&asset);
+    let mut cumulative_supplier_interest: i128 = 0;
+    let mut cumulative_dust: i128 = 0;
+
+    for _ in 0..100 {
+        let before_total_deposited = client.get_total_deposited(&asset);
+        let before_total_borrowed = client.get_total_borrowed(&asset);
+
+        let ledger_timestamp = env.ledger().timestamp();
+        env.ledger()
+            .set_timestamp(ledger_timestamp + SECONDS_PER_YEAR);
+
+        client.accrue_interest(&asset);
+
+        let after_total_deposited = client.get_total_deposited(&asset);
+        let after_total_borrowed = client.get_total_borrowed(&asset);
+        let supplier_interest = after_total_deposited - before_total_deposited;
+        let borrower_interest = after_total_borrowed - before_total_borrowed;
+        let dust = borrower_interest - supplier_interest;
+
+        // Dust must never be negative — borrowers always pay >= what suppliers receive.
+        assert!(dust >= 0, "dust must never be negative");
+
+        cumulative_supplier_interest += supplier_interest;
+        cumulative_dust += dust;
+    }
+
+    // Aggregate dust over 100 accruals must be non-zero.
+    assert!(
+        cumulative_dust > 0,
+        "aggregate dust over accruals must be non-zero"
+    );
+
+    let final_reserve = client.get_asset_reserve(&asset);
+    // Reserve balance must equal: initial_deposit + Σ(supplier_interest) + Σ(dust)
+    assert_eq!(
+        final_reserve.total_balance,
+        initial_reserve.total_balance + cumulative_supplier_interest + cumulative_dust
+    );
+}
+
+// The overflow test is in interest.rs as a unit test (zero_snapshot and
+// overflow tests work at the function level since they need to construct
+// extreme states directly).

@@ -61,7 +61,30 @@ function fakeSorobanEventId(seed: number): string {
 
 // ─── Seed ───────────────────────────────────────────────────────────────────
 
+
+function assertSeedAllowed() {
+  const databaseUrl = process.env.DATABASE_URL ?? '';
+  const isProduction = process.env.NODE_ENV === 'production';
+  const isPublicCloudDatabase =
+    /(?:amazonaws\.com|rds\.amazonaws\.com|azure\.com|database\.windows\.net|postgres\.database\.azure\.com|cloudsql|googleapis\.com|supabase\.(?:co|com)|neon\.tech|planetscale\.com|railway\.app|render\.com|digitalocean\.com|db\.ondigitalocean\.com|herokuapp\.com|cockroachlabs\.cloud|aivencloud\.com)/i.test(
+      databaseUrl,
+    );
+
+  if (
+    (isProduction || isPublicCloudDatabase) &&
+    process.env.ALLOW_SEED_IN_PRODUCTION !== '1'
+  ) {
+    console.error(
+      '\x1b[31m%s\x1b[0m',
+      '🚨 Refusing to run seed against production or public cloud database. Set ALLOW_SEED_IN_PRODUCTION=1 to override deliberately.',
+    );
+    process.exit(1);
+  }
+}
+
 async function main() {
+  assertSeedAllowed();
+
   console.log('🌱 Seeding VeilLend demo data...\n');
 
   // Clean existing demo data (order matters due to FK constraints)

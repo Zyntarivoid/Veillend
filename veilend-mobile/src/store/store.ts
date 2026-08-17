@@ -1,16 +1,6 @@
 import { create } from 'zustand';
 import api, { fetchWithRetry } from '../utils/api';
-// prefer expo SecureStore when installed; fall back to local shim
-import * as SecureStoreShim from '../utils/secureStoreShim';
-let SecureStore: typeof SecureStoreShim;
-try {
-  // attempt to require the real expo-secure-store if available
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  // @ts-ignore
-  SecureStore = require('expo-secure-store');
-} catch (e) {
-  SecureStore = SecureStoreShim as any;
-}
+import { getSecureItem, setSecureItem, deleteSecureItem } from '../utils/secureStorage';
 
 type Nullable<T> = T | null;
 
@@ -264,8 +254,8 @@ export const useStore = create<StoreState>(
     setAddress: (address: string | null) => {
       set({ address });
       try {
-        if (address) SecureStore.setItemAsync(PERSIST_KEYS.address, address);
-        else SecureStore.deleteItemAsync(PERSIST_KEYS.address);
+        if (address) setSecureItem(PERSIST_KEYS.address, address);
+        else deleteSecureItem(PERSIST_KEYS.address);
       } catch (e) {
         // ignore persistence errors
       }
@@ -273,8 +263,8 @@ export const useStore = create<StoreState>(
     setAuthToken: (token: string | null) => {
       set({ authToken: token });
       try {
-        if (token) SecureStore.setItemAsync(PERSIST_KEYS.authToken, token);
-        else SecureStore.deleteItemAsync(PERSIST_KEYS.authToken);
+        if (token) setSecureItem(PERSIST_KEYS.authToken, token);
+        else deleteSecureItem(PERSIST_KEYS.authToken);
       } catch (e) {
         // ignore persistence errors
       }
@@ -296,15 +286,15 @@ export const useStore = create<StoreState>(
       });
       // Clear ALL persisted keys to prevent stale data on next launch
       try {
-        SecureStore.deleteItemAsync(PERSIST_KEYS.authToken);
-        SecureStore.deleteItemAsync(PERSIST_KEYS.address);
-        SecureStore.deleteItemAsync(PERSIST_KEYS.isPrivacyMode);
-        SecureStore.deleteItemAsync(PERSIST_KEYS.profileName);
-        SecureStore.deleteItemAsync(PERSIST_KEYS.profileImage);
-        SecureStore.deleteItemAsync(PERSIST_KEYS.secretKey);
-        SecureStore.deleteItemAsync(PERSIST_KEYS.currency);
-        SecureStore.deleteItemAsync(PERSIST_KEYS.notificationsEnabled);
-        SecureStore.deleteItemAsync(PERSIST_KEYS.backupConfirmed);
+        deleteSecureItem(PERSIST_KEYS.authToken);
+        deleteSecureItem(PERSIST_KEYS.address);
+        deleteSecureItem(PERSIST_KEYS.isPrivacyMode);
+        deleteSecureItem(PERSIST_KEYS.profileName);
+        deleteSecureItem(PERSIST_KEYS.profileImage);
+        deleteSecureItem(PERSIST_KEYS.secretKey);
+        deleteSecureItem(PERSIST_KEYS.currency);
+        deleteSecureItem(PERSIST_KEYS.notificationsEnabled);
+        deleteSecureItem(PERSIST_KEYS.backupConfirmed);
       } catch (e) {
         // ignore persistence errors
       }
@@ -317,8 +307,8 @@ export const useStore = create<StoreState>(
     setProfileName: (name: string | null) => {
       set({ profileName: name });
       try {
-        if (name) SecureStore.setItemAsync(PERSIST_KEYS.profileName, name);
-        else SecureStore.deleteItemAsync(PERSIST_KEYS.profileName);
+        if (name) setSecureItem(PERSIST_KEYS.profileName, name);
+        else deleteSecureItem(PERSIST_KEYS.profileName);
       } catch (e) {
         // ignore persistence errors
       }
@@ -326,8 +316,8 @@ export const useStore = create<StoreState>(
     setProfileImage: (uri: string | null) => {
       set({ profileImage: uri });
       try {
-        if (uri) SecureStore.setItemAsync(PERSIST_KEYS.profileImage, uri);
-        else SecureStore.deleteItemAsync(PERSIST_KEYS.profileImage);
+        if (uri) setSecureItem(PERSIST_KEYS.profileImage, uri);
+        else deleteSecureItem(PERSIST_KEYS.profileImage);
       } catch (e) {
         // ignore persistence errors
       }
@@ -337,9 +327,9 @@ export const useStore = create<StoreState>(
       set({ isPrivacyMode: next });
       try {
         if (next) {
-          SecureStore.setItemAsync(PERSIST_KEYS.isPrivacyMode, 'true');
+          setSecureItem(PERSIST_KEYS.isPrivacyMode, 'true');
         } else {
-          SecureStore.deleteItemAsync(PERSIST_KEYS.isPrivacyMode);
+          deleteSecureItem(PERSIST_KEYS.isPrivacyMode);
         }
       } catch (e) {
         // ignore persistence errors
@@ -350,7 +340,7 @@ export const useStore = create<StoreState>(
     setCurrency: (currency: string) => {
       set({ currency });
       try {
-        SecureStore.setItemAsync(PERSIST_KEYS.currency, currency);
+        setSecureItem(PERSIST_KEYS.currency, currency);
       } catch (e) {
         // ignore persistence errors
       }
@@ -358,7 +348,7 @@ export const useStore = create<StoreState>(
     setNotificationsEnabled: (enabled: boolean) => {
       set({ notificationsEnabled: enabled });
       try {
-        SecureStore.setItemAsync(
+        setSecureItem(
           PERSIST_KEYS.notificationsEnabled,
           enabled ? 'true' : 'false',
         );
@@ -408,7 +398,7 @@ export const useStore = create<StoreState>(
         set({ authLoading: false });
         set({ authToken: token, address: walletAddress });
         try {
-          if (token) SecureStore.setItemAsync(PERSIST_KEYS.authToken, token);
+          if (token) setSecureItem(PERSIST_KEYS.authToken, token);
         } catch (e) {}
         return token;
       } catch (err) {
@@ -620,13 +610,13 @@ const optimisticDelta = (kind: LendingKind, amount: number): number => {
   try {
     const [token, address, privacyMode, profileName, profileImage, currency, notificationsEnabled] =
       await Promise.all([
-        SecureStore.getItemAsync(PERSIST_KEYS.authToken),
-        SecureStore.getItemAsync(PERSIST_KEYS.address),
-        SecureStore.getItemAsync(PERSIST_KEYS.isPrivacyMode),
-        SecureStore.getItemAsync(PERSIST_KEYS.profileName),
-        SecureStore.getItemAsync(PERSIST_KEYS.profileImage),
-        SecureStore.getItemAsync(PERSIST_KEYS.currency),
-        SecureStore.getItemAsync(PERSIST_KEYS.notificationsEnabled),
+        getSecureItem(PERSIST_KEYS.authToken),
+        getSecureItem(PERSIST_KEYS.address),
+        getSecureItem(PERSIST_KEYS.isPrivacyMode),
+        getSecureItem(PERSIST_KEYS.profileName),
+        getSecureItem(PERSIST_KEYS.profileImage),
+        getSecureItem(PERSIST_KEYS.currency),
+        getSecureItem(PERSIST_KEYS.notificationsEnabled),
       ]);
 
     const patch: Partial<AuthState & UiState> = { sessionRestored: true };

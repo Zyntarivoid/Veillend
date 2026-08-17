@@ -1,8 +1,11 @@
 import { Module } from '@nestjs/common';
 import { ProtocolController } from './protocol.controller';
 import { ProtocolService } from './protocol.service';
+import { ConfigModule } from '../config/config.module';
+import { PrismaModule } from '../prisma/prisma.module';
 
 @Module({
+  imports: [ConfigModule, PrismaModule],
   controllers: [ProtocolController],
   providers: [ProtocolService],
   exports: [ProtocolService],
