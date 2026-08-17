@@ -18,6 +18,8 @@ export interface AppConfig {
   horizonUrl: string;
   networkPassphrase: string;
   apiUrl: string;
+  /** Canonical URL of the deployed app, used for sitemap/robots/OG tags. */
+  siteUrl: string;
 }
 
 /** A single validation failure. */
@@ -37,6 +39,7 @@ const DEFAULTS: Record<string, string> = {
   NEXT_PUBLIC_HORIZON_URL: "https://horizon-testnet.stellar.org",
   NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE: "Test SDF Network ; September 2015",
   NEXT_PUBLIC_API_URL: "http://localhost:3001",
+  NEXT_PUBLIC_SITE_URL: "http://localhost:3000",
 };
 
 // ─── Validators ───────────────────────────────────────────────────────────────
@@ -44,6 +47,12 @@ const DEFAULTS: Record<string, string> = {
 function isValidUrl(value: string): boolean {
   try {
     const url = new URL(value);
+    // Reject empty hostname (e.g. http:///foo)
+    if (!url.hostname || url.hostname === "") return false;
+    // Reject credentials in URLs (e.g. https://user:pass@host)
+    if (url.username || url.password) return false;
+    // Require explicit port for localhost
+    if (url.hostname === "localhost" && !url.port) return false;
     return url.protocol === "http:" || url.protocol === "https:";
   } catch {
     return false;
@@ -150,6 +159,7 @@ export function validateConfig(): AppConfig {
     horizonUrl,
     networkPassphrase,
     apiUrl,
+    siteUrl,
   };
 }
 
