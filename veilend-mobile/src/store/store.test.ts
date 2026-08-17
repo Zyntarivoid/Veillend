@@ -191,3 +191,75 @@ describe('shieldedLoading state (issue #59)', () => {
     assert.equal(useStore.getState().shieldedLoading, false);
   });
 });
+
+describe('Lending double-submit prevention (issue #266)', () => {
+  it('deposit: two rapid calls should execute action exactly once', async () => {
+    const { deposit } = useStore.getState();
+    const [res1, res2] = await Promise.all([
+      deposit({ amount: '100', asset: 'XLM' }),
+      deposit({ amount: '200', asset: 'XLM' }),
+    ]);
+    assert.notEqual(res1, null, 'First deposit should succeed');
+    assert.equal(res2, null, 'Second rapid deposit should be blocked');
+    assert.equal(useStore.getState().lastLendingTx?.txHash?.startsWith('mock-deposit-'), true);
+    assert.equal(useStore.getState().lastLendingTx?.amount, '100');
+    assert.equal(useStore.getState().lendingLoading, false);
+  });
+
+  it('borrow: two rapid calls should execute action exactly once', async () => {
+    const { borrow } = useStore.getState();
+    const [res1, res2] = await Promise.all([
+      borrow({ amount: '500', asset: 'USDC' }),
+      borrow({ amount: '600', asset: 'USDC' }),
+    ]);
+    assert.notEqual(res1, null, 'First borrow should succeed');
+    assert.equal(res2, null, 'Second rapid borrow should be blocked');
+    assert.equal(useStore.getState().lastLendingTx?.txHash?.startsWith('mock-borrow-'), true);
+    assert.equal(useStore.getState().lastLendingTx?.amount, '500');
+    assert.equal(useStore.getState().lendingLoading, false);
+  });
+
+  it('repay: two rapid calls should execute action exactly once', async () => {
+    const { repay } = useStore.getState();
+    const [res1, res2] = await Promise.all([
+      repay({ amount: '250', asset: 'BLND' }),
+      repay({ amount: '350', asset: 'BLND' }),
+    ]);
+    assert.notEqual(res1, null, 'First repay should succeed');
+    assert.equal(res2, null, 'Second rapid repay should be blocked');
+    assert.equal(useStore.getState().lastLendingTx?.txHash?.startsWith('mock-repay-'), true);
+    assert.equal(useStore.getState().lastLendingTx?.amount, '250');
+    assert.equal(useStore.getState().lendingLoading, false);
+  });
+
+  it('withdraw: two rapid calls should execute action exactly once', async () => {
+    const { withdraw } = useStore.getState();
+    const [res1, res2] = await Promise.all([
+      withdraw({ amount: '50', asset: 'XLM' }),
+      withdraw({ amount: '75', asset: 'XLM' }),
+    ]);
+    assert.notEqual(res1, null, 'First withdraw should succeed');
+    assert.equal(res2, null, 'Second rapid withdraw should be blocked');
+    assert.equal(useStore.getState().lastLendingTx?.txHash?.startsWith('mock-withdraw-'), true);
+    assert.equal(useStore.getState().lastLendingTx?.amount, '50');
+    assert.equal(useStore.getState().lendingLoading, false);
+  });
+
+  it('lendingLoading should be true while action is in flight', async () => {
+    const { deposit } = useStore.getState();
+    let loadingDuringCall: boolean | undefined;
+    const promise = deposit({ amount: '100', asset: 'XLM' });
+    loadingDuringCall = useStore.getState().lendingLoading;
+    await promise;
+    assert.equal(loadingDuringCall, true, 'lendingLoading should be true during async call');
+    assert.equal(useStore.getState().lendingLoading, false, 'lendingLoading should reset after call');
+  });
+
+  it('deposit should block when lendingLoading is already true', async () => {
+    useStore.setState({ lendingLoading: true });
+    const { deposit } = useStore.getState();
+    const res = await deposit({ amount: '100', asset: 'XLM' });
+    assert.equal(res, null, 'Deposit should be blocked when lendingLoading is true');
+    assert.equal(useStore.getState().lastLendingTx, null);
+  });
+});

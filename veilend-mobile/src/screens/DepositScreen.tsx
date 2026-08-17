@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { MOCK_ASSETS } from '../data/mockData';
@@ -8,37 +8,85 @@ import Toast from '../utils/toast';
 
 type SelectedAsset = { id: string; name: string; symbol: string; balance?: number } | null;
 
+const sanitizeAmountInput = (value: string): string => {
+  let cleaned = value.replace(/[^0-9.]/g, '');
+  const firstDotIndex = cleaned.indexOf('.');
+  if (firstDotIndex !== -1) {
+    cleaned = cleaned.slice(0, firstDotIndex + 1) + cleaned.slice(firstDotIndex + 1).replace(/\./g, '');
+  }
+  return cleaned;
+};
+
 export default function DepositScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<SelectedAsset>(null);
   const [amount, setAmount] = useState<string>('');
 
+  const lendingLoading = useStore((state) => state.lendingLoading);
+
   const openDepositModal = (asset: any) => {
     setSelectedAsset(asset);
-    setAmount(String(asset.balance ?? '1'));
+    setAmount('');
     setModalVisible(true);
   };
 
+  const handleAmountChange = (value: string) => {
+    setAmount(sanitizeAmountInput(value));
+  };
+
+  const handleMaxPress = () => {
+    if (selectedAsset?.balance != null) {
+      setAmount(String(selectedAsset.balance));
+    }
+  };
+
+  const { error, canSubmit } = useMemo(() => {
+    const trimmed = amount.trim();
+    if (trimmed === '') {
+      return { error: null, canSubmit: false };
+    }
+
+    if (!/^\d*\.?\d+$/.test(trimmed) && !/^\d+\.?\d*$/.test(trimmed)) {
+      return { error: 'Invalid amount', canSubmit: false };
+    }
+
+    const parsed = parseFloat(trimmed);
+    if (!isFinite(parsed) || isNaN(parsed)) {
+      return { error: 'Invalid amount', canSubmit: false };
+    }
+
+    if (parsed <= 0) {
+      return { error: 'Amount must be greater than 0', canSubmit: false };
+    }
+
+    if (selectedAsset?.balance != null && parsed > selectedAsset.balance) {
+      return { error: `Insufficient ${selectedAsset.symbol} balance`, canSubmit: false };
+    }
+
+    return { error: null, canSubmit: true };
+  }, [amount, selectedAsset]);
+
   const confirmDeposit = async () => {
-    if (!selectedAsset) return;
-      try {
+    if (!selectedAsset || !canSubmit || lendingLoading) return;
+    try {
       const res = await useStore.getState().deposit({ amount, asset: selectedAsset.symbol });
       Toast.show({ type: 'success', text1: 'Deposit Submitted', text2: JSON.stringify(res) });
       setModalVisible(false);
     } catch (err: any) {
-      // Fallback to mock response when offline / API fails
       const mockRes = { txHash: 'mock-' + Date.now(), status: 'mock', amount, asset: selectedAsset.symbol };
       useStore.setState({ lastLendingTx: mockRes });
       Toast.show({ type: 'info', text1: 'Offline - Mock Deposit', text2: JSON.stringify(mockRes) });
       setModalVisible(false);
     }
   };
+
+  const confirmDisabled = !canSubmit || lendingLoading;
+
   return (
     <>
     <ScrollView style={styles.container}>
       <Text style={styles.headerTitle}>Supply Market</Text>
-      
-      {/* Stats Header */}
+
       <View style={styles.statsContainer}>
         <View style={styles.statBox}>
           <Text style={styles.statLabel}>Net APY</Text>
@@ -52,7 +100,7 @@ export default function DepositScreen() {
       </View>
 
       <Text style={styles.sectionTitle}>Assets to Supply</Text>
-      
+
       <View style={styles.assetsList}>
         {MOCK_ASSETS.map((asset) => (
           <TouchableOpacity
@@ -69,7 +117,7 @@ export default function DepositScreen() {
                 <Text style={styles.assetSymbol}>{asset.symbol}</Text>
               </View>
             </View>
-            
+
             <View style={styles.assetRight}>
               <View style={styles.apyBadge}>
                 <Text style={styles.apyText}>{asset.apy}% APY</Text>
@@ -81,40 +129,63 @@ export default function DepositScreen() {
           </TouchableOpacity>
         ))}
       </View>
-      
+
       <View style={{ height: 100 }} />
     </ScrollView>
-      {/* Amount Modal */}
-        <Modal
-          visible={modalVisible}
-          transparent
-          animationType="slide"
-          onRequestClose={() => setModalVisible(false)}
-        >
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>Deposit {selectedAsset?.symbol}</Text>
+      <Modal
+        visible={modalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Deposit {selectedAsset?.symbol}</Text>
+            <View style={styles.inputRow}>
               <TextInput
                 value={amount}
-                onChangeText={setAmount}
-                keyboardType="numeric"
+                onChangeText={handleAmountChange}
+                keyboardType="decimal-pad"
                 style={styles.amountInput}
                 placeholder="Amount"
                 placeholderTextColor="#888"
+                accessibilityLabel="Deposit amount input"
               />
-              <View style={styles.modalButtons}>
-                <TouchableOpacity onPress={() => setModalVisible(false)} style={[styles.modalBtn, { backgroundColor: '#333' }]}>
-                    <Text style={styles.buttonText}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={confirmDeposit} style={[styles.modalBtn, { backgroundColor: '#A855F7' }]} disabled={useStore.getState().lendingLoading}>
-                    {useStore.getState().lendingLoading ? <ActivityIndicator color="#fff"/> : <Text style={styles.buttonText}>Confirm</Text>}
-                  </TouchableOpacity>
-              </View>
+              <TouchableOpacity
+                onPress={handleMaxPress}
+                style={styles.maxButton}
+                accessibilityLabel="Deposit MAX button"
+              >
+                <Text style={styles.maxButtonText}>MAX</Text>
+              </TouchableOpacity>
             </View>
-          </KeyboardAvoidingView>
-          </Modal>
-          </>
-        );
+            {error != null && (
+              <Text style={styles.errorText} accessibilityLabel={`Deposit error: ${error}`}>
+                {error}
+              </Text>
+            )}
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                onPress={() => setModalVisible(false)}
+                style={[styles.modalBtn, { backgroundColor: '#333' }]}
+                accessibilityLabel="Cancel deposit"
+              >
+                <Text style={styles.buttonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={confirmDeposit}
+                style={[styles.modalBtn, { backgroundColor: confirmDisabled ? '#555' : '#A855F7' }]}
+                disabled={confirmDisabled}
+                accessibilityLabel="Confirm deposit"
+              >
+                {lendingLoading ? <ActivityIndicator color="#fff"/> : <Text style={styles.buttonText}>Confirm</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+        </Modal>
+        </>
+      );
 }
 
 const styles = StyleSheet.create({
@@ -240,7 +311,13 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: 'bold',
   },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   amountInput: {
+    flex: 1,
     backgroundColor: '#1A1A1A',
     borderWidth: 1,
     borderColor: '#333',
@@ -249,6 +326,24 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     color: '#FFFFFF',
     fontSize: 16,
+  },
+  maxButton: {
+    backgroundColor: 'rgba(168, 85, 247, 0.2)',
+    borderWidth: 1,
+    borderColor: '#A855F7',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 16,
+  },
+  maxButtonText: {
+    color: '#A855F7',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  errorText: {
+    color: '#FF6363',
+    fontSize: 14,
+    fontWeight: '500',
   },
   modalButtons: {
     flexDirection: 'row',

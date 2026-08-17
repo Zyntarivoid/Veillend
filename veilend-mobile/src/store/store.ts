@@ -255,8 +255,10 @@ export const useStore = create<StoreState>(
     lastLendingTx: null,
     lendingLoading: false,
     deposit: async ({ amount, asset }: { amount: string; asset: string }) => {
+      if (get().lendingLoading) return null;
       set({ lendingLoading: true });
       try {
+        await Promise.resolve();
         const mockTx = { txHash: `mock-deposit-${Date.now()}`, amount, asset, status: 'success' };
         set({ lastLendingTx: mockTx, lendingLoading: false });
         return mockTx;
@@ -266,8 +268,10 @@ export const useStore = create<StoreState>(
       }
     },
     withdraw: async ({ amount, asset }: { amount: string; asset: string }) => {
+      if (get().lendingLoading) return null;
       set({ lendingLoading: true });
       try {
+        await Promise.resolve();
         const mockTx = { txHash: `mock-withdraw-${Date.now()}`, amount, asset, status: 'success' };
         set({ lastLendingTx: mockTx, lendingLoading: false });
         return mockTx;
@@ -277,8 +281,10 @@ export const useStore = create<StoreState>(
       }
     },
     borrow: async ({ amount, asset }: { amount: string; asset: string }) => {
+      if (get().lendingLoading) return null;
       set({ lendingLoading: true });
       try {
+        await Promise.resolve();
         const mockTx = { txHash: `mock-borrow-${Date.now()}`, amount, asset, status: 'success' };
         set({ lastLendingTx: mockTx, lendingLoading: false });
         return mockTx;
@@ -288,8 +294,10 @@ export const useStore = create<StoreState>(
       }
     },
     repay: async ({ amount, asset }: { amount: string; asset: string }) => {
+      if (get().lendingLoading) return null;
       set({ lendingLoading: true });
       try {
+        await Promise.resolve();
         const mockTx = { txHash: `mock-repay-${Date.now()}`, amount, asset, status: 'success' };
         set({ lastLendingTx: mockTx, lendingLoading: false });
         return mockTx;
