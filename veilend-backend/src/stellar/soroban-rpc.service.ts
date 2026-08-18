@@ -17,7 +17,6 @@ import { CORRELATION_ID_HEADER } from '../common/logging/correlation-id.util';
 
 import { CircuitBreakerManager } from './retry-with-fallback';
 
-
 @Injectable()
 export class SorobanRpcService implements OnModuleInit {
   private readonly logger = new Logger(SorobanRpcService.name);
@@ -99,7 +98,6 @@ export class SorobanRpcService implements OnModuleInit {
     );
   }
 
-
   /**
    * Returns fetch options (headers) for outbound calls, including the
    * current CLS correlation ID as X-Correlation-Id.
@@ -123,7 +121,7 @@ export class SorobanRpcService implements OnModuleInit {
    * automatically propagating the correlation ID header.
    */
   async rpcCall<T = unknown>(method: string, params?: unknown): Promise<T> {
-    const url = this.configService.stellar.sorobanRpcUrl;
+    const url = this.configService.stellar.sorobanRpcUrls[0];
     const body = JSON.stringify({
       jsonrpc: '2.0',
       id: 1,

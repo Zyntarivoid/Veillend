@@ -304,10 +304,12 @@ export class AuthService {
       }
     } catch (error) {
       // Already revoked/gone - logout is idempotent. Anything else is a real failure.
-      if (!(
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === 'P2025'
-      )) {
+      if (
+        !(
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2025'
+        )
+      ) {
         throw error;
       }
     }

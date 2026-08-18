@@ -17,7 +17,9 @@ export class PrismaService
     // Middleware that captures every Prisma operation and tags them with the
     // current correlation ID. The ID is stored on the params so downstream
     // logging / slow-query analysis can trace back to the originating request.
-    this.$use(
+    /* eslint-disable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-assignment */
+    const useFn = this.$use.bind(this);
+    void useFn(
       async (
         params: Prisma.MiddlewareParams,
         next: (params: Prisma.MiddlewareParams) => Promise<unknown>,
@@ -37,6 +39,7 @@ export class PrismaService
         return next(params);
       },
     );
+    /* eslint-enable @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-assignment */
   }
 
   async onModuleDestroy() {

@@ -10,7 +10,6 @@ import { CORRELATION_ID_HEADER } from '../common/logging/correlation-id.util';
 
 import { CircuitBreakerManager } from './retry-with-fallback';
 
-
 @Injectable()
 export class HorizonService implements OnModuleInit {
   private readonly logger = new Logger(HorizonService.name);
@@ -71,7 +70,6 @@ export class HorizonService implements OnModuleInit {
     });
   }
 
-
   /**
    * Returns fetch options (headers) for outbound calls, including the
    * current CLS correlation ID as X-Correlation-Id.
@@ -95,7 +93,7 @@ export class HorizonService implements OnModuleInit {
    * automatically propagating the correlation ID header.
    */
   async horizonFetch(path: string): Promise<Response> {
-    const url = `${this.configService.stellar.horizonUrl}/${path}`;
+    const url = `${this.configService.stellar.horizonUrls[0]}/${path}`;
     return fetch(url, this.getOutboundFetchOptions());
   }
 

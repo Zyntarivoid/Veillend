@@ -58,8 +58,8 @@ describe('IndexerService', () => {
           provide: AppConfigService,
           useValue: {
             stellar: {
-              sorobanRpcUrl: 'https://test',
-              horizonUrl: 'https://test',
+              sorobanRpcUrls: ['https://test'],
+              horizonUrls: ['https://test'],
               network: 'testnet',
               networkPassphrase: 'Test SDF Network ; September 2015',
             },

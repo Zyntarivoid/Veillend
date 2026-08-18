@@ -8,7 +8,6 @@ npm-debug.log
 .gitignore
 Dockerfile
 docker-compose*.yml
-docker-entrypoint.sh
 .dockerignore
 README.md
 SESSION.md
@@ -19,3 +18,4 @@ test
 *.md
 .vscode
 .idea
+.github
