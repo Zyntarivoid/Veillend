@@ -1,4 +1,4 @@
-import { Platform, ToastAndroid, Alert } from 'react-native';
+import React from 'react';
 
 type ToastOpts = { type?: string; text1?: string; text2?: string };
 
@@ -6,6 +6,10 @@ const show = (opts: ToastOpts) => {
   const text1 = opts?.text1 || '';
   const text2 = opts?.text2 || '';
   const message = text1 + (text2 ? '\n' + text2 : '');
+
+  // Delay loading react-native so Node-based tests never parse its source.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { Platform, ToastAndroid, Alert } = require('react-native');
   if (Platform.OS === 'android') {
     ToastAndroid.show(message, ToastAndroid.SHORT);
   } else {
@@ -19,7 +23,6 @@ export const showError = (text1: string, text2?: string) => show({ type: 'error'
 export const showInfo = (text1: string, text2?: string) => show({ type: 'info', text1, text2 });
 
 // Minimal React component placeholder so App.tsx can mount <Toast /> safely.
-import React from 'react';
 type ToastComponentType = React.FC & {
   show: (opts: ToastOpts) => void;
 };

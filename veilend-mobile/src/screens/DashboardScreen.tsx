@@ -1,20 +1,19 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Image, Modal, TouchableWithoutFeedback, Keyboard, Dimensions, FlatList, ActivityIndicator } from 'react-native';
-import api from '../utils/api';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Image, Modal, TouchableWithoutFeedback, Keyboard, Dimensions, FlatList, ActivityIndicator, RefreshControl } from 'react-native';
 import { useStore, TransactionRecord } from '../store/store';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { MOCK_USER } from '../data/mockData';
 import { shortenAddress, getCurrencySymbol } from '../utils/helpers';
+import { navigationRef } from '../navigation';
 import ProtocolStatusBanners from '../components/ProtocolStatusBanners';
+import OfflineBanner from '../components/OfflineBanner';
+import { ListSkeleton } from '../components/Skeletons';
 
 const { width } = Dimensions.get('window');
 const isSmallScreen = width < 380;
 const CARD_WIDTH = width - 48; // Padding 24 * 2
 const DEFAULT_PROFILE_IMAGE = 'https://i.pravatar.cc/100?img=5';
 
-
-  
 export default function DashboardScreen({ navigation }: any) {
   const {
     address,
@@ -33,17 +32,20 @@ export default function DashboardScreen({ navigation }: any) {
     balance,
     collateralValue,
     borrowedValue,
-    availableToBorrow,
-    healthFactor,
-    portfolioLoading,
-    portfolioError,
-    fetchPortfolio,
+    dashboardLoading,
+    dashboardError,
+    hydrateDashboard,
     transactions,
     transactionsLoading,
-    fetchTransactions,
+    pendingTransactions,
+    refreshDashboard,
+    isOnline,
   } = useStore();
-  const [data, setData] = useState<Record<string, unknown> | null>(null);
+  const [initialLoad, setInitialLoad] = useState(true);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshAbortRef = useRef<AbortController | null>(null);
+  const allTransactions = [...pendingTransactions, ...transactions];
   
   // Profile Menu State
   const [profileVisible, setProfileVisible] = useState(false);
@@ -54,33 +56,26 @@ export default function DashboardScreen({ navigation }: any) {
     { label: 'Borrowed Value', value: borrowedValue.toFixed(2), icon: 'trending-down-outline' },
   ];
 
-  if (portfolioLoading) {
+  if (initialLoad && dashboardLoading) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0F172A' }}>
         <ActivityIndicator size="large" color="#A855F7" />
-        <Text style={{ color: '#94A3B8', marginTop: 12 }}>Loading portfolio...</Text>
+        <Text style={{ color: '#94A3B8', marginTop: 12 }}>Loading dashboard...</Text>
       </View>
     );
   }
-
-  if (portfolioError) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0F172A', padding: 24 }}>
-        <Text style={{ color: '#EF4444', fontSize: 16, textAlign: 'center' }}>{portfolioError}</Text>
-        <TouchableOpacity style={{ marginTop: 16, padding: 12, backgroundColor: '#1E293B', borderRadius: 8 }} onPress={fetchPortfolio}>
-          <Text style={{ color: '#A855F7' }}>Retry</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-  const defaultUsername = address ? shortenAddress(address) : MOCK_USER.name;
+  const defaultUsername = address ? shortenAddress(address) : 'Guest';
   const username = profileName ?? defaultUsername;
   const avatarUri = profileImage ?? DEFAULT_PROFILE_IMAGE;
 
   const handleLogout = () => {
     setProfileVisible(false);
+    // logout() already clears profileName/profileImage (state + persisted
+    // SecureStore keys) — see store.ts.
     logout();
-    navigation.replace('ConnectWallet');
+    // Fully reset the navigation stack to avoid navigator-scope issues
+    // (ConnectWallet lives on the root stack, not inside the tab navigator).
+    navigationRef.reset({ index: 0, routes: [{ name: 'ConnectWallet' }] });
   };
 
   const handleStatusRetry = () => {
@@ -98,14 +93,28 @@ export default function DashboardScreen({ navigation }: any) {
   }).current;
 
   useEffect(() => {
-    fetchData();
+    // One-shot dashboard hydration: supported assets, portfolio, positions
+    // and transactions are fetched concurrently by the store.
+    hydrateDashboard().finally(() => setInitialLoad(false));
   }, []);
 
-  const fetchData = async () => {
+  // Cancel any in-flight pull-to-refresh work when the screen unmounts.
+  useEffect(() => {
+    return () => refreshAbortRef.current?.abort();
+  }, []);
+
+  const handleRefresh = async () => {
+    refreshAbortRef.current?.abort();
+    const controller = new AbortController();
+    refreshAbortRef.current = controller;
+    setRefreshing(true);
     try {
-      await Promise.all([fetchPortfolio(), fetchTransactions()]);
-    } catch (err) {
-      // Errors handled by store
+      await refreshDashboard(controller.signal);
+    } catch (e) {
+      // refreshDashboard aggregates failures into dashboardError; keep the
+      // spinner from getting stuck if an unexpected error escapes.
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -178,7 +187,18 @@ export default function DashboardScreen({ navigation }: any) {
   };
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView
+      style={styles.container}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={handleRefresh}
+          tintColor="#A855F7"
+          colors={['#A855F7']}
+          progressBackgroundColor="#1A1A1A"
+        />
+      }
+    >
       {/* Header */}
       <View style={styles.header}>
         <View>
@@ -204,9 +224,25 @@ export default function DashboardScreen({ navigation }: any) {
         walletConnected={Boolean(address && authToken)}
         lastSyncedAt={lastProtocolSyncAt}
         isRefreshing={protocolStatusLoading}
+        isOnline={isOnline}
         onReconnect={handleLogout}
         onRetrySync={handleStatusRetry}
       />
+
+      {/* Aggregate hydration error with retry */}
+      {dashboardError ? (
+        <View style={styles.errorBanner}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.errorBannerText}>{dashboardError}</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.errorBannerBtn}
+            onPress={() => hydrateDashboard().catch(() => {})}
+          >
+            <Text style={styles.errorBannerBtnText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
       {/* Profile Menu Modal */}
       <Modal
@@ -219,6 +255,7 @@ export default function DashboardScreen({ navigation }: any) {
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
               <View style={styles.modalContent}>
+                <OfflineBanner />
                 <View style={styles.modalHeader}>
                   <Text style={styles.modalTitle}>Profile</Text>
                   <TouchableOpacity onPress={() => setProfileVisible(false)}>
@@ -318,26 +355,44 @@ export default function DashboardScreen({ navigation }: any) {
 
       {/* Transactions List */}
       <Text style={styles.sectionTitle}>Transactions</Text>
-      <View style={styles.transactionsList}>
-        {transactions.map((tx: TransactionRecord) => (
-          <View key={tx.id} style={styles.txItem}>
-            <View style={styles.txLeft}>
-              <View style={styles.txIconBox}>
-                <Ionicons
-                  name={(tx.type === 'deposit' ? 'arrow-down' : tx.type === 'withdraw' ? 'arrow-up' : 'swap-horizontal') as any}
-                  size={20}
-                  color="#fff"
-                />
+      {transactionsLoading && allTransactions.length === 0 ? (
+        <ListSkeleton count={2} height={72} />
+      ) : allTransactions.length === 0 ? (
+        <View style={styles.txEmpty}>
+          <Text style={styles.txEmptyText}>No transactions yet</Text>
+        </View>
+      ) : (
+        <View style={styles.transactionsList}>
+          {allTransactions.map((tx: TransactionRecord) => (
+            <View key={tx.id} style={styles.txItem}>
+              <View style={styles.txLeft}>
+                <View style={styles.txIconBox}>
+                  <Ionicons
+                    name={(tx.type === 'deposit' ? 'arrow-down' : tx.type === 'withdraw' ? 'arrow-up' : 'swap-horizontal') as any}
+                    size={20}
+                    color="#fff"
+                  />
+                </View>
+                <View>
+                  <Text style={styles.txTitle}>{tx.type} — {tx.asset}</Text>
+                  <Text style={styles.txDate}>{tx.timestamp}</Text>
+                  {tx.status === 'PENDING' ? (
+                    <View style={styles.txStatusRow}>
+                      <ActivityIndicator size="small" color="#A855F7" />
+                      <Text style={[styles.txStatus, { color: '#A855F7' }]}>Pending</Text>
+                    </View>
+                  ) : tx.status === 'FAILED' ? (
+                    <Text style={[styles.txStatus, { color: '#FF4D4D' }]}>
+                      Failed{tx.errorReason ? ` — ${tx.errorReason}` : ''}
+                    </Text>
+                  ) : null}
+                </View>
               </View>
-              <View>
-                <Text style={styles.txTitle}>{tx.type} — {tx.asset}</Text>
-                <Text style={styles.txDate}>{tx.timestamp}</Text>
-              </View>
+              <Text style={styles.txValue}>{tx.amount} {tx.asset}</Text>
             </View>
-            <Text style={styles.txValue}>{tx.amount} {tx.asset}</Text>
-          </View>
-        ))}
-      </View>
+          ))}
+        </View>
+      )}
       
       {/* Spacer for bottom tab bar */}
       <View style={{ height: 100 }} />
@@ -649,5 +704,53 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  txStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+  },
+  txStatus: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  txEmpty: {
+    alignItems: 'center',
+    paddingVertical: 32,
+    backgroundColor: '#121212',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#222',
+  },
+  txEmptyText: {
+    color: '#666',
+    fontSize: 14,
+  },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: 'rgba(255, 77, 77, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 77, 77, 0.25)',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 24,
+  },
+  errorBannerText: {
+    color: '#FF4D4D',
+    fontSize: 13,
+  },
+  errorBannerBtn: {
+    backgroundColor: '#FF4D4D',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  errorBannerBtnText: {
+    color: '#FFFFFF',
+    fontWeight: 'bold',
+    fontSize: 13,
   },
 });

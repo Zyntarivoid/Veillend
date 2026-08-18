@@ -20,9 +20,13 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useWallet } from "@/context/WalletContext"
 import { WalletConnect } from "@/components/WalletConnect"
 import { WalletStatus } from "@/components/WalletStatus"
+import { ActionTray } from "@/components/ActionTray"
+
+export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
 
 export default function VeilLendDashboard() {
-  const { isConnected, isAuthenticated } = useWallet();
+  const { isConnected, isAuthenticated, address } = useWallet();
   // Global simulation states to demonstrate acceptance criteria loading/empty loops
   const [isLoading, setIsLoading] = React.useState<boolean>(false)
   const [isEmpty, setIsEmpty] = React.useState<boolean>(false)
@@ -35,13 +39,13 @@ export default function VeilLendDashboard() {
   // Show wallet connection prompt if not connected
   if (!isConnected || !isAuthenticated) {
     return (
-      <div className="p-4 sm:p-8 max-w-7xl mx-auto text-slate-100 min-h-screen flex flex-col items-center justify-center">
+      <main className="p-4 sm:p-8 max-w-7xl mx-auto text-slate-100 min-h-screen flex flex-col items-center justify-center">
         <Card className="bg-slate-950/40 border-slate-800/80 backdrop-blur-sm max-w-md w-full text-center">
           <CardHeader>
             <div className="mx-auto w-16 h-16 rounded-full bg-slate-900 flex items-center justify-center text-slate-600 border border-slate-800">
               <Wallet className="h-8 w-8 text-slate-500" />
             </div>
-            <CardTitle className="text-xl font-bold text-slate-200 mt-4">Connect Wallet</CardTitle>
+            <h1 className="text-xl font-bold text-slate-200 mt-4">Connect Wallet</h1>
             <CardDescription className="text-slate-400">
               Connect your Stellar wallet to access the VeilLend dashboard and manage your shielded assets.
             </CardDescription>
@@ -53,12 +57,12 @@ export default function VeilLendDashboard() {
             </p>
           </CardContent>
         </Card>
-      </div>
+      </main>
     )
   }
 
   return (
-    <div className="p-4 sm:p-8 space-y-8 max-w-7xl mx-auto text-slate-100 min-h-screen">
+    <main className="p-4 sm:p-8 space-y-8 max-w-7xl mx-auto text-slate-100 min-h-screen">
 
       {/* Dashboard Top Management Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-800 pb-6">
@@ -96,6 +100,9 @@ export default function VeilLendDashboard() {
           </Button>
         </div>
       </div>
+
+      {/* Protocol Action Tray (Deposit / Withdraw / Borrow / Repay) */}
+      <ActionTray userAddress={address || undefined} />
 
       {/* --- LAYER 1: PROTOCOL RISK ENGINE OVERVIEW --- */}
       {!isEmpty && !isLoading && (
@@ -297,6 +304,6 @@ export default function VeilLendDashboard() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </main>
   )
 }

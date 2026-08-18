@@ -28,13 +28,14 @@ export function ContributorInterest() {
           <button
             key={interestArea}
             type="button"
+            aria-pressed={selectedArea === interestArea}
             onClick={() => {
               setSelectedArea(interestArea);
               trackCampaignEvent('campaign_contributor_interest', {
                 interestArea,
               });
             }}
-            className={`rounded-full border px-4 py-2 text-sm font-medium transition-colors ${
+            className={`rounded-full border px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-secondary focus-visible:ring-offset-2 focus-visible:ring-offset-background-alt ${
               selectedArea === interestArea
                 ? 'border-secondary bg-secondary text-black'
                 : 'border-border bg-card text-text-secondary hover:border-secondary hover:text-text'

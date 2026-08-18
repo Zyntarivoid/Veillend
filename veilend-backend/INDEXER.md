@@ -26,7 +26,7 @@ When the backend starts up:
 3.  The indexer requests the oldest available ledger sequence from the Soroban RPC health endpoint (`getHealth`).
 4.  **Retention Safety Check**: If the database checkpoint is older than the oldest ledger currently retained by the RPC node (due to ledger expiration or pruning), it automatically jumps the starting height forward to `oldestLedger` and logs a warning about the skipped historical period. This prevents API query failures.
 5.  It fetches events in chunks of up to 100, page-navigating using the RPC response pagination `cursor`, and commits the updated checkpoint to Postgres upon catching up.
-6.  Duplicate event delivery is handled at the storage layer: `saveTransaction` returns `false` (no-op) if the event's `sorobanEventId` was already indexed, and the service skips the corresponding position update in that case — so replayed/redelivered events never double-count balances.
+6.  Duplicate event delivery and position updates are handled atomically at the storage layer: `IndexerRepository.applyEvent` runs the `TransactionHistory` insert (deduped on the unique `sorobanEventId`) and the `Position` delta update in a single database transaction, returning `false` when the event was already indexed — so replayed/redelivered events never double-count balances.
 
 ### 2. Replay Behavior (Historical Sync Reset)
 If you modify your read model schemas or want to index all events from scratch, you can trigger a full historical event replay:
@@ -60,4 +60,3 @@ STELLAR_INDEXER_POLL_INTERVAL_MS=5000
 
 *   `TransactionHistory.amountUsd` is written as `0` by the indexer — no price-oracle integration exists yet anywhere in the codebase (`AdminService.setOraclePrice` is also currently an unpersisted stub). Populating real USD values is a separate, unscoped effort.
 *   Auto-created `Asset` rows (from `asset_configured` events for contracts not yet known to the app) use the contract address as a placeholder for `code`/`symbol`/`name`, since the indexer has no other source for that metadata. A future admin asset-configuration flow is expected to fill in real values.
-*   `updatePosition`'s read-modify-write relies on the indexer's poll loop processing events strictly serially (single writer). If indexing is ever parallelized, this needs row-level locking or an atomic increment-then-clamp instead.

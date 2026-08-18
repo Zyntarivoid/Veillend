@@ -15,6 +15,12 @@ import { Ionicons } from '@expo/vector-icons';
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
+// Reuse the lightweight exported ref so tests can import it without
+// dragging in react-native's heavy transforms.
+import { navigationRef, setNativeRef } from './navigationRef';
+
+export { navigationRef };
+
 function MainTabs() {
   return (
     <Tab.Navigator
@@ -62,7 +68,7 @@ export default function RootNavigator() {
   // even when the user has a persisted session.
   if (!sessionRestored) {
     return (
-      <NavigationContainer>
+      <NavigationContainer ref={(r) => setNativeRef(r)}>
         <Stack.Navigator screenOptions={{ headerShown: false }}>
           <Stack.Screen name="Splash" component={SessionRestoreSplash} />
         </Stack.Navigator>
@@ -71,7 +77,7 @@ export default function RootNavigator() {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={(r) => setNativeRef(r)}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {!authToken ? (
           <Stack.Screen name="ConnectWallet" component={ConnectWalletScreen} />

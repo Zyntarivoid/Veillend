@@ -1,21 +1,14 @@
 import { useState } from 'react';
 import { Keypair } from '@stellar/stellar-base';
 import { useStore } from '../store/store';
-import * as SecureStoreShim from '../utils/secureStoreShim';
+import { setSecureItem } from '../utils/secureStorage';
 
-let SecureStore: typeof SecureStoreShim;
-try {
-  // @ts-ignore
-  SecureStore = require('expo-secure-store');
-} catch (e) {
-  SecureStore = SecureStoreShim as any;
-}
-
-const SECRET_KEY_STORE = 'stellar_secret_key';
+const SECRET_KEY_STORE = 'stellar_secret_key' as const;
 
 export function useStellarAuth() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [generatedSecretKey, setGeneratedSecretKey] = useState<string | null>(null);
   const { requestNonce, verify, setAddress, setAuthToken } = useStore();
 
   const authenticate = async (keypair: Keypair) => {
@@ -32,9 +25,12 @@ export function useStellarAuth() {
   const generateWallet = async () => {
     setLoading(true);
     setError(null);
+    setGeneratedSecretKey(null);
     try {
       const keypair = Keypair.random();
-      await SecureStore.setItemAsync(SECRET_KEY_STORE, keypair.secret());
+      const secret = keypair.secret();
+      await setSecureItem(SECRET_KEY_STORE, secret);
+      setGeneratedSecretKey(secret);
       await authenticate(keypair);
     } catch (e: any) {
       setError(e?.message ?? 'Failed to generate wallet');
@@ -43,19 +39,31 @@ export function useStellarAuth() {
     }
   };
 
-  const importWallet = async (secretKey: string) => {
+  const importWallet = async (secretKey: string): Promise<boolean> => {
     setLoading(true);
     setError(null);
+    setGeneratedSecretKey(null);
     try {
       const keypair = Keypair.fromSecret(secretKey.trim());
-      await SecureStore.setItemAsync(SECRET_KEY_STORE, keypair.secret());
+      await setSecureItem(SECRET_KEY_STORE, keypair.secret());
       await authenticate(keypair);
+      return true;
     } catch (e: any) {
       setError(e?.message ?? 'Invalid secret key');
+      return false;
     } finally {
       setLoading(false);
     }
   };
 
-  return { loading, error, generateWallet, importWallet };
+  const clearGeneratedSecretKey = () => setGeneratedSecretKey(null);
+
+  return {
+    loading,
+    error,
+    generateWallet,
+    importWallet,
+    generatedSecretKey,
+    clearGeneratedSecretKey,
+  };
 }

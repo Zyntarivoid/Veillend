@@ -44,7 +44,7 @@ export function SyncStatusBadge({ status, lastSyncedAt, onRefresh }: SyncStatusB
           type="button"
           onClick={onRefresh}
           aria-label="Refresh positions"
-          className="text-slate-500 hover:text-slate-300 transition-colors"
+          className="rounded text-slate-500 hover:text-slate-300 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
         >
           <RefreshCw className="h-3.5 w-3.5" />
         </button>

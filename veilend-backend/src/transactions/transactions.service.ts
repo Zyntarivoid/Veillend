@@ -1,84 +1,74 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { HorizonService } from '../stellar/horizon.service';
-import { ServiceResponse } from '../stellar/types';
-
-export interface TransactionRecord {
-  id: string;
-  type: 'deposit' | 'withdraw' | 'borrow' | 'repay' | 'transfer';
-  amount: number;
-  asset: string;
-  timestamp: string;
-  status: string;
-  txHash: string;
-}
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { PageDto } from '../common/dto/page.dto';
+import { PageMetaDto } from '../common/dto/page-meta.dto';
+import { formatRawAmount } from '../common/utils/format-raw-amount';
+import { GetTransactionsQueryDto } from './dto/get-transactions-query.dto';
+import { TransactionRecordDto } from './dto/transaction-record.dto';
 
 @Injectable()
 export class TransactionsService {
   private readonly logger = new Logger(TransactionsService.name);
 
-  constructor(private readonly horizonService: HorizonService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Reads the indexer's TransactionHistory table, which is derived from
+   * classified Soroban protocol events, rather than raw Horizon transaction
+   * history (which included unrelated ops like `change_trust`).
+   */
   async getTransactions(
     walletAddress: string,
-  ): Promise<ServiceResponse<TransactionRecord[]>> {
-    try {
-      const client = this.horizonService.getClient();
-      const txs = await client
-        .transactions()
-        .forAccount(walletAddress)
-        .limit(20)
-        .order('desc')
-        .call();
+    query: GetTransactionsQueryDto,
+  ): Promise<PageDto<TransactionRecordDto>> {
+    const user = await this.prisma.user.findUnique({
+      where: { walletAddress },
+    });
 
-      const records: TransactionRecord[] = txs.records.map((tx) => {
-        // Determine transaction type from operations
-        let type: TransactionRecord['type'] = 'transfer';
-        let amount = 0;
-        let asset = 'XLM';
-
-        if (tx.operations && tx.operations.length > 0) {
-          const op = tx.operations[0] as Record<string, unknown>;
-          const opType = op.type as string | undefined;
-          if (opType === 'payment') {
-            type = 'transfer';
-            const rawAmount = op.amount;
-            amount = typeof rawAmount === 'string' ? parseFloat(rawAmount) : 0;
-            const rawAssetCode = op.asset_code;
-            asset = typeof rawAssetCode === 'string' ? rawAssetCode : 'XLM';
-          } else if (opType === 'change_trust') {
-            type = 'deposit';
-            const rawLimit = op.limit;
-            amount = typeof rawLimit === 'string' ? parseFloat(rawLimit) : 0;
-            const rawAssetCode = op.asset_code;
-            asset = typeof rawAssetCode === 'string' ? rawAssetCode : 'UNKNOWN';
-          }
-        }
-
-        return {
-          id: tx.id,
-          type,
-          amount,
-          asset,
-          timestamp: tx.created_at,
-          status: tx.successful ? 'success' : 'failed',
-          txHash: tx.hash,
-        };
-      });
-
-      return {
-        success: true,
-        data: records,
-      };
-    } catch (error: unknown) {
-      const message =
-        error instanceof Error ? error.message : 'Failed to fetch transactions';
-      this.logger.warn(
-        `Transaction fetch failed for ${walletAddress}: ${message}`,
+    if (!user) {
+      throw new NotFoundException(
+        `No indexed data found for wallet ${walletAddress}`,
       );
-      return {
-        success: false,
-        error: { message, code: 'TRANSACTIONS_FETCH_ERROR', rawError: error },
-      };
     }
+
+    const where = {
+      userId: user.id,
+      ...(query.type ? { type: query.type } : {}),
+    };
+
+    const [records, itemCount] = await Promise.all([
+      this.prisma.transactionHistory.findMany({
+        where,
+        include: { asset: true },
+        take: query.take,
+        skip: query.skip,
+        orderBy: {
+          createdAt: query.order.toLowerCase() as 'asc' | 'desc',
+        },
+      }),
+      this.prisma.transactionHistory.count({ where }),
+    ]);
+
+    const data: TransactionRecordDto[] = records.map((tx) => ({
+      id: tx.id,
+      type: tx.type,
+      status: tx.status,
+      amount: formatRawAmount(tx.amountRaw, tx.asset.decimals),
+      amountUsd: Number(tx.amountUsd),
+      assetCode: tx.asset.code,
+      assetSymbol: tx.asset.symbol,
+      txHash: tx.txHash,
+      ledgerSequence: tx.ledgerSequence,
+      sorobanEventId: tx.sorobanEventId,
+      createdAt: tx.createdAt,
+      confirmedAt: tx.confirmedAt,
+    }));
+
+    this.logger.debug(
+      `Fetched ${data.length}/${itemCount} transaction(s) for ${walletAddress}`,
+    );
+
+    const pageMetaDto = new PageMetaDto({ pageOptionsDto: query, itemCount });
+    return new PageDto(data, pageMetaDto);
   }
 }

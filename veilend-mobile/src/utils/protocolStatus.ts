@@ -5,19 +5,21 @@ export type ProtocolStatusInput = {
   lastSyncedAt?: number | null;
   now?: number;
   maxSyncLagMs?: number;
+  isOnline?: boolean;
 };
 
 export type ProtocolStatusBannerId =
   | 'wallet-disconnected'
   | 'network-mismatch'
-  | 'sync-lag';
+  | 'sync-lag'
+  | 'offline';
 
 export type ProtocolStatusBanner = {
   id: ProtocolStatusBannerId;
   severity: 'warning' | 'danger';
   title: string;
   message: string;
-  actionLabel: string;
+  actionLabel?: string;
 };
 
 const DEFAULT_SYNC_LAG_MS = 120_000;
@@ -33,10 +35,20 @@ export function getProtocolStatusBanners({
   lastSyncedAt,
   now = Date.now(),
   maxSyncLagMs = DEFAULT_SYNC_LAG_MS,
+  isOnline = true,
 }: ProtocolStatusInput): ProtocolStatusBanner[] {
   const banners: ProtocolStatusBanner[] = [];
   const normalizedExpected = expectedNetwork.trim().toLowerCase();
   const normalizedCurrent = currentNetwork?.trim().toLowerCase();
+
+  if (!isOnline) {
+    banners.push({
+      id: 'offline',
+      severity: 'danger',
+      title: 'No Internet Connection',
+      message: 'You are offline. Reconnect to refresh live balances and submit transactions.',
+    });
+  }
 
   if (!walletConnected) {
     banners.push({

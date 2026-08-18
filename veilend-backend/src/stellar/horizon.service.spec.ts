@@ -41,8 +41,8 @@ describe('HorizonService', () => {
           provide: AppConfigService,
           useValue: {
             stellar: {
-              sorobanRpcUrl: 'https://test',
-              horizonUrl: 'https://test',
+              sorobanRpcUrls: ['https://test'],
+              horizonUrls: ['https://test'],
               network: 'testnet',
               networkPassphrase: 'Test SDF Network ; September 2015',
             },
@@ -106,7 +106,9 @@ describe('HorizonService', () => {
 
       expect(result).toBe(false);
       expect(service.isHealthy()).toBe(false);
-      expect(service.getLastError()).toBe('Network offline');
+      expect(service.getLastError()).toBe(
+        'All Horizon providers are unhealthy',
+      );
     });
   });
 
@@ -137,7 +139,9 @@ describe('HorizonService', () => {
       service.checkConnection$().subscribe((response) => {
         expect(response.success).toBe(false);
         expect(response.data?.connected).toBe(false);
-        expect(response.error?.message).toBe('Horizon offline');
+        expect(response.error?.message).toBe(
+          'All Horizon providers are unhealthy',
+        );
         done();
       });
     });

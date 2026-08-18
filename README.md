@@ -66,17 +66,31 @@ All contract errors are typed via `VeilLendError` (`#[contracterror]`, `#[repr(u
 | Variant | Code | When it fires |
 |---------|------|---------------|
 | `AlreadyInitialized` | 1 | `__constructor` called when admin is already set |
-| `Unauthorized` | 2 | Non-admin caller on admin-only functions (`configure_asset`, `set_oracle_price`) |
+| `Unauthorized` | 2 | Non-admin caller on admin-only functions (`add_admin`, `remove_admin`, `propose_*`, `execute_*`, `cancel_*`, `set_timelock_ledgers`, `set_paused`) |
 | `UnsupportedAsset` | 3 | Operation on an asset not yet configured via `configure_asset` |
 | `InvalidAmount` | 4 | Negative amount passed to `deposit`, `borrow`, `repay`, `withdraw` |
 | `InsufficientCollateral` | 5 | `borrow` or `withdraw` would push collateral ratio below minimum |
 | `InsufficientDeposit` | 6 | `withdraw` amount exceeds user's deposited balance |
 | `RepayTooLarge` | 7 | `repay` amount exceeds user's outstanding borrowed balance |
-| `InvalidCollateralRatio` | 8 | `__constructor` called with `min_collateral_ratio_bps < 10_000` (< 100%) |
+| `InvalidCollateralRatio` | 8 | `__constructor` or `propose_set_min_collateral_ratio` called with `min_collateral_ratio_bps < 10_000` (< 100%) |
 | `NotInitialized` | 9 | Any function requiring admin called before `__constructor` |
 | `ZeroAmount` | 10 | Zero amount passed to `deposit`, `borrow`, `repay`, `withdraw` |
 | `OraclePriceMissing` | 11 | `borrow` or `withdraw` on an asset without a configured oracle price |
-| `ContractPaused` | 12 | Any state-changing function called while contract is paused |
+| `ContractPaused` | 12 | Deposit or borrow called while contract is paused |
+| `DepositCapExceeded` | 13 | Deposit would exceed the asset's deposit cap |
+| `BorrowCapExceeded` | 14 | Borrow would exceed the asset's borrow cap |
+| `InvalidCap` | 15 | Cap value that is neither `-1` (unlimited) nor positive |
+| `CircuitBreakerTriggered` | 16 | Circuit breaker triggered - asset temporarily paused |
+| `InsufficientReserve` | 17 | Reserve balance too low for the requested action |
+| `TimelockNotReady` | 18 | `execute_*` called before the pending action's timelock has elapsed |
+| `UnknownAction` | 19 | `execute_*`/`cancel_*` called with an unknown action id or a mismatched action kind |
+| `LastAdminRequired` | 20 | `remove_admin` would remove the last remaining admin |
+| `InvalidTimelock` | 21 | `set_timelock_ledgers` called with a value outside `1..=100_000` |
+| `TimelockRequired` | 22 | `set_paused(true)` called directly — pausing must go through `propose_set_paused`/`execute_set_paused` |
+| `OraclePriceStale` | 23 | Oracle price has exceeded maximum age limit |
+| `OraclePriceChangeExceedsLimit` | 24 | Oracle price change exceeds maximum allowed volatility |
+| `OraclePriceBelowMin` | 25 | Oracle price is below minimum allowed bound |
+| `OraclePriceAboveMax` | 26 | Oracle price is above maximum allowed bound |
 
 ### Error handling notes
 - Zero and negative amounts produce **different** errors (`ZeroAmount` vs `InvalidAmount`) so clients can distinguish them.
@@ -167,7 +181,7 @@ The previous backend and migration documents remain available under `legacy/` wh
 ## 📜 License
 MIT
 
-## 🌟 Join the Drips Monthly Wave Contributor Program
+## 🌟 Join the Monthly Wave Contributor Program
 
 We're actively seeking contributors to help build VeilLend on Stellar! This is your opportunity to:
 
@@ -217,7 +231,6 @@ All contributors must adhere to the Code of Conduct and sign off commits for DCO
 - [Soroban Documentation](https://soroban.stellar.org/docs)
 - [Stellar Developer Docs](https://developers.stellar.org/docs)
 - Archived research: `legacy/docs`
-- [Drips Contributor Program](https://drips.network/contributors)
 - [Stellar Discord](https://discord.gg/stellardev)
 
 **Ready to contribute?** Start with the VeilLend Soroban contract in `/veilend-soroban` and help us build the future of private lending on Stellar! 🌟

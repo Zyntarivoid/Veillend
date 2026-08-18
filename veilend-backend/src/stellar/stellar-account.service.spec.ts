@@ -23,15 +23,11 @@ describe('StellarAccountService', () => {
         StellarAccountService,
         {
           provide: HorizonService,
-          useValue: {
-            getClient: jest.fn().mockReturnValue(mockHorizonClient),
-          },
+          useValue: mockHorizonClient,
         },
         {
           provide: SorobanRpcService,
-          useValue: {
-            getClient: jest.fn().mockReturnValue(mockSorobanClient),
-          },
+          useValue: mockSorobanClient,
         },
       ],
     }).compile();

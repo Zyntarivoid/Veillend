@@ -55,6 +55,7 @@ model Asset {
   logoUrl       String?
   isNative      Boolean  @default(false)
   isSupported   Boolean  @default(false)     // set by the indexer's 'asset_configured' event
+  minCollateralRatio Float?                    // per-asset LTV (0–1); null uses protocol default
   createdAt     DateTime @default(now())
 
   positions     Position[]
@@ -182,6 +183,85 @@ model Admin {
   createdAt      DateTime @default(now())
 
   @@index([walletAddress])
+}
+
+// ─── Admin Audit Log ─────────────────────────────────────────────────────────
+
+enum AdminActionType {
+  ADD_ADMIN
+  REMOVE_ADMIN
+  CONFIGURE_ASSET
+  SET_ORACLE_PRICE
+  SET_MIN_COLLATERAL_RATIO
+}
+
+model AdminAuditLog {
+  id            String          @id @default(uuid())
+  actorWallet   String                          // wallet address of the admin who performed the action
+  action        AdminActionType
+  target        String?                         // the target of the action (e.g., wallet address, asset ID)
+  payload       Json?                           // additional data about the action
+  createdAt     DateTime        @default(now())
+
+  @@index([actorWallet])
+  @@index([action])
+  @@index([createdAt])
+}
+
+// ─── Admin Action Intents ────────────────────────────────────────────────────
+
+enum AdminActionStatus {
+  PENDING
+  SENT
+  CONFIRMED
+  FAILED
+}
+
+// Records every privileged admin mutation dispatched through the backend as a
+// replay-safe intent. The backend never holds admin secret keys: it builds an
+// unsigned Soroban transaction XDR (source = admin's public key, sequence =
+// the admin account's current nonce, memo = the action id) that the client
+// signs with Freighter and submits itself. The AdminActionWatcher flips the
+// status based on the on-chain outcome of the reported txHash.
+model AdminAction {
+  id            String            @id @default(cuid())
+  adminAddress  String
+  action        AdminActionType
+  payload       Json
+  xdr           String            @default("")
+  status        AdminActionStatus @default(PENDING)
+  txHash        String?           @unique
+  error         String?
+  submittedAt   DateTime?
+  confirmedAt   DateTime?
+  createdAt     DateTime          @default(now())
+
+  @@index([adminAddress])
+  @@index([action])
+  @@index([status])
+  @@index([txHash])
+}
+
+// ─── Auth Audit Log ──────────────────────────────────────────────────────────
+
+enum AuthEventType {
+  NONCE_GENERATED
+  LOGIN_SUCCESS
+  LOGIN_FAILED
+  LOGOUT
+}
+
+model AuthAuditLog {
+  id            String        @id @default(uuid())
+  walletAddress String
+  event         AuthEventType
+  reason        String?
+  ip            String?
+  userAgent     String?
+  correlationId String?
+  createdAt     DateTime      @default(now())
+
+  @@index([walletAddress, createdAt(sort: Desc)])
 }
 
 // ─── Indexer Checkpoint ──────────────────────────────────────────────────────

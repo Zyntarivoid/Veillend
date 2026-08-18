@@ -6,6 +6,11 @@ import { AppModule } from './../src/app.module';
 import { WalletService } from './../src/wallet/wallet.service';
 import { PrismaService } from './../src/prisma/prisma.service';
 
+// A syntactically valid Stellar Ed25519 public key, needed now that
+// walletAddress is validated with @IsStellarAddress() at the API boundary.
+const VALID_WALLET_ADDRESS =
+  'GBJEI2M7C3VCWLNGMVIUCA5MNNJICYGKRPS75OZHNUCX33RTRJNQK6MH';
+
 // Real Stellar signature verification and a live Postgres connection are
 // unnecessary weight for exercising the session lifecycle end-to-end, so
 // both are replaced with lightweight in-memory stubs scoped to this spec.
@@ -85,13 +90,13 @@ describe('Session lifecycle (e2e)', () => {
   async function login(): Promise<string> {
     const nonceRes = await request(app.getHttpServer())
       .post('/auth/nonce')
-      .send({ walletAddress: 'GABC' });
+      .send({ walletAddress: VALID_WALLET_ADDRESS });
     const nonceBody = nonceRes.body as { nonce: string };
 
     const verifyRes = await request(app.getHttpServer())
       .post('/auth/verify')
       .send({
-        walletAddress: 'GABC',
+        walletAddress: VALID_WALLET_ADDRESS,
         nonce: nonceBody.nonce,
         signature: 'stubbed',
       });
@@ -109,7 +114,7 @@ describe('Session lifecycle (e2e)', () => {
     const body = res.body as { walletAddress: string; sessionId: string };
 
     expect(res.status).toBe(200);
-    expect(body.walletAddress).toBe('GABC');
+    expect(body.walletAddress).toBe(VALID_WALLET_ADDRESS);
     expect(typeof body.sessionId).toBe('string');
   });
 
@@ -136,5 +141,21 @@ describe('Session lifecycle (e2e)', () => {
       .set('Authorization', `Bearer ${token}`);
 
     expect(sessionRes.status).toBe(401);
+  });
+
+  it('rejects an invalid walletAddress on nonce request', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/auth/nonce')
+      .send({ walletAddress: 'not-a-key' });
+    const body = res.body as {
+      success: boolean;
+      error: { message: string };
+    };
+
+    expect(res.status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error.message).toContain(
+      'Must be a valid Stellar public key (G...)',
+    );
   });
 });

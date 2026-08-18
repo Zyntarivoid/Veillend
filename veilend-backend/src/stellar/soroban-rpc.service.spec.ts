@@ -41,8 +41,8 @@ describe('SorobanRpcService', () => {
           provide: AppConfigService,
           useValue: {
             stellar: {
-              sorobanRpcUrl: 'https://test',
-              horizonUrl: 'https://test',
+              sorobanRpcUrls: ['https://test'],
+              horizonUrls: ['https://test'],
               network: 'testnet',
               networkPassphrase: 'Test SDF Network ; September 2015',
             },
@@ -74,7 +74,9 @@ describe('SorobanRpcService', () => {
   describe('onModuleInit', () => {
     it('should initialize Soroban RPC client', () => {
       service.onModuleInit();
-      expect(rpc.Server).toHaveBeenCalledWith('https://test');
+      expect(rpc.Server).toHaveBeenCalledWith('https://test', {
+        allowHttp: true,
+      });
     });
   });
 
@@ -108,7 +110,9 @@ describe('SorobanRpcService', () => {
 
       expect(result).toBe(false);
       expect(service.isHealthy()).toBe(false);
-      expect(service.getLastError()).toBe('Reported status: unhealthy');
+      expect(service.getLastError()).toBe(
+        'All Soroban RPC providers are unhealthy',
+      );
     });
 
     it('should set healthy to false when getHealth throws an error', async () => {
@@ -120,7 +124,9 @@ describe('SorobanRpcService', () => {
 
       expect(result).toBe(false);
       expect(service.isHealthy()).toBe(false);
-      expect(service.getLastError()).toBe('RPC Offline');
+      expect(service.getLastError()).toBe(
+        'All Soroban RPC providers are unhealthy',
+      );
     });
   });
 
@@ -153,7 +159,9 @@ describe('SorobanRpcService', () => {
       service.checkConnection$().subscribe((response) => {
         expect(response.success).toBe(false);
         expect(response.data?.connected).toBe(false);
-        expect(response.error?.message).toBe('RPC Offline');
+        expect(response.error?.message).toBe(
+          'All Soroban RPC providers are unhealthy',
+        );
         done();
       });
     });

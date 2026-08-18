@@ -3,7 +3,7 @@
 import React, { createContext, useContext, ReactNode } from "react";
 import { useStellarWallet, WalletState, WalletActions } from "@/hooks/useStellarWallet";
 
-type WalletContextType = WalletState & WalletActions;
+export type WalletContextType = WalletState & WalletActions;
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
 

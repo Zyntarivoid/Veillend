@@ -6,6 +6,7 @@ import Toast from './src/utils/toast';
 import { useStore } from './src/store/store';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
+import NetworkProvider from './src/components/NetworkProvider';
 import { setupCrashInstrumentation } from './src/utils/errorReporting';
 
 // Install global crash handlers once on module load
@@ -20,18 +21,20 @@ export default function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ErrorBoundary component="App">
-        <View style={styles.container}>
-          <RootNavigator />
-          <StatusBar style="light" />
+        <NetworkProvider>
+          <View style={styles.container}>
+            <RootNavigator />
+            <StatusBar style="light" />
 
-          {anyLoading && (
-            <View style={styles.loadingOverlay} pointerEvents="none">
-              <ActivityIndicator size="large" color="#fff" />
-            </View>
-          )}
+            {anyLoading && (
+              <View style={styles.loadingOverlay} pointerEvents="none">
+                <ActivityIndicator size="large" color="#fff" />
+              </View>
+            )}
 
-          <Toast />
-        </View>
+            <Toast />
+          </View>
+        </NetworkProvider>
       </ErrorBoundary>
     </GestureHandlerRootView>
   );

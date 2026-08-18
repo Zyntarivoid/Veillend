@@ -24,8 +24,7 @@ export class StellarAccountService {
   ): Promise<ServiceResponse<Horizon.AccountResponse>> {
     try {
       this.logger.log(`Looking up account on Horizon: ${accountId}`);
-      const client = this.horizonService.getClient();
-      const account = await client.loadAccount(accountId);
+      const account = await this.horizonService.loadAccount(accountId);
       return { success: true, data: account };
     } catch (error: unknown) {
       let status: number | undefined = undefined;
@@ -78,8 +77,7 @@ export class StellarAccountService {
   ): Promise<ServiceResponse<Account>> {
     try {
       this.logger.log(`Looking up account on Soroban RPC: ${accountId}`);
-      const client = this.sorobanRpcService.getClient();
-      const account = await client.getAccount(accountId);
+      const account = await this.sorobanRpcService.getAccount(accountId);
       return { success: true, data: account };
     } catch (error: unknown) {
       let message = 'Error loading account from Soroban RPC';

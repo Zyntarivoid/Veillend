@@ -1,85 +1,134 @@
 import { NextResponse } from 'next/server';
+import { parseOr422 } from '@/lib/server/validation';
+import { captureEvent } from '@/lib/server/telemetry';
+import { CampaignEventSchema, type CampaignEvent } from '@/lib/validation/campaign-schemas';
 
-const campaignEvents = [
-  'campaign_page_visit',
-  'campaign_cta_click',
-  'campaign_contributor_interest',
-] as const;
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const maxDuration = 15;
 
-type CampaignEventName = (typeof campaignEvents)[number];
+// Per-IP Rate Limiting (60 requests per 1 minute window)
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const RATE_LIMIT_MAX_REQUESTS = 60;
+const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
 
-type CampaignEventRequest = {
-  event?: CampaignEventName;
-  campaign?: string;
-  timestamp?: string;
-  payload?: Record<string, unknown>;
-};
-
-type SanitizedPayload = {
-  path?: string;
-  referrer?: string;
-  source?: string;
-  ctaId?: string;
-  ctaLabel?: string;
-  targetUrl?: string;
-  interestArea?: string;
-};
-
-function isCampaignEventName(event: unknown): event is CampaignEventName {
-  return typeof event === 'string' && campaignEvents.includes(event as CampaignEventName);
+export function resetRateLimits(): void {
+  rateLimitStore.clear();
 }
 
-function sanitizeString(value: unknown, maxLength = 160) {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
+// In-Memory LRU Dedup Cache keyed on event ID
+const DEDUP_CACHE_MAX_SIZE = 10000;
+const dedupCache = new Map<string, number>();
 
-  const trimmedValue = value.trim();
-
-  if (!trimmedValue) {
-    return undefined;
-  }
-
-  return trimmedValue.slice(0, maxLength);
+export function resetDedupCache(): void {
+  dedupCache.clear();
 }
 
-function sanitizePayload(payload: CampaignEventRequest['payload']): SanitizedPayload {
-  if (!payload) {
-    return {};
+function isDuplicateEvent(id: string): boolean {
+  if (dedupCache.has(id)) {
+    return true;
+  }
+  if (dedupCache.size >= DEDUP_CACHE_MAX_SIZE) {
+    const firstKey = dedupCache.keys().next().value;
+    if (firstKey !== undefined) {
+      dedupCache.delete(firstKey);
+    }
+  }
+  dedupCache.set(id, Date.now());
+  return false;
+}
+
+function isAllowedOrigin(originHeader: string | null): boolean {
+  if (!originHeader) {
+    return true;
   }
 
-  return {
-    path: sanitizeString(payload.path),
-    referrer: sanitizeString(payload.referrer, 240),
-    source: sanitizeString(payload.source),
-    ctaId: sanitizeString(payload.ctaId),
-    ctaLabel: sanitizeString(payload.ctaLabel),
-    targetUrl: sanitizeString(payload.targetUrl, 240),
-    interestArea: sanitizeString(payload.interestArea),
-  };
+  const configuredOrigin = process.env.NEXT_PUBLIC_APP_URL || process.env.ALLOWED_ORIGIN;
+  const defaultAllowed = ['http://localhost:3000', 'http://127.0.0.1:3000', 'https://veillend.app'];
+
+  if (configuredOrigin && originHeader === configuredOrigin) {
+    return true;
+  }
+
+  if (defaultAllowed.includes(originHeader)) {
+    return true;
+  }
+
+  try {
+    const parsedOrigin = new URL(originHeader);
+    if (parsedOrigin.hostname === 'localhost' || parsedOrigin.hostname === '127.0.0.1') {
+      return true;
+    }
+  } catch {
+    return false;
+  }
+
+  return false;
 }
 
 export async function POST(request: Request) {
-  let body: CampaignEventRequest;
+  // 1. Check Origin Header Validation (403 if invalid)
+  const originHeader = request.headers.get('origin');
+  if (!isAllowedOrigin(originHeader)) {
+    return NextResponse.json({ error: 'Forbidden origin' }, { status: 403 });
+  }
 
+  // 2. Check Rate Limit by IP (429 if exceeded)
+  const clientIp =
+    request.headers.get('x-forwarded-for')?.split(',')[0].trim() ||
+    request.headers.get('x-real-ip') ||
+    '127.0.0.1';
+
+  const now = Date.now();
+  let ipRecord = rateLimitStore.get(clientIp);
+
+  if (!ipRecord || now > ipRecord.resetTime) {
+    ipRecord = { count: 1, resetTime: now + RATE_LIMIT_WINDOW_MS };
+    rateLimitStore.set(clientIp, ipRecord);
+  } else {
+    ipRecord.count += 1;
+  }
+
+  if (ipRecord.count > RATE_LIMIT_MAX_REQUESTS) {
+    return NextResponse.json(
+      { error: 'Rate limit exceeded' },
+      {
+        status: 429,
+        headers: {
+          'Retry-After': '60',
+        },
+      }
+    );
+  }
+
+  // 3. Parse JSON Body
+  let body: unknown;
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: 'Invalid JSON payload' }, { status: 400 });
   }
 
-  if (!isCampaignEventName(body.event) || body.campaign !== 'grantfox-oss-stellar') {
-    return NextResponse.json({ error: 'Unsupported campaign event' }, { status: 400 });
+  // 4. Validate against the Zod schema (422 + flattened issues on failure,
+  //    telemetry already captured inside parseOr422)
+  let parsed: { data: CampaignEvent };
+  try {
+    parsed = await parseOr422(CampaignEventSchema, body);
+  } catch (err) {
+    if (err instanceof Response) {
+      return err;
+    }
+    throw err;
   }
 
-  const analyticsEvent = {
-    event: body.event,
-    campaign: body.campaign,
-    timestamp: sanitizeString(body.timestamp) ?? new Date().toISOString(),
-    payload: sanitizePayload(body.payload),
-  };
+  const event = parsed.data;
 
-  console.info('[campaign-analytics]', analyticsEvent);
+  // 5. In-Memory Dedup Check (409 Conflict if duplicate)
+  if (isDuplicateEvent(event.id)) {
+    return NextResponse.json({ error: 'Duplicate event ID', id: event.id }, { status: 409 });
+  }
 
-  return NextResponse.json({ ok: true });
+  captureEvent({ kind: 'campaign_event', ...event });
+
+  return NextResponse.json({ ok: true, id: event.id });
 }

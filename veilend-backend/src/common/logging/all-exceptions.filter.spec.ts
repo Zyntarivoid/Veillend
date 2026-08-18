@@ -1,5 +1,10 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
-import { ArgumentsHost, BadRequestException } from '@nestjs/common';
+import {
+  ArgumentsHost,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { AllExceptionsFilter } from './all-exceptions.filter';
 import { AppLoggerService } from './app-logger.service';
 import { ClsService } from 'nestjs-cls';
@@ -10,11 +15,13 @@ describe('AllExceptionsFilter', () => {
   let cls: { isActive: jest.Mock; getId: jest.Mock };
   let jsonSpy: jest.Mock;
   let statusSpy: jest.Mock;
+  let setHeaderSpy: jest.Mock;
 
   function makeHost(): ArgumentsHost {
     jsonSpy = jest.fn();
     statusSpy = jest.fn().mockReturnValue({ json: jsonSpy });
-    const res = { status: statusSpy };
+    setHeaderSpy = jest.fn();
+    const res = { status: statusSpy, setHeader: setHeaderSpy };
     return {
       switchToHttp: () => ({
         getResponse: () => res,
@@ -41,6 +48,7 @@ describe('AllExceptionsFilter', () => {
     filter.catch(exception, makeHost());
 
     expect(statusSpy).toHaveBeenCalledWith(400);
+    expect(setHeaderSpy).toHaveBeenCalledWith('x-correlation-id', 'corr-abc');
     expect(jsonSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         success: false,
@@ -73,5 +81,57 @@ describe('AllExceptionsFilter', () => {
       }),
     );
     expect(logger.error).toHaveBeenCalled();
+  });
+
+  it('sets the correlation id header for a 404', () => {
+    filter.catch(new NotFoundException('missing'), makeHost());
+
+    expect(statusSpy).toHaveBeenCalledWith(404);
+    expect(setHeaderSpy).toHaveBeenCalledWith('x-correlation-id', 'corr-abc');
+  });
+
+  it.each([
+    ['P2002', 409, 'PrismaUniqueConstraintError'],
+    ['P2003', 400, 'PrismaForeignKeyConstraintError'],
+    ['P2025', 404, 'PrismaRecordNotFoundError'],
+  ])('maps Prisma known request error %s', (code, status, errorCode) => {
+    filter.catch(
+      new Prisma.PrismaClientKnownRequestError('prisma error', {
+        code,
+        clientVersion: 'test',
+      }),
+      makeHost(),
+    );
+
+    expect(statusSpy).toHaveBeenCalledWith(status);
+    expect(jsonSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.objectContaining({ code: errorCode }),
+      }),
+    );
+  });
+
+  it('maps Prisma validation errors to 400', () => {
+    filter.catch(
+      new Prisma.PrismaClientValidationError('invalid query', {
+        clientVersion: 'test',
+      }),
+      makeHost(),
+    );
+
+    expect(statusSpy).toHaveBeenCalledWith(400);
+    expect(jsonSpy.mock.calls[0][0].error.code).toBe('PrismaValidationError');
+  });
+
+  it('maps Prisma initialization errors to 503', () => {
+    filter.catch(
+      new Prisma.PrismaClientInitializationError('cannot connect', 'test'),
+      makeHost(),
+    );
+
+    expect(statusSpy).toHaveBeenCalledWith(503);
+    expect(jsonSpy.mock.calls[0][0].error.code).toBe(
+      'PrismaInitializationError',
+    );
   });
 });

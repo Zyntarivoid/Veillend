@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Clipboard,
 } from 'react-native';
 import Animated, {
   FadeInDown,
@@ -22,15 +23,26 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useStellarAuth } from '../hooks/useStellarAuth';
+import { WalletBackupModal } from '../components/WalletBackupModal';
+import { useWalletSecurity } from '../hooks/useWalletSecurity';
+import { validateSecretKey } from '../utils/validateSecretKey';
 
 const { width } = Dimensions.get('window');
+
+const PASTE_CLEAR_DELAY = 10_000;
 
 type Mode = 'choose' | 'import';
 
 export default function ConnectWalletScreen() {
-  const { loading, error, generateWallet, importWallet } = useStellarAuth();
+  const { loading, error, generateWallet, importWallet, generatedSecretKey, clearGeneratedSecretKey } = useStellarAuth();
   const [mode, setMode] = useState<Mode>('choose');
   const [secretKey, setSecretKey] = useState('');
+  const [showKey, setShowKey] = useState(false);
+  const [showBackupModal, setShowBackupModal] = useState(false);
+  const { isBackupRequired, confirmBackup } = useWalletSecurity();
+  const pasteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const keyValidation = validateSecretKey(secretKey);
 
   const scale = useSharedValue(1);
   useEffect(() => {
@@ -44,14 +56,55 @@ export default function ConnectWalletScreen() {
     );
   }, []);
 
+  // Clear paste timer on unmount
+  useEffect(() => {
+    return () => {
+      if (pasteTimerRef.current) clearTimeout(pasteTimerRef.current);
+    };
+  }, []);
+
   const animatedButtonStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
   }));
 
+  const handleGenerateWallet = async () => {
+    await generateWallet();
+    if (isBackupRequired()) {
+      setShowBackupModal(true);
+    }
+  };
+
+  const handleBackupConfirmed = async () => {
+    await confirmBackup();
+    setShowBackupModal(false);
+    clearGeneratedSecretKey();
+    setSecretKey('');
+  };
+
+  const handleImportWallet = async () => {
+    const success = await importWallet(secretKey);
+    if (success) {
+      setSecretKey('');
+    }
+  };
+
+  const handlePaste = async () => {
+    const text = await Clipboard.getString();
+    const trimmed = text.trim();
+    setSecretKey(trimmed);
+
+    // Auto-clear clipboard after delay
+    if (pasteTimerRef.current) clearTimeout(pasteTimerRef.current);
+    pasteTimerRef.current = setTimeout(() => {
+      Clipboard.setString('');
+      pasteTimerRef.current = null;
+    }, PASTE_CLEAR_DELAY);
+  };
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.select({ ios: 'padding', android: undefined })}
     >
       <ScrollView
         contentContainerStyle={styles.scroll}
@@ -110,7 +163,7 @@ export default function ConnectWalletScreen() {
                 <Animated.View style={[styles.connectButtonContainer, animatedButtonStyle]}>
                   <TouchableOpacity
                     activeOpacity={0.8}
-                    onPress={generateWallet}
+                    onPress={handleGenerateWallet}
                     disabled={loading}
                   >
                     <LinearGradient
@@ -142,17 +195,47 @@ export default function ConnectWalletScreen() {
             {mode === 'import' && (
               <>
                 <View style={styles.inputWrapper}>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter Stellar secret key (S…)"
-                    placeholderTextColor="#555"
-                    value={secretKey}
-                    onChangeText={setSecretKey}
-                    autoCapitalize="characters"
-                    autoCorrect={false}
-                    secureTextEntry={false}
-                  />
+                  {/* Secret key input + eye toggle */}
+                  <View style={styles.inputRow}>
+                    <TextInput
+                      style={[styles.input, styles.inputFlex]}
+                      placeholder="Enter Stellar secret key (S…)"
+                      placeholderTextColor="#555"
+                      value={secretKey}
+                      onChangeText={setSecretKey}
+                      autoCapitalize="characters"
+                      autoCorrect={false}
+                      secureTextEntry={!showKey}
+                    />
+                    <TouchableOpacity
+                      style={styles.eyeButton}
+                      onPress={() => setShowKey(v => !v)}
+                      hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                      accessibilityLabel={showKey ? 'Hide secret key' : 'Show secret key'}
+                    >
+                      <Ionicons
+                        name={showKey ? 'eye-off' : 'eye'}
+                        size={20}
+                        color="#888"
+                      />
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Paste button */}
+                  <TouchableOpacity style={styles.pasteButton} onPress={handlePaste}>
+                    <Ionicons name="clipboard-outline" size={14} color="#09cc71" />
+                    <Text style={styles.pasteButtonText}>Paste</Text>
+                  </TouchableOpacity>
                 </View>
+
+                {/* Real-time validation chip */}
+                {secretKey.length > 0 && (
+                  <View style={[styles.validationChip, keyValidation.valid ? styles.chipValid : styles.chipWarn]}>
+                    <Text style={[styles.chipText, keyValidation.valid ? styles.chipTextValid : styles.chipTextWarn]}>
+                      {keyValidation.valid ? 'Valid strkey ✔️' : keyValidation.error}
+                    </Text>
+                  </View>
+                )}
 
                 {error ? (
                   <Text style={styles.errorText}>{error}</Text>
@@ -160,14 +243,14 @@ export default function ConnectWalletScreen() {
 
                 <TouchableOpacity
                   activeOpacity={0.8}
-                  onPress={() => importWallet(secretKey)}
-                  disabled={loading || !secretKey.trim()}
+                  onPress={handleImportWallet}
+                  disabled={loading || !keyValidation.valid}
                 >
                   <LinearGradient
                     colors={['#09cc71', '#059652']}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 0 }}
-                    style={[styles.connectButton, styles.importButton]}
+                    style={[styles.connectButton, styles.importButton, (!keyValidation.valid || loading) && styles.buttonDisabled]}
                   >
                     <Text style={styles.buttonText}>
                       {loading ? 'Connecting…' : 'Connect Wallet'}
@@ -187,6 +270,14 @@ export default function ConnectWalletScreen() {
           </Animated.View>
         </View>
       </ScrollView>
+
+      {/* Wallet Backup Modal */}
+      <WalletBackupModal
+        visible={showBackupModal}
+        onRequestSecret={() => Promise.resolve(generatedSecretKey)}
+        onClose={() => setShowBackupModal(false)}
+        onBackupConfirmed={handleBackupConfirmed}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -307,6 +398,9 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
   },
+  buttonDisabled: {
+    opacity: 0.5,
+  },
   importButton: {
     marginBottom: 16,
   },
@@ -330,7 +424,23 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   inputWrapper: {
-    marginBottom: 16,
+    marginBottom: 12,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 4,
+  },
+  inputFlex: {
+    flex: 1,
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    paddingHorizontal: 0,
   },
   input: {
     backgroundColor: 'rgba(255,255,255,0.07)',
@@ -342,6 +452,50 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 15,
     fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+  },
+  eyeButton: {
+    paddingLeft: 12,
+    paddingVertical: 10,
+  },
+  pasteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-end',
+    marginTop: 8,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    gap: 4,
+  },
+  pasteButtonText: {
+    color: '#09cc71',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  validationChip: {
+    alignSelf: 'flex-start',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    marginBottom: 12,
+    borderWidth: 1,
+  },
+  chipWarn: {
+    backgroundColor: 'rgba(255, 165, 0, 0.1)',
+    borderColor: 'rgba(255, 165, 0, 0.4)',
+  },
+  chipValid: {
+    backgroundColor: 'rgba(9, 204, 113, 0.1)',
+    borderColor: 'rgba(9, 204, 113, 0.4)',
+  },
+  chipText: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  chipTextWarn: {
+    color: '#FFA500',
+  },
+  chipTextValid: {
+    color: '#09cc71',
   },
   errorText: {
     color: '#ff6b6b',

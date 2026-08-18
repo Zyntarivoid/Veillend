@@ -9,6 +9,7 @@ type ProtocolStatusBannersProps = {
   walletConnected: boolean;
   lastSyncedAt?: number | null;
   isRefreshing?: boolean;
+  isOnline?: boolean;
   onReconnect: () => void;
   onRetrySync: () => void;
 };
@@ -19,6 +20,7 @@ export default function ProtocolStatusBanners({
   walletConnected,
   lastSyncedAt,
   isRefreshing = false,
+  isOnline = true,
   onReconnect,
   onRetrySync,
 }: ProtocolStatusBannersProps) {
@@ -27,6 +29,7 @@ export default function ProtocolStatusBanners({
     currentNetwork,
     walletConnected,
     lastSyncedAt,
+    isOnline,
   });
 
   if (banners.length === 0) {
@@ -37,8 +40,13 @@ export default function ProtocolStatusBanners({
     <View style={styles.stack}>
       {banners.map((banner) => {
         const isWalletBanner = banner.id === 'wallet-disconnected';
+        const isOfflineBanner = banner.id === 'offline';
         const onPress = isWalletBanner ? onReconnect : onRetrySync;
-        const iconName = isWalletBanner ? 'wallet-outline' : 'warning-outline';
+        const iconName = isWalletBanner
+          ? 'wallet-outline'
+          : isOfflineBanner
+            ? 'cloud-offline-outline'
+            : 'warning-outline';
 
         return (
           <View
@@ -53,17 +61,19 @@ export default function ProtocolStatusBanners({
               <Text style={styles.title}>{banner.title}</Text>
               <Text style={styles.message}>{banner.message}</Text>
             </View>
-            <TouchableOpacity
-              accessibilityRole="button"
-              accessibilityLabel={banner.actionLabel}
-              disabled={isRefreshing && !isWalletBanner}
-              onPress={onPress}
-              style={styles.action}
-            >
-              <Text style={styles.actionText}>
-                {isRefreshing && !isWalletBanner ? 'Checking...' : banner.actionLabel}
-              </Text>
-            </TouchableOpacity>
+            {banner.actionLabel ? (
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel={banner.actionLabel}
+                disabled={isRefreshing && !isWalletBanner}
+                onPress={onPress}
+                style={styles.action}
+              >
+                <Text style={styles.actionText}>
+                  {isRefreshing && !isWalletBanner ? 'Checking...' : banner.actionLabel}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         );
       })}

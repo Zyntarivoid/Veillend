@@ -3,6 +3,20 @@ export interface AssetBalance {
   assetName: string;
   balance: number;
   usdValue: number;
+  /** Asset decimal precision (for display tooltip) */
+  decimals?: number;
+  /** Per-asset LTV used in HF calculation */
+  minCollateralRatio?: number;
+  /** Remote logo URL if available */
+  logoUrl?: string;
+}
+
+export interface HfBreakdownItem {
+  symbol: string;
+  depositedUsd: number;
+  minCollateralRatio: number;
+  /** depositedUsd × minCollateralRatio */
+  weightedUsd: number;
 }
 
 export interface PortfolioData {
@@ -13,6 +27,13 @@ export interface PortfolioData {
   depositedAssets: AssetBalance[];
   borrowedAssets: AssetBalance[];
   lastUpdated: string; // ISO timestamp
+  /** Per-asset HF contribution (empty when no borrows or warning is set) */
+  hfBreakdown: HfBreakdownItem[];
+  /**
+   * Set when an asset's minCollateralRatio is unknown and HF cannot be
+   * computed accurately. Display this string to the user instead of the HF.
+   */
+  hfWarning?: string;
 }
 
 export type ActivityActionType = 'DEPOSIT' | 'BORROW' | 'REPAY' | 'WITHDRAW';

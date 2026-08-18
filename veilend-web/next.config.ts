@@ -13,7 +13,8 @@ import { validateConfig } from "./src/lib/config-validation";
 validateConfig();
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  reactStrictMode: true,
+  poweredByHeader: false,
 };
 
 export default nextConfig;

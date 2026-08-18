@@ -1,6 +1,6 @@
-import { IsString } from 'class-validator';
+import { IsStellarAddress } from '../../common/validators/is-stellar-address.validator';
 
 export class AddAdminDto {
-  @IsString()
+  @IsStellarAddress()
   walletAddress: string;
 }

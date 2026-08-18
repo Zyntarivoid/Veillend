@@ -1,98 +1,183 @@
-import { DashboardData, ActivityActionType, AssetBalance } from '../types/dashboard';
+import { backendFetch } from '@/lib/server/backendFetch';
+import {
+  AssetRegistryResponseSchema,
+  IndexerPositionsResponseSchema,
+  IndexerTransactionsResponseSchema,
+  OraclePricesResponseSchema,
+  type IndexerTransaction,
+} from '@/lib/validation/api-schemas';
+import { requireSafeNumber } from '@/lib/validation/safe-numbers';
+import type {
+  ActivityActionType,
+  AssetBalance,
+  DashboardData,
+  HfBreakdownItem,
+} from '@/lib/types/dashboard';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+import {
+  buildAssetRegistry,
+  registryDecimals,
+  registrySymbol,
+  registryName,
+  registryMcr,
+  warnRegistryUnavailable,
+} from './assetRegistry';
+import { fetchValidated } from './validated-fetch';
 
-// For the demo/campaign, we can use a hardcoded or random dummy address if none is provided.
-// In a real app with wallet connect, this would be passed dynamically.
-const DEMO_ADDRESS = 'GCOQ4Z...'; // example stellar pubkey
+// ---------------------------------------------------------------------------
+// Main function
+// ---------------------------------------------------------------------------
 
-// Define types for API responses
-interface IndexerPosition {
-  assetAddress: string;
-  depositedAmount: string | number;
-  borrowedAmount: string | number;
-}
+/**
+ * Fetches live dashboard data for a specific wallet address.
+ * Uses per-asset decimals and MCR from the /assets registry (falls back
+ * to hardcoded table when endpoint is unavailable).
+ */
+export async function fetchDashboardData(address: string): Promise<DashboardData> {
+  if (!address || !address.startsWith('G')) {
+    throw new Error('Invalid Stellar address provided. Address must start with "G".');
+  }
 
-interface IndexerTransaction {
-  id: string;
-  type: string;
-  amount: string | number;
-  assetAddress: string;
-  timestamp: string;
-  txHash: string;
-}
-
-export async function fetchDashboardData(address: string = DEMO_ADDRESS): Promise<DashboardData> {
   try {
-    const [positionsRes, transactionsRes] = await Promise.all([
-      fetch(`${API_BASE_URL}/indexer/positions/${address}`, { next: { revalidate: 10 } }),
-      fetch(`${API_BASE_URL}/indexer/transactions/${address}`, { next: { revalidate: 10 } })
+    const fetcher = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
+      backendFetch(String(input), init);
+    const [positionsData, transactionsData, pricesData, rawAssets] = await Promise.all([
+      fetchValidated(`/indexer/positions/${address}`, IndexerPositionsResponseSchema, {
+        fetcher,
+        requestInit: {
+          next: { revalidate: 10 },
+          headers: { 'Cache-Control': 'no-cache' },
+        },
+      }),
+      fetchValidated(`/indexer/transactions/${address}`, IndexerTransactionsResponseSchema, {
+        fetcher,
+        requestInit: {
+          next: { revalidate: 10 },
+          headers: { 'Cache-Control': 'no-cache' },
+        },
+      }),
+      fetchValidated('/oracle/prices', OraclePricesResponseSchema, {
+        fetcher,
+        requestInit: {
+          next: { revalidate: 10 },
+          headers: { 'Cache-Control': 'no-cache' },
+        },
+      }),
+      fetchValidated('/assets', AssetRegistryResponseSchema, {
+        fetcher,
+        requestInit: { next: { revalidate: 300 } },
+      }).catch(() => {
+        warnRegistryUnavailable();
+        return [];
+      }),
     ]);
+    const registry = buildAssetRegistry(rawAssets);
 
-    if (!positionsRes.ok || !transactionsRes.ok) {
-      throw new Error('Failed to fetch data from live indexer endpoints');
-    }
+    const positions = positionsData.positions;
+    const transactions = transactionsData.transactions;
+    const prices = pricesData.prices;
 
-    const { positions } = await positionsRes.json() as { positions: IndexerPosition[] };
-    const { transactions } = await transactionsRes.json() as { transactions: IndexerTransaction[] };
-
+    // ── Process positions ─────────────────────────────────────────────────
     let totalDepositedUsd = 0;
     let totalBorrowedUsd = 0;
     const depositedAssets: AssetBalance[] = [];
     const borrowedAssets: AssetBalance[] = [];
+    const hfBreakdown: HfBreakdownItem[] = [];
+    let weightedCollateral = 0;
+    let missingMcrSymbol: string | null = null;
 
-    // Map positions (assuming naive 1:1 USD pricing for demo unless oracle is integrated)
-    // The backend returns IndexerPosition: { assetAddress, depositedAmount, borrowedAmount }
-    if (Array.isArray(positions)) {
-      positions.forEach((pos: IndexerPosition) => {
-        const deposited = Number(pos.depositedAmount) / 1e7; // Assuming 7 decimals (Stellar standard)
-        const borrowed = Number(pos.borrowedAmount) / 1e7;
-        
-        // Mock price for demo since Oracle might not be fully wired in the read models yet
-        const price = pos.assetAddress.includes('USDC') ? 1.0 : 0.11; // Dummy XLM price
+    for (const [index, pos] of positions.entries()) {
+      const decimals = registryDecimals(registry, pos.assetAddress);
+      const deposited = requireSafeNumber(pos.depositedRaw, decimals, [
+        'positions',
+        index,
+        'depositedRaw',
+      ]);
+      const borrowed = requireSafeNumber(pos.borrowedRaw, decimals, [
+        'positions',
+        index,
+        'borrowedRaw',
+      ]);
+      const symbol    = registrySymbol(registry, pos.assetAddress);
+      const name      = registryName(registry, pos.assetAddress);
+      const price     = prices[pos.assetAddress] ?? 0;
+      const logoUrl   = registry.get(pos.assetAddress)?.logoUrl ?? undefined;
+      const mcr       = registryMcr(registry, pos.assetAddress);
 
-        if (deposited > 0) {
-          const usdValue = deposited * price;
-          totalDepositedUsd += usdValue;
-          depositedAssets.push({
-            assetSymbol: pos.assetAddress.substring(0, 4), // Dummy symbol from address
-            assetName: pos.assetAddress,
-            balance: deposited,
-            usdValue,
-          });
+      if (deposited > 0 && price > 0) {
+        const usdValue = deposited * price;
+        totalDepositedUsd += usdValue;
+        depositedAssets.push({
+          assetSymbol: symbol,
+          assetName: name,
+          balance: deposited,
+          usdValue,
+          decimals,
+          minCollateralRatio: mcr ?? undefined,
+          logoUrl,
+        });
+        if (mcr != null) {
+          const weighted = usdValue * mcr;
+          weightedCollateral += weighted;
+          hfBreakdown.push({ symbol, depositedUsd: usdValue, minCollateralRatio: mcr, weightedUsd: weighted });
+        } else if (usdValue > 0 && !missingMcrSymbol) {
+          missingMcrSymbol = symbol;
         }
+      }
 
-        if (borrowed > 0) {
-          const usdValue = borrowed * price;
-          totalBorrowedUsd += usdValue;
-          borrowedAssets.push({
-            assetSymbol: pos.assetAddress.substring(0, 4),
-            assetName: pos.assetAddress,
-            balance: borrowed,
-            usdValue,
-          });
-        }
-      });
+      if (borrowed > 0 && price > 0) {
+        const usdValue = borrowed * price;
+        totalBorrowedUsd += usdValue;
+        borrowedAssets.push({
+          assetSymbol: symbol,
+          assetName: name,
+          balance: borrowed,
+          usdValue,
+          decimals,
+          logoUrl,
+        });
+      }
     }
 
-    const healthFactor = totalBorrowedUsd === 0 ? 99.99 : (totalDepositedUsd * 0.8) / totalBorrowedUsd; // Assumed 80% LTV
+    // ── Health factor (per-asset MCR weighted) ────────────────────────────
+    let healthFactor: number;
+    let hfWarning: string | undefined;
+
+    if (totalBorrowedUsd === 0) {
+      healthFactor = Infinity;
+    } else if (missingMcrSymbol) {
+      healthFactor = -1; // sentinel — UI should show hfWarning instead
+      hfWarning = 'Asset registry not loaded — refresh';
+    } else {
+      healthFactor = Math.min(weightedCollateral / totalBorrowedUsd, 99.99);
+    }
+
     const totalBalanceUsd = totalDepositedUsd - totalBorrowedUsd;
 
-    // Map transactions
-    const recentActivity = Array.isArray(transactions) ? transactions.map((tx: IndexerTransaction) => {
-      const amount = Number(tx.amount) / 1e7;
-      const price = tx.assetAddress.includes('USDC') ? 1.0 : 0.11;
-      return {
-        id: tx.id,
-        action: tx.type.toUpperCase() as ActivityActionType,
-        assetSymbol: tx.assetAddress.substring(0, 4),
-        amount,
-        usdValue: amount * price,
-        timestamp: tx.timestamp,
-        status: 'COMPLETED' as const,
-        txHash: tx.txHash,
-      };
-    }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()) : [];
+    // ── Process transactions ──────────────────────────────────────────────
+    const recentActivity = transactions
+          .map((tx: IndexerTransaction, index) => {
+            const decimals = registryDecimals(registry, tx.assetAddress);
+            const amount = requireSafeNumber(tx.amount, decimals, [
+              'transactions',
+              index,
+              'amount',
+            ]);
+            const price    = prices[tx.assetAddress] ?? 0;
+            return {
+              id: tx.id,
+              action: mapTransactionType(tx.type),
+              assetSymbol: registrySymbol(registry, tx.assetAddress),
+              amount,
+              usdValue: amount * price,
+              timestamp: tx.timestamp,
+              status: 'COMPLETED' as const,
+              txHash: tx.txHash,
+            };
+          })
+          .filter((activity) => activity.usdValue > 0)
+          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+          .slice(0, 50);
 
     return {
       portfolio: {
@@ -103,11 +188,40 @@ export async function fetchDashboardData(address: string = DEMO_ADDRESS): Promis
         depositedAssets,
         borrowedAssets,
         lastUpdated: new Date().toISOString(),
+        hfBreakdown,
+        hfWarning,
       },
       recentActivity,
     };
   } catch (error) {
-    console.error('API Error:', error);
-    throw new Error('Could not load live dashboard data. Is the NestJS indexer running?');
+    console.error('Dashboard API Error:', error);
+    if (error instanceof Error) {
+      throw error;
+    }
+    throw new Error('Could not load live dashboard data. Please check your connection.');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function mapTransactionType(type: string): ActivityActionType {
+  const normalizedType = type.toUpperCase();
+  switch (normalizedType) {
+    case 'DEPOSIT':
+    case 'SUPPLY':
+      return 'DEPOSIT';
+    case 'BORROW':
+      return 'BORROW';
+    case 'REPAY':
+    case 'REPAYMENT':
+      return 'REPAY';
+    case 'WITHDRAW':
+    case 'WITHDRAWAL':
+      return 'WITHDRAW';
+    default:
+      console.warn(`Unknown transaction type: ${type}, defaulting to DEPOSIT`);
+      return 'DEPOSIT';
   }
 }

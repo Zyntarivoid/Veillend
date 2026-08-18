@@ -1,21 +1,53 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { AuthenticatedRequest } from './types/authenticated-request.type';
 
 describe('AuthController', () => {
   let controller: AuthController;
-  let authService: { revokeSession: jest.Mock };
+  let authService: {
+    generateNonce: jest.Mock;
+    revokeSession: jest.Mock;
+  };
 
   beforeEach(async () => {
-    authService = { revokeSession: jest.fn().mockResolvedValue(undefined) };
+    authService = {
+      generateNonce: jest.fn().mockResolvedValue('mock-nonce'),
+      revokeSession: jest.fn().mockResolvedValue(undefined),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AuthController],
-      providers: [{ provide: AuthService, useValue: authService }],
+      providers: [
+        { provide: AuthService, useValue: authService },
+        {
+          provide: PrismaService,
+          useValue: { admin: { findUnique: jest.fn() } },
+        },
+      ],
     }).compile();
 
     controller = module.get(AuthController);
+  });
+
+  describe('createNonce', () => {
+    it('calls authService.generateNonce and returns the nonce', async () => {
+      const result = await controller.createNonce(
+        { walletAddress: 'GABC' },
+        '127.0.0.1',
+        'jest',
+        '1234',
+      );
+
+      expect(authService.generateNonce).toHaveBeenCalledWith(
+        'GABC',
+        '127.0.0.1',
+        'jest',
+        '1234',
+      );
+      expect(result).toEqual({ nonce: 'mock-nonce' });
+    });
   });
 
   describe('getSession', () => {
@@ -43,9 +75,15 @@ describe('AuthController', () => {
         },
       } as AuthenticatedRequest;
 
-      const result = await controller.logout(req);
+      const result = await controller.logout(req, '127.0.0.1', 'jest', '1234');
 
-      expect(authService.revokeSession).toHaveBeenCalledWith('session-1');
+      expect(authService.revokeSession).toHaveBeenCalledWith(
+        'session-1',
+        'GABC',
+        '127.0.0.1',
+        'jest',
+        '1234',
+      );
       expect(result).toEqual({ revoked: true });
     });
   });

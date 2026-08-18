@@ -11,20 +11,34 @@ export class AppConfigService {
 
   get stellar(): {
     network: string;
-    horizonUrl: string;
-    sorobanRpcUrl: string;
+    horizonUrls: string[];
+    sorobanRpcUrls: string[];
     networkPassphrase: string;
   } {
     return {
       network: this.configService.get<string>('STELLAR_NETWORK', 'testnet'),
-      horizonUrl: this.configService.get<string>(
-        'STELLAR_HORIZON_URL',
-        'https://horizon-testnet.stellar.org',
-      ),
-      sorobanRpcUrl: this.configService.get<string>(
-        'STELLAR_SOROBAN_RPC_URL',
-        'https://soroban-testnet.stellar.org',
-      ),
+      horizonUrls: this.configService
+        .get<string>(
+          'STELLAR_HORIZON_URLS',
+          this.configService.get<string>(
+            'STELLAR_HORIZON_URL',
+            'https://horizon-testnet.stellar.org',
+          ),
+        )
+        .split(',')
+        .map((u) => u.trim())
+        .filter(Boolean),
+      sorobanRpcUrls: this.configService
+        .get<string>(
+          'STELLAR_SOROBAN_RPC_URLS',
+          this.configService.get<string>(
+            'STELLAR_SOROBAN_RPC_URL',
+            'https://soroban-testnet.stellar.org',
+          ),
+        )
+        .split(',')
+        .map((u) => u.trim())
+        .filter(Boolean),
       networkPassphrase: this.configService.get<string>(
         'STELLAR_NETWORK_PASSPHRASE',
         'Test SDF Network ; September 2015',
@@ -58,6 +72,17 @@ export class AppConfigService {
   } {
     return {
       jwtSecret: this.configService.get<string>('JWT_SECRET', 'dev_secret'),
+    };
+  }
+
+  get adminActions(): {
+    watcherPollIntervalMs: number;
+  } {
+    return {
+      watcherPollIntervalMs: this.configService.get<number>(
+        'ADMIN_ACTION_WATCHER_POLL_INTERVAL_MS',
+        10000,
+      ),
     };
   }
 }

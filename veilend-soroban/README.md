@@ -13,6 +13,8 @@ The contract currently provides an initial VeilLend lending scaffold with:
 - protocol fee tracking separated from user position balances
 - basic `deposit`, `borrow`, `repay`, and `withdraw` state transitions
 - typed contract events for key lending actions
+- a multi-admin set (`AdminSet`) with `add_admin`/`remove_admin` (any one of N admins can act)
+- a propose/execute/cancel timelock on privileged mutations (configurable `set_timelock_ledgers`)
 - queryable contract and storage-schema metadata for migration safety
 
 This is a protocol foundation, not the full privacy implementation yet. Token transfers, price oracles, liquidation logic, and shielded proof verification still need to be added in follow-up iterations.
@@ -36,7 +38,7 @@ User balances remain in per-user `Position` records, so protocol-owned fees are 
 
 ### Events
 
-The contract continues to emit action-specific user events (`deposit`, `borrow`, `repay`, `withdraw`) and now also emits an `asset_reserve_updated` event whenever reserve accounting changes. This keeps reserve state updates observable and documented consistently for indexers and treasury tooling.
+The contract continues to emit action-specific user events (`deposit`, `borrow`, `repay`, `withdraw`) and also emits an `asset_reserve_updated` event whenever reserve accounting changes, plus a per-asset `interest_accrued` event whenever a non-zero amount of interest accrues (topic prefix `veillend`, event name `interest_accrued`). Accrual is idempotent: calling `accrue_interest` (or any entrypoint) again at the same ledger timestamp is a pure no-op that touches no storage and emits no events. This keeps reserve and interest state updates observable and documented consistently for indexers and treasury tooling.
 
 ## Prerequisites
 
@@ -78,6 +80,40 @@ cargo build --target wasm32-unknown-unknown --release
 stellar contract build
 ```
 
+## Generate Contract Specifications & Bindings
+
+Contract specifications and client bindings make it safe and easy for backend/frontend contributors to integrate with the Soroban contract.
+
+### Generate TypeScript Bindings
+
+To generate TypeScript client bindings for the contract (for use in veilend-web, veilend-backend, etc.):
+
+1. Build the contract first:
+   ```bash
+   stellar contract build
+   ```
+
+2. Generate TypeScript bindings into the `specs` directory:
+   ```bash
+   stellar contract bindings typescript --output-dir ./specs --contract-id C... # replace with your contract ID or use --wasm
+   ```
+
+   Alternatively, to generate from the built WASM file (without needing a contract ID):
+   ```bash
+   stellar contract bindings typescript --output-dir ./specs --wasm target/wasm32-unknown-unknown/release/veillend_contract.wasm
+   ```
+
+### Inspect Contract Spec
+
+To inspect the contract specification (functions, errors, events) from the built WASM:
+```bash
+stellar contract info interface --wasm target/wasm32-unknown-unknown/release/veillend_contract.wasm
+```
+
+### Storing Specifications
+
+All generated specifications and client bindings should be stored in the `specs/` directory.
+
 ## Testing
 
 ```bash
@@ -106,21 +142,41 @@ Call `contract_metadata()` on a deployed contract before writing a migration or 
 
 | Metadata field | Current value | Meaning |
 | :--- | :--- | :--- |
-| `contract_version` | `1` | The public contract interface version. |
-| `storage_schema_version` | `1` | The version of serialized storage keys and values. |
-| `storage_schema_id` | `VLENDV1` | A compact, stable identifier for this storage layout. |
+| `contract_version` | `4` | The public contract interface version. |
+| `storage_schema_version` | `3` | The version of serialized storage keys and values. |
+| `storage_schema_id` | `VLENDV3` | A compact, stable identifier for this storage layout. |
 
-Schema `VLENDV1` uses these keys:
+Schema `VLENDV3` uses these keys:
 
 | Durability | Key | Value |
 | :--- | :--- | :--- |
-| Instance | `Admin` | `Address` |
+| Instance | `AdminSet` | `Vec<Address>` |
+| Instance | `TimelockLedgers` | `u32` |
+| Instance | `NextActionId` | `u64` |
+| Instance | `PendingAction(u64)` | `PendingAction { kind, payload, executable_at_ledger: u32, proposer: Address }` |
 | Instance | `MinCollateralRatioBps` | `u32` |
+| Instance | `MaxOracleAge` | `u64` |
 | Persistent | `SupportedAsset(Address)` | `bool` |
-| Persistent | `Position(Address, Address)` | `Position { deposited: i128, borrowed: i128 }` |
+| Persistent | `AssetReserve(Address)` | `AssetReserve { total_balance: i128, protocol_fees: i128 }` |
+| Persistent | `Position(Address, Address)` | `Position { deposited: i128, borrowed: i128, supply_index_snapshot: i128, borrow_index_snapshot: i128 }` |
 | Persistent | `OraclePrice(Address)` | `i128` |
+| Persistent | `DepositCap(Address)` | `i128` |
+| Persistent | `BorrowCap(Address)` | `i128` |
+| Persistent | `TotalDeposited(Address)` | `i128` |
+| Persistent | `TotalBorrowed(Address)` | `i128` |
+| Persistent | `Paused` | `bool` |
+| Persistent | `InterestState(Address)` | `InterestState { supply_index: i128, borrow_index: i128, last_accrual_timestamp: u64 }` |
+| Persistent | `OracleLastUpdated(Address)` | `u64` |
+| Persistent | `OraclePrevPrice(Address)` | `i128` |
+| Persistent | `OracleMaxChangeBps(Address)` | `u32` |
+| Persistent | `OracleMinPrice(Address)` | `i128` |
+| Persistent | `OracleMaxPrice(Address)` | `i128` |
 
-When changing the public interface, increment `CONTRACT_VERSION`. When changing a `DataKey` variant or any stored value shape, increment `STORAGE_SCHEMA_VERSION` and assign a new `STORAGE_SCHEMA_ID`. Keep this table in sync with the implementation.
+The admin authority is a `Vec<Address>` (`AdminSet`): any one of N admins can act, and `add_admin`/`remove_admin` manage membership (with a last-admin lockout guard). Privileged mutations — `configure_asset`, `set_oracle_price`, `update_asset_caps`, `set_min_collateral_ratio`, pausing, and `record_protocol_fee` — follow a `propose_*` → `execute_*` (after the `TimelockLedgers` delay) → `cancel_*` flow, with `set_paused(false)` exempt so unpausing stays immediate.
+
+**Oracle Safety Rails:** The contract includes comprehensive oracle price safety mechanisms including staleness tracking (`OracleLastUpdated`), volatility limits (`OracleMaxChangeBps`, `OraclePrevPrice`), and absolute bounds (`OracleMinPrice`, `OracleMaxPrice`). These protect against stale prices, excessive volatility, and absurd values that could compromise the protocol.
+
+When changing the public interface, increment `CONTRACT_VERSION`. When changing a `DataKey` variant or any stored value shape, increment `STORAGE_SCHEMA_VERSION` and assign a new `STORAGE_SCHEMA_ID`. **Keep this table in sync with the implementation** — any drift will break migrations and off-chain readers.
 
 ## Development Workflow
 
@@ -129,6 +185,7 @@ When changing the public interface, increment `CONTRACT_VERSION`. When changing 
 3. Run `cargo test`
 4. Build WASM with `cargo build --target wasm32-unknown-unknown --release`
 5. Build Soroban artifacts with `stellar contract build`
+6. (Optional) Generate/update specifications/bindings and commit to `specs/`
 
 ## Next Steps
 

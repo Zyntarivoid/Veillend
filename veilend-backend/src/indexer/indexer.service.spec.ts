@@ -25,8 +25,7 @@ describe('IndexerService', () => {
   let mockRepository: {
     getCheckpoint: jest.Mock;
     saveCheckpoint: jest.Mock;
-    saveTransaction: jest.Mock;
-    updatePosition: jest.Mock;
+    applyEvent: jest.Mock;
     setAssetSupported: jest.Mock;
     resetDatabase: jest.Mock;
   };
@@ -47,8 +46,7 @@ describe('IndexerService', () => {
     mockRepository = {
       getCheckpoint: jest.fn().mockResolvedValue({ lastIndexedLedger: 0 }),
       saveCheckpoint: jest.fn().mockResolvedValue(undefined),
-      saveTransaction: jest.fn().mockResolvedValue(true),
-      updatePosition: jest.fn().mockResolvedValue(undefined),
+      applyEvent: jest.fn().mockResolvedValue(true),
       setAssetSupported: jest.fn().mockResolvedValue(undefined),
       resetDatabase: jest.fn().mockResolvedValue(undefined),
     };
@@ -82,9 +80,7 @@ describe('IndexerService', () => {
         },
         {
           provide: SorobanRpcService,
-          useValue: {
-            getClient: jest.fn().mockReturnValue(mockRpcClient),
-          },
+          useValue: mockRpcClient,
         },
       ],
     }).compile();
@@ -126,19 +122,17 @@ describe('IndexerService', () => {
 
       expect(mockRpcClient.getLatestLedger).toHaveBeenCalled();
       expect(mockRpcClient.getEvents).toHaveBeenCalled();
-      expect(mockRepository.saveTransaction).toHaveBeenCalledWith({
-        id: 'evt-1',
-        userAddress: 'user-addr',
-        type: 'deposit',
-        assetAddress: 'asset-addr',
-        amount: '1000',
-        ledger: 22,
-        txHash: 'txhash123',
-        timestamp: '2026-06-16T17:00:00Z',
-      });
-      expect(mockRepository.updatePosition).toHaveBeenCalledWith(
-        'user-addr',
-        'asset-addr',
+      expect(mockRepository.applyEvent).toHaveBeenCalledWith(
+        {
+          id: 'evt-1',
+          userAddress: 'user-addr',
+          type: 'deposit',
+          assetAddress: 'asset-addr',
+          amount: '1000',
+          ledger: 22,
+          txHash: 'txhash123',
+          timestamp: '2026-06-16T17:00:00Z',
+        },
         1000n,
         0n,
       );
@@ -185,15 +179,11 @@ describe('IndexerService', () => {
 
       await service.runIndexer();
 
-      expect(mockRepository.saveTransaction).toHaveBeenCalledWith(
+      expect(mockRepository.applyEvent).toHaveBeenCalledWith(
         expect.objectContaining({
           type: 'borrow',
           amount: '500',
         }),
-      );
-      expect(mockRepository.updatePosition).toHaveBeenCalledWith(
-        'user-addr',
-        'asset-addr',
         0n,
         500n,
       );
@@ -210,9 +200,11 @@ describe('IndexerService', () => {
 
       await service.runIndexer();
 
-      expect(mockRepository.updatePosition).toHaveBeenCalledWith(
-        'user-addr',
-        'asset-addr',
+      expect(mockRepository.applyEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'withdraw',
+          amount: '200',
+        }),
         -200n,
         0n,
       );
@@ -229,9 +221,11 @@ describe('IndexerService', () => {
 
       await service.runIndexer();
 
-      expect(mockRepository.updatePosition).toHaveBeenCalledWith(
-        'user-addr',
-        'asset-addr',
+      expect(mockRepository.applyEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'repay',
+          amount: '100',
+        }),
         0n,
         -100n,
       );
@@ -254,7 +248,7 @@ describe('IndexerService', () => {
       );
     });
 
-    it('should skip updating position if saveTransaction returns false (duplicate event)', async () => {
+    it('should call applyEvent once when it returns false (duplicate event)', async () => {
       const mockEvent = {
         id: 'evt-dup',
         topic: ['veillend', 'borrow', 'user-addr', 'asset-addr'],
@@ -264,18 +258,21 @@ describe('IndexerService', () => {
       mockRpcClient.getEvents.mockResolvedValueOnce({ events: [mockEvent] });
 
       // Return false to simulate a duplicate event
-      mockRepository.saveTransaction.mockResolvedValueOnce(false);
+      mockRepository.applyEvent.mockResolvedValueOnce(false);
 
       await service.runIndexer();
 
-      expect(mockRepository.saveTransaction).toHaveBeenCalledWith(
+      // Dedup + position update are handled atomically inside applyEvent, so
+      // the service calls it exactly once and never touches the position again.
+      expect(mockRepository.applyEvent).toHaveBeenCalledWith(
         expect.objectContaining({
           type: 'borrow',
           amount: '500',
         }),
+        0n,
+        500n,
       );
-      // It should NOT call updatePosition
-      expect(mockRepository.updatePosition).not.toHaveBeenCalled();
+      expect(mockRepository.applyEvent).toHaveBeenCalledTimes(1);
     });
   });
 });

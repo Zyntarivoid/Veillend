@@ -3,13 +3,16 @@
  * Supports Freighter wallet integration
  */
 
-import { Horizon, TransactionBuilder, Operation, Keypair } from "@stellar/stellar-sdk";
-import { isConnected, getAddress, signTransaction } from "@stellar/freighter-api";
-import { getHorizonUrl, getNetworkPassphrase } from "./config";
+import { isConnected, getAddress, signMessage as signMessageWithWallet } from "@stellar/freighter-api";
 
 export interface WalletInfo {
   address: string;
   publicKey: string;
+}
+
+export interface WalletHealthInfo {
+  available: boolean;
+  address: string | null;
 }
 
 export interface WalletConnectionMessage {
@@ -61,6 +64,32 @@ export const getWalletConnectionMessage = (
 export const isFreighterInstalled = (): boolean => {
   if (typeof window === "undefined") return false;
   return !!(window as Window & { freighter?: unknown }).freighter;
+};
+
+/**
+ * Lightweight, non-interactive wallet health probe.
+ *
+ * Reports whether Freighter is installed, unlocked/authorised, and which
+ * address it currently exposes. It never throws and never prompts the user,
+ * so it is safe to run on a polling interval. Any failure (extension missing,
+ * wallet locked, address unavailable) collapses into `available: false`.
+ */
+export const getFreighterHealth = async (): Promise<WalletHealthInfo> => {
+  if (!isFreighterInstalled()) {
+    return { available: false, address: null };
+  }
+
+  try {
+    const connected = await isConnected();
+    if (!connected || !connected.isConnected) {
+      return { available: false, address: null };
+    }
+
+    const address = await getFreighterAddress();
+    return { available: Boolean(address), address: address || null };
+  } catch {
+    return { available: false, address: null };
+  }
 };
 
 /**
@@ -124,9 +153,17 @@ export const getFreighterAddress = async (): Promise<string> => {
 };
 
 /**
- * Sign a message using Freighter wallet
+ * Sign an arbitrary message with the Freighter wallet.
+ *
+ * Uses the wallet's signMessage (SEP-53 framing) so the returned
+ * base64-encoded Ed25519 signature can be verified by the backend's
+ * /auth/verify endpoint. Returns null when the user does not submit a
+ * signature (e.g. they dismiss the prompt).
  */
-export const signMessage = async (message: string): Promise<string> => {
+export const signMessage = async (
+  message: string,
+  address?: string
+): Promise<string | null> => {
   if (!isFreighterInstalled()) {
     throw new Error("Freighter wallet is not installed.");
   }
@@ -137,73 +174,28 @@ export const signMessage = async (message: string): Promise<string> => {
       throw new Error("Failed to get address from Freighter.");
     }
 
-    const publicKey = addressResult.address;
+    const publicKey = address ?? addressResult.address;
     if (!publicKey) {
       throw new Error("Failed to get public key.");
     }
 
-    const server = new Horizon.Server(getHorizonUrl());
-    let account: Horizon.AccountResponse;
-
-    try {
-      account = await server.loadAccount(publicKey);
-    } catch {
-      // Account might not exist on testnet, use a dummy account for signing
-      account = {
-        accountId: publicKey,
-        sequenceNumber: "0",
-        incrementSequenceNumber: () => {},
-        signers: [],
-        thresholds: { low: 0, medium: 0, high: 0 },
-        _baseFee: () => 100,
-        _networkId: Buffer.alloc(32),
-      } as unknown as Horizon.AccountResponse;
+    const result = await signMessageWithWallet(message, { address: publicKey });
+    if (result.error) {
+      throw new Error(result.error.message ?? "Failed to sign message.");
     }
 
-    // Create a dummy transaction for signing
-    const tx = new TransactionBuilder(account, {
-      fee: "100",
-      networkPassphrase: getNetworkPassphrase(),
-    })
-      .addOperation(Operation.setOptions({}))
-      .setTimeout(30)
-      .build();
-
-    const txXdr = tx.toXDR();
-    const signedTx = await signTransaction(txXdr, {
-      networkPassphrase: getNetworkPassphrase(),
-    });
-
-    // Return the signed transaction XDR
-    if (typeof signedTx === 'string') {
-      return signedTx;
+    const { signedMessage } = result;
+    if (!signedMessage) {
+      // No signature was submitted (cancelled / rejected by the user).
+      return null;
     }
 
-    if (signedTx && typeof signedTx === 'object' && 'signedTxXdr' in signedTx) {
-      const signedTxObj = signedTx as { signedTxXdr: string };
-      return signedTxObj.signedTxXdr;
-    }
-
-    return `signed_${message.substring(0, 20)}_${Date.now()}`;
+    return Buffer.isBuffer(signedMessage)
+      ? signedMessage.toString("base64")
+      : signedMessage;
   } catch (error) {
     console.error("Message signing error:", error);
     throw new Error(error instanceof Error ? error.message : "Failed to sign message.");
-  }
-};
-
-/**
- * Verify a signed message
- */
-export const verifySignedMessage = async (
-  _message: string,
-  _signature: string,
-  publicKey: string
-): Promise<boolean> => {
-  try {
-    const keypair = Keypair.fromPublicKey(publicKey);
-    return keypair.publicKey() === publicKey;
-  } catch {
-    return false;
   }
 };
 

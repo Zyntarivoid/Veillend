@@ -1,18 +1,71 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { MOCK_POSITIONS } from '../data/mockData';
 import { useStore } from '../store/store';
 import { ActivityIndicator } from 'react-native';
 import Toast from '../utils/toast';
+import { ListSkeleton } from '../components/Skeletons';
+import OfflineBanner from '../components/OfflineBanner';
 
-export default function RepayScreen() {
-  const activeLoans = MOCK_POSITIONS.filter(p => p.type === 'Borrowed');
+type ActiveLoan = {
+  id: string;
+  asset: string;
+  amount: number;
+  status: string;
+  healthFactor: number;
+};
+
+export default function RepayScreen({ navigation }: any) {
   const [modalVisible, setModalVisible] = useState(false);
-  const [selectedLoan, setSelectedLoan] = useState<any>(null);
+  const [selectedLoan, setSelectedLoan] = useState<ActiveLoan | null>(null);
   const [amount, setAmount] = useState<string>('');
 
-  const openRepayModal = (loan: any) => {
+  const positions = useStore((s) => s.positions);
+  const positionsLoading = useStore((s) => s.positionsLoading);
+  const positionsError = useStore((s) => s.positionsError);
+  const supportedAssets = useStore((s) => s.supportedAssets);
+  const healthFactor = useStore((s) => s.healthFactor);
+  const lendingLoading = useStore((s) => s.lendingLoading);
+  const fetchPositions = useStore((s) => s.fetchPositions);
+  const fetchSupportedAssets = useStore((s) => s.fetchSupportedAssets);
+  const repay = useStore((s) => s.repay);
+
+  // Lazily hydrate positions + asset metadata on mount.
+  useEffect(() => {
+    if (!positions.length && !positionsLoading) {
+      fetchPositions().catch(() => {});
+    }
+    if (!supportedAssets.length) {
+      fetchSupportedAssets().catch(() => {});
+    }
+  }, []);
+
+  const symbolByContract = useMemo(
+    () =>
+      Object.fromEntries(
+        supportedAssets
+          .filter((a) => a.contractId)
+          .map((a) => [a.contractId as string, a.symbol]),
+      ),
+    [supportedAssets],
+  );
+
+  // Borrowed positions → active loans (live protocol data).
+  const activeLoans: ActiveLoan[] = useMemo(
+    () =>
+      positions
+        .filter((p) => p.borrowed > 0)
+        .map((p) => ({
+          id: p.assetAddress || p.userAddress,
+          asset: symbolByContract[p.assetAddress] ?? `…${p.assetAddress.slice(-4)}`,
+          amount: p.borrowed,
+          status: 'Active',
+          healthFactor,
+        })),
+    [positions, symbolByContract, healthFactor],
+  );
+
+  const openRepayModal = (loan: ActiveLoan) => {
     setSelectedLoan(loan);
     setAmount(String(loan.amount));
     setModalVisible(true);
@@ -21,15 +74,88 @@ export default function RepayScreen() {
   const confirmRepay = async () => {
     if (!selectedLoan) return;
     try {
-        const res = await useStore.getState().repay({ amount, asset: selectedLoan.asset });
-        Toast.show({ type: 'success', text1: 'Repay Submitted', text2: JSON.stringify(res) });
+      const res = await repay({ amount, asset: selectedLoan.asset });
+      Toast.show({ type: 'success', text1: 'Repay Submitted', text2: `${amount} ${selectedLoan.asset}` });
       setModalVisible(false);
     } catch (err: any) {
-      const mockRes = { txHash: 'mock-' + Date.now(), status: 'mock', amount, asset: selectedLoan.asset };
-      useStore.setState({ lastLendingTx: mockRes });
-        Toast.show({ type: 'info', text1: 'Offline - Mock Repay', text2: JSON.stringify(mockRes) });
+      // The store rolled back the optimistic update; surface the reason.
+      Toast.show({ type: 'error', text1: 'Repay Failed', text2: err?.message ?? 'Something went wrong' });
       setModalVisible(false);
     }
+  };
+
+  const renderLoans = () => {
+    if (positionsLoading && activeLoans.length === 0) {
+      return <ListSkeleton count={2} height={180} />;
+    }
+    if (!positionsLoading && activeLoans.length === 0) {
+      return (
+        <View style={styles.emptyState}>
+          <Ionicons name="checkmark-circle-outline" size={64} color="#333" />
+          <Text style={styles.emptyText}>
+            {positionsError ? 'Could not load positions' : 'No active loans'}
+          </Text>
+          <Text style={styles.emptySubtext}>
+            {positionsError
+              ? 'Check your connection and try again.'
+              : "You don't have any borrowed assets to repay."}
+          </Text>
+          <TouchableOpacity
+            style={styles.emptyCta}
+            onPress={() => navigation?.navigate('Borrow')}
+          >
+            <Text style={styles.emptyCtaText}>Borrow Assets</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return (
+      <View style={styles.loansList}>
+        {activeLoans.map((loan) => (
+          <View key={loan.id} style={styles.loanCard}>
+            <View style={styles.cardHeader}>
+              <View style={styles.assetInfo}>
+                 <View style={styles.iconContainer}>
+                    <Ionicons name="cash-outline" size={24} color="#A855F7" />
+                 </View>
+                 <View>
+                   <Text style={styles.assetName}>{loan.asset}</Text>
+                   <Text style={styles.loanLabel}>Debt</Text>
+                 </View>
+              </View>
+              <View style={styles.healthBadge}>
+                <Text style={styles.healthText}>Health: {loan.healthFactor}</Text>
+              </View>
+            </View>
+
+            <View style={styles.loanDetails}>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Amount Owed</Text>
+                <Text style={styles.detailValue}>{loan.amount.toLocaleString()} {loan.asset}</Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Status</Text>
+                <Text style={styles.detailValue}>{loan.status}</Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={styles.repayButton}
+              onPress={() => {
+                const token = useStore.getState().authToken;
+                if (!token) {
+                  Toast.show({ type: 'error', text1: 'Not Authenticated', text2: 'Please connect your wallet first' });
+                  return;
+                }
+                openRepayModal(loan);
+              }}
+            >
+              <Text style={styles.buttonText}>Repay Now</Text>
+            </TouchableOpacity>
+          </View>
+        ))}
+      </View>
+    );
   };
 
   return (
@@ -37,63 +163,7 @@ export default function RepayScreen() {
     <ScrollView style={styles.container}>
       <Text style={styles.headerTitle}>Repay Loans</Text>
 
-      {activeLoans.length > 0 ? (
-        <View style={styles.loansList}>
-          {activeLoans.map((loan) => (
-            <View key={loan.id} style={styles.loanCard}>
-              <View style={styles.cardHeader}>
-                <View style={styles.assetInfo}>
-                   <View style={styles.iconContainer}>
-                      <Ionicons name="cash-outline" size={24} color="#A855F7" />
-                   </View>
-                   <View>
-                     <Text style={styles.assetName}>{loan.asset}</Text>
-                     <Text style={styles.loanLabel}>Debt</Text>
-                   </View>
-                </View>
-                <View style={styles.healthBadge}>
-                  <Text style={styles.healthText}>Health: {loan.healthFactor}</Text>
-                </View>
-              </View>
-
-              <View style={styles.loanDetails}>
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Amount Owed</Text>
-                  <Text style={styles.detailValue}>{loan.amount} {loan.asset}</Text>
-                </View>
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Value</Text>
-                  <Text style={styles.detailValue}>${loan.value.toLocaleString()}</Text>
-                </View>
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Interest Accrued</Text>
-                  <Text style={styles.detailValue}>$12.50</Text>
-                </View>
-              </View>
-
-              <TouchableOpacity
-                style={styles.repayButton}
-                onPress={() => {
-                  const token = useStore.getState().authToken;
-                  if (!token) {
-                    Toast.show({ type: 'error', text1: 'Not Authenticated', text2: 'Please connect your wallet first' });
-                    return;
-                  }
-                  openRepayModal(loan);
-                }}
-              >
-                <Text style={styles.buttonText}>Repay Now</Text>
-              </TouchableOpacity>
-            </View>
-          ))}
-        </View>
-      ) : (
-        <View style={styles.emptyState}>
-          <Ionicons name="checkmark-circle-outline" size={64} color="#333" />
-          <Text style={styles.emptyText}>No active loans</Text>
-          <Text style={styles.emptySubtext}>You don't have any borrowed assets to repay.</Text>
-        </View>
-      )}
+      {renderLoans()}
     </ScrollView>
       {/* Amount Modal */}
         <Modal
@@ -104,6 +174,7 @@ export default function RepayScreen() {
         >
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
             <View style={styles.modalContent}>
+              <OfflineBanner />
               <Text style={styles.modalTitle}>Repay {selectedLoan?.asset}</Text>
               <TextInput
                 value={amount}
@@ -117,8 +188,8 @@ export default function RepayScreen() {
                 <TouchableOpacity onPress={() => setModalVisible(false)} style={[styles.modalBtn, { backgroundColor: '#333' }]}>
                   <Text style={styles.buttonText}>Cancel</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={confirmRepay} style={[styles.modalBtn, { backgroundColor: '#A855F7' }]} disabled={useStore.getState().lendingLoading}>
-                  {useStore.getState().lendingLoading ? <ActivityIndicator color="#fff"/> : <Text style={styles.buttonText}>Confirm</Text>}
+                <TouchableOpacity onPress={confirmRepay} style={[styles.modalBtn, { backgroundColor: '#A855F7' }]} disabled={lendingLoading}>
+                  {lendingLoading ? <ActivityIndicator color="#fff"/> : <Text style={styles.buttonText}>Confirm</Text>}
                 </TouchableOpacity>
               </View>
             </View>
@@ -225,18 +296,31 @@ const styles = StyleSheet.create({
   emptyState: {
     alignItems: 'center',
     marginTop: 60,
+    paddingHorizontal: 16,
   },
   emptyText: {
     color: '#FFFFFF',
     fontSize: 20,
     fontWeight: 'bold',
     marginTop: 16,
+    textAlign: 'center',
   },
   emptySubtext: {
     color: '#666',
     fontSize: 14,
     marginTop: 8,
     textAlign: 'center',
+  },
+  emptyCta: {
+    marginTop: 20,
+    backgroundColor: '#A855F7',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  emptyCtaText: {
+    color: '#FFFFFF',
+    fontWeight: 'bold',
   },
   modalOverlay: {
     flex: 1,
