@@ -10,12 +10,18 @@ WORKDIR /app
 # OpenSSL required by Prisma's native query engine on Alpine
 RUN apk add --no-cache openssl
 
-COPY package.json package-lock.json ./
+# .npmrc carries engine-strict=true, so the image enforces the same Node floor
+# as local installs and CI do.
+COPY package.json package-lock.json .npmrc ./
 COPY prisma ./prisma/
 
 RUN npm ci
 
+
 # ── Stage 2: Build the application ────────────────────────────
+
+
+
 FROM node:22-alpine AS build
 
 WORKDIR /app
@@ -23,15 +29,22 @@ WORKDIR /app
 RUN apk add --no-cache openssl
 
 COPY --from=deps /app/node_modules ./node_modules
-COPY package.json package-lock.json tsconfig.json tsconfig.build.json nest-cli.json ./
+COPY package.json package-lock.json .npmrc tsconfig.json tsconfig.build.json nest-cli.json ./
 COPY prisma ./prisma/
 COPY src ./src/
 COPY scripts ./scripts/
 
 RUN npx nest build
 
+
 # ── Stage 3: Production image ─────────────────────────────────
 FROM node:22-alpine AS production
+
+# ── Stage 3: Production ─────────────────────────────────────
+FROM node:22-alpine AS production
+
+WORKDIR /app
+
 
 RUN apk add --no-cache openssl && \
     addgroup -S appuser && adduser -S appuser -G appuser
@@ -41,8 +54,12 @@ WORKDIR /app
 ENV NODE_ENV=production \
     PORT=3000
 
+
 # Install production dependencies + generate Prisma client
 COPY package.json package-lock.json ./
+
+COPY package.json package-lock.json .npmrc ./
+
 COPY prisma ./prisma/
 RUN npm ci --omit=dev && \
     npx prisma generate

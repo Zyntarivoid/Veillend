@@ -104,7 +104,7 @@ export default function ConnectWalletScreen() {
   return (
     <KeyboardAvoidingView
       style={{ flex: 1 }}
-      behavior={Platform.select({ ios: 'padding', android: undefined })}
+      behavior={Platform.select({ ios: 'padding', android: 'height' })}
     >
       <ScrollView
         contentContainerStyle={styles.scroll}
@@ -165,6 +165,8 @@ export default function ConnectWalletScreen() {
                     activeOpacity={0.8}
                     onPress={handleGenerateWallet}
                     disabled={loading}
+                    accessibilityRole="button"
+                    accessibilityLabel="Generate new Stellar wallet"
                   >
                     <LinearGradient
                       colors={['#09cc71', '#059652']}
@@ -206,11 +208,15 @@ export default function ConnectWalletScreen() {
                       autoCapitalize="characters"
                       autoCorrect={false}
                       secureTextEntry={!showKey}
+                      accessibilityLabel="Import secret key"
+                      returnKeyType="done"
+                      onSubmitEditing={handleImportWallet}
                     />
                     <TouchableOpacity
                       style={styles.eyeButton}
                       onPress={() => setShowKey(v => !v)}
                       hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                      accessibilityRole="button"
                       accessibilityLabel={showKey ? 'Hide secret key' : 'Show secret key'}
                     >
                       <Ionicons

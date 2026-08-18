@@ -69,6 +69,7 @@ jobs:
       run:
         working-directory: veilend-backend
 
+
     services:
       postgres:
         image: postgres:16-alpine
@@ -132,3 +133,26 @@ jobs:
           tags: veilend-backend:ci-${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Use Node.js from .nvmrc
+      uses: actions/setup-node@v4
+      with:
+        node-version-file: .nvmrc
+        cache: 'npm'
+        cache-dependency-path: 'veilend-backend/package-lock.json'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Lint
+      run: npm run lint
+      
+    - name: Build
+      run: npm run build
+      
+    - name: Test
+      run: npm run test
+

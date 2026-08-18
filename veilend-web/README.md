@@ -4,7 +4,7 @@ The VeilLend web application — a privacy-first decentralized lending interface
 
 ## Prerequisites
 
-- **Node.js** 22+
+- **Node.js** 22+ — the exact version used by CI is pinned in the repo-root `.nvmrc`; run `nvm use` from the repo root. `engines.node` is `>=22` and `.npmrc` sets `engine-strict=true`, so `npm ci` fails fast on an older runtime.
 - **npm** 10+
 
 ## Getting Started

@@ -119,7 +119,12 @@ export default function DashboardScreen({ navigation }: any) {
   };
 
   const ServiceButton = ({ icon, label, onPress }: any) => (
-    <TouchableOpacity style={styles.serviceBtn} onPress={onPress}>
+    <TouchableOpacity
+      style={styles.serviceBtn}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
       <View style={styles.serviceIconBox}>
         <Ionicons name={icon} size={24} color="#A855F7" />
       </View>
@@ -157,7 +162,15 @@ export default function DashboardScreen({ navigation }: any) {
                 }
               </Text>
                {/* Masked number eye icon */}
-              <Ionicons name={isPrivacyMode ? "eye-off-outline" : "eye-outline"} size={20} color="rgba(255,255,255,0.6)" style={{marginLeft: 10, marginTop: 12}} />
+              <TouchableOpacity
+                onPress={togglePrivacyMode}
+                accessibilityRole="button"
+                accessibilityLabel="Toggle balance visibility"
+                accessibilityState={{ checked: isPrivacyMode }}
+                style={{ marginLeft: 10, marginTop: 12 }}
+              >
+                <Ionicons name={isPrivacyMode ? "eye-off-outline" : "eye-outline"} size={20} color="rgba(255,255,255,0.6)" />
+              </TouchableOpacity>
             </View>
           </View>
           
@@ -206,10 +219,20 @@ export default function DashboardScreen({ navigation }: any) {
           <Text style={styles.userName}>{username}</Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-          <TouchableOpacity onPress={togglePrivacyMode} style={styles.iconButton}>
+          <TouchableOpacity
+            onPress={togglePrivacyMode}
+            style={styles.iconButton}
+            accessibilityRole="button"
+            accessibilityLabel="Toggle privacy mode"
+            accessibilityState={{ checked: isPrivacyMode }}
+          >
             <Ionicons name={isPrivacyMode ? "eye-off" : "eye"} size={24} color="#A1A1A1" />
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => setProfileVisible(true)}>
+          <TouchableOpacity
+            onPress={() => setProfileVisible(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Open profile menu"
+          >
             <Image 
               source={{ uri: avatarUri }} 
               style={styles.avatar} 
@@ -258,7 +281,7 @@ export default function DashboardScreen({ navigation }: any) {
                 <OfflineBanner />
                 <View style={styles.modalHeader}>
                   <Text style={styles.modalTitle}>Profile</Text>
-                  <TouchableOpacity onPress={() => setProfileVisible(false)}>
+                  <TouchableOpacity onPress={() => setProfileVisible(false)} accessibilityRole="button" accessibilityLabel="Close modal">
                     <Ionicons name="close-circle" size={28} color="#A1A1A1" />
                   </TouchableOpacity>
                 </View>
@@ -364,7 +387,12 @@ export default function DashboardScreen({ navigation }: any) {
       ) : (
         <View style={styles.transactionsList}>
           {allTransactions.map((tx: TransactionRecord) => (
-            <View key={tx.id} style={styles.txItem}>
+            <View
+              key={tx.id}
+              style={styles.txItem}
+              accessible
+              accessibilityLabel={`${tx.type} of ${tx.amount} ${tx.asset} on ${tx.timestamp}`}
+            >
               <View style={styles.txLeft}>
                 <View style={styles.txIconBox}>
                   <Ionicons

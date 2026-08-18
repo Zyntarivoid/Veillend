@@ -123,7 +123,7 @@ export default function SettingsScreen({ navigation }: any) {
       <Text style={styles.sectionTitle}>Profile</Text>
       <View style={styles.card}>
         <View style={styles.avatarRow}>
-          <TouchableOpacity onPress={pickImage} style={styles.avatarContainer}>
+          <TouchableOpacity onPress={pickImage} style={styles.avatarContainer} accessibilityRole="button" accessibilityLabel="Change profile photo">
             <Image source={{ uri: avatarUri }} style={styles.avatar} />
             <View style={styles.cameraIconBadge}>
               <Ionicons name="camera" size={14} color="#000" />
@@ -147,6 +147,8 @@ export default function SettingsScreen({ navigation }: any) {
             onPress={saveUsername}
             style={styles.saveBtn}
             disabled={tempName.trim() === username}
+            accessibilityRole="button"
+            accessibilityLabel="Save username"
           >
             <Text style={styles.saveBtnText}>Save</Text>
           </TouchableOpacity>
@@ -181,6 +183,8 @@ export default function SettingsScreen({ navigation }: any) {
           style={styles.securityAction}
           onPress={handleExportWallet}
           disabled={!isBackupConfirmed}
+          accessibilityRole="button"
+          accessibilityLabel="Export wallet backup file"
         >
           <View style={styles.securityActionLeft}>
             <Ionicons name="download-outline" size={20} color="#00D1FF" />
@@ -219,6 +223,9 @@ export default function SettingsScreen({ navigation }: any) {
               key={code}
               style={[styles.currencyChip, currency === code && styles.currencyChipActive]}
               onPress={() => setCurrency(code)}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: currency === code }}
+              accessibilityLabel={`Select ${code} currency`}
             >
               <Text
                 style={[
@@ -244,6 +251,7 @@ export default function SettingsScreen({ navigation }: any) {
             onValueChange={setNotificationsEnabled}
             trackColor={{ false: '#333', true: '#A855F7' }}
             thumbColor="#FFFFFF"
+            accessibilityLabel="Toggle notifications"
           />
         </View>
 
@@ -259,6 +267,7 @@ export default function SettingsScreen({ navigation }: any) {
             onValueChange={togglePrivacyMode}
             trackColor={{ false: '#333', true: '#A855F7' }}
             thumbColor="#FFFFFF"
+            accessibilityLabel="Toggle privacy mode"
           />
         </View>
       </View>
