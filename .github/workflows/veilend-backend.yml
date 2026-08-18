@@ -2,42 +2,133 @@ name: VeilLend Backend CI
 
 on:
   push:
+    branches:
+      - main
     paths:
-      - 'veilend-backend/**'
+      - "veilend-backend/**"
+      - ".github/workflows/veilend-backend.yml"
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
     paths:
-      - 'veilend-backend/**'
+      - "veilend-backend/**"
+      - ".github/workflows/veilend-backend.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: backend-ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build-and-test:
+  # ── Lint, Build & Unit Tests ──────────────────────────────────
+  lint-build-test:
+    name: Lint, Build & Test
     runs-on: ubuntu-latest
 
     defaults:
       run:
         working-directory: veilend-backend
 
-    strategy:
-      matrix:
-        node-version: [20.x]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: veilend-backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit tests
+        run: npm run test
+
+      - name: Validate contract spec
+        run: npm run validate-contracts
+
+  # ── E2E Tests (with Postgres) ────────────────────────────────
+  e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: veilend-backend
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: veilend
+          POSTGRES_PASSWORD: veilend
+          POSTGRES_DB: veilend_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U veilend"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://veilend:veilend@localhost:5432/veilend_test
+      JWT_SECRET: test_secret
+      STELLAR_NETWORK: testnet
 
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ matrix.node-version }}
-        cache: 'npm'
-        cache-dependency-path: 'veilend-backend/package-lock.json'
-        
-    - name: Install dependencies
-      run: npm ci
-      
-    - name: Lint
-      run: npm run lint
-      
-    - name: Build
-      run: npm run build
-      
-    - name: Test
-      run: npm run test
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: veilend-backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: Run migrations
+        run: npx prisma migrate deploy
+
+      - name: E2E tests
+        run: npm run test:e2e
+
+  # ── Docker Build Check ───────────────────────────────────────
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./veilend-backend
+          file: ./veilend-backend/Dockerfile
+          push: false
+          load: true
+          tags: veilend-backend:ci-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

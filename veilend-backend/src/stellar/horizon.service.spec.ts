@@ -1,8 +1,9 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-member-access */
 import { Test, TestingModule } from '@nestjs/testing';
 import { AppConfigService } from '../config/app-config.service';
 import { HorizonService } from './horizon.service';
 import { Horizon } from '@stellar/stellar-sdk';
+import { ClsService } from 'nestjs-cls';
 
 // Mock the Horizon class and its Server constructor
 jest.mock('@stellar/stellar-sdk', () => {
@@ -22,10 +23,16 @@ describe('HorizonService', () => {
   let mockHorizonServerInstance: {
     root: jest.Mock;
   };
+  let clsMock: { isActive: jest.Mock; getId: jest.Mock };
 
   beforeEach(async () => {
     // Reset mocks before each test
     jest.clearAllMocks();
+
+    clsMock = {
+      isActive: jest.fn().mockReturnValue(true),
+      getId: jest.fn().mockReturnValue('test-correlation-id-456'),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -49,6 +56,10 @@ describe('HorizonService', () => {
               pollIntervalMs: 5000,
             },
           },
+        },
+        {
+          provide: ClsService,
+          useValue: clsMock,
         },
       ],
     }).compile();
@@ -129,6 +140,24 @@ describe('HorizonService', () => {
         expect(response.error?.message).toBe('Horizon offline');
         done();
       });
+    });
+  });
+
+  describe('getOutboundFetchOptions', () => {
+    it('should include X-Correlation-Id header matching current CLS id', () => {
+      const options = service.getOutboundFetchOptions();
+      const headers = options.headers as Record<string, string>;
+
+      expect(headers['x-correlation-id']).toBe('test-correlation-id-456');
+    });
+
+    it('should omit X-Correlation-Id when no active CLS context', () => {
+      clsMock.isActive.mockReturnValue(false);
+
+      const options = service.getOutboundFetchOptions();
+      const headers = options.headers as Record<string, string>;
+
+      expect(headers['x-correlation-id']).toBeUndefined();
     });
   });
 });

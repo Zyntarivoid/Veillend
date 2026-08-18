@@ -4,6 +4,8 @@ import { rpc } from '@stellar/stellar-sdk';
 import { Observable, from, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { ServiceResponse } from './types';
+import { ClsService } from 'nestjs-cls';
+import { CORRELATION_ID_HEADER } from '../common/logging/correlation-id.util';
 
 @Injectable()
 export class SorobanRpcService implements OnModuleInit {
@@ -12,7 +14,10 @@ export class SorobanRpcService implements OnModuleInit {
   private healthy = false;
   private lastErrorMsg: string | null = null;
 
-  constructor(private readonly configService: AppConfigService) {}
+  constructor(
+    private readonly configService: AppConfigService,
+    private readonly cls: ClsService,
+  ) {}
 
   onModuleInit() {
     const sorobanRpcUrl = this.configService.stellar.sorobanRpcUrl;
@@ -43,6 +48,62 @@ export class SorobanRpcService implements OnModuleInit {
       throw new Error('Soroban RPC client is not initialized yet.');
     }
     return this.client;
+  }
+
+  /**
+   * Returns fetch options (headers) for outbound calls, including the
+   * current CLS correlation ID as X-Correlation-Id.
+   */
+  getOutboundFetchOptions(): RequestInit {
+    const correlationId = this.cls.isActive() ? this.cls.getId() : undefined;
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+
+    if (correlationId) {
+      headers[CORRELATION_ID_HEADER] = correlationId;
+    }
+
+    return { headers };
+  }
+
+  /**
+   * Perform an outbound JSON-RPC call to the Soroban endpoint,
+   * automatically propagating the correlation ID header.
+   */
+  async rpcCall<T = unknown>(method: string, params?: unknown): Promise<T> {
+    const url = this.configService.stellar.sorobanRpcUrl;
+    const body = JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method,
+      ...(params !== undefined ? { params } : {}),
+    });
+
+    const response = await fetch(url, {
+      ...this.getOutboundFetchOptions(),
+      method: 'POST',
+      body,
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Soroban RPC call "${method}" failed: ${response.status} ${response.statusText}`,
+      );
+    }
+
+    const json = (await response.json()) as {
+      result?: T;
+      error?: { message: string };
+    };
+    if (json.error) {
+      throw new Error(
+        `Soroban RPC call "${method}" returned error: ${json.error.message}`,
+      );
+    }
+
+    return json.result as T;
   }
 
   /**

@@ -1,6 +1,8 @@
 import { Injectable, LoggerService } from '@nestjs/common';
 import { ClsService } from 'nestjs-cls';
-import { redact } from './redact.util';
+import { redact, redactString } from './redact.util';
+
+const IS_PROD = process.env['NODE_ENV'] === 'production';
 
 @Injectable()
 export class AppLoggerService implements LoggerService {
@@ -34,15 +36,42 @@ export class AppLoggerService implements LoggerService {
   ) {
     const correlationId = this.cls.isActive() ? this.cls.getId() : undefined;
 
-    const record = {
-      timestamp: new Date().toISOString(),
-      level,
-      context,
-      correlationId,
-      message: typeof message === 'string' ? message : redact(message),
-      ...(trace ? { trace } : {}),
-    };
+    // Resolve message: redact objects deeply, keep strings for final pass
+    let resolvedMessage: unknown;
+    if (typeof message === 'string') {
+      resolvedMessage = message;
+    } else {
+      resolvedMessage = redact(message);
+    }
 
-    process.stdout.write(JSON.stringify(record) + '\n');
+    if (IS_PROD) {
+      // NDJSON format for Loki / Datadog ingestion
+      const record: Record<string, unknown> = {
+        level,
+        time: new Date().toISOString(),
+        msg: resolvedMessage,
+        component: context,
+        ...(correlationId ? { correlationId } : {}),
+        ...(trace ? { trace } : {}),
+      };
+
+      // LAST step: apply PII regex redaction to the entire serialized line
+      const line = JSON.stringify(record);
+      process.stdout.write(redactString(line) + '\n');
+    } else {
+      // Pretty dev format
+      const record = {
+        timestamp: new Date().toISOString(),
+        level,
+        context,
+        correlationId,
+        message: resolvedMessage,
+        ...(trace ? { trace } : {}),
+      };
+
+      // LAST step: apply PII regex redaction to the entire serialized line
+      const line = JSON.stringify(record);
+      process.stdout.write(redactString(line) + '\n');
+    }
   }
 }
