@@ -2,8 +2,6 @@ import { Injectable, LoggerService } from '@nestjs/common';
 import { ClsService } from 'nestjs-cls';
 import { redact, redactString } from './redact.util';
 
-const IS_PROD = process.env['NODE_ENV'] === 'production';
-
 @Injectable()
 export class AppLoggerService implements LoggerService {
   constructor(private readonly cls: ClsService) {}
@@ -35,10 +33,7 @@ export class AppLoggerService implements LoggerService {
     trace?: string,
   ) {
     const correlationId = this.cls.isActive() ? this.cls.getId() : undefined;
-    const isProd = process.env.NODE_ENV === 'production';
-    const redactedMsg = redact(message);
-    const now = new Date().toISOString();
-
+    const isProd = process.env['NODE_ENV'] === 'production';
 
     // Resolve message: redact objects deeply, keep strings for final pass
     let resolvedMessage: unknown;
@@ -48,13 +43,14 @@ export class AppLoggerService implements LoggerService {
       resolvedMessage = redact(message);
     }
 
-    if (IS_PROD) {
+    if (isProd) {
       // NDJSON format for Loki / Datadog ingestion
       const record: Record<string, unknown> = {
         level,
         time: new Date().toISOString(),
         msg: resolvedMessage,
         component: context,
+        context,
         ...(correlationId ? { correlationId } : {}),
         ...(trace ? { trace } : {}),
       };
@@ -76,36 +72,6 @@ export class AppLoggerService implements LoggerService {
       // LAST step: apply PII regex redaction to the entire serialized line
       const line = JSON.stringify(record);
       process.stdout.write(redactString(line) + '\n');
-
-    if (isProd) {
-      // Production NDJSON schema optimized for Datadog/Loki/CloudWatch ingestion
-      const prodRecord: Record<string, unknown> = {
-        time: now,
-        timestamp: now,
-        level,
-        msg:
-          typeof redactedMsg === 'string'
-            ? redactedMsg
-            : JSON.stringify(redactedMsg),
-        message: redactedMsg,
-        component: context,
-        context,
-        correlationId,
-        ...(trace ? { trace } : {}),
-      };
-      process.stdout.write(JSON.stringify(prodRecord) + '\n');
-    } else {
-      // Development format
-      const record = {
-        timestamp: now,
-        level,
-        context,
-        correlationId,
-        message: redactedMsg,
-        ...(trace ? { trace } : {}),
-      };
-      process.stdout.write(JSON.stringify(record) + '\n');
-
     }
   }
 }

@@ -34,13 +34,13 @@ describe('redact', () => {
   it('masks Stellar G-addresses preserving only first 6 and last 4 characters', () => {
     const addr = 'GBJEI2M7C3VCWLNGMVIUCA5MNNJICYGKRPS75OZHNUCX33RTRJNQK6MH';
     const redacted = redact(`Failed signature for wallet ${addr}`);
-    expect(redacted).toBe('Failed signature for wallet GBJEI2...K6MH');
+    expect(redacted).toBe('Failed signature for wallet GBJEI2…K6MH');
   });
 
   it('fully redacts Stellar S-secret seed keys', () => {
     const secret = 'SCZANGBA5YHTNYVVV4C3U252E2B6P6IRKD4D876OQO7D6EUZPIF274IH';
     const redacted = redact(`Signing transaction with key ${secret}`);
-    expect(redacted).toBe('Signing transaction with key [REDACTED_SECRET_KEY]');
+    expect(redacted).toBe('Signing transaction with key [REDACTED]');
   });
 
   it('redacts JWT tokens embedded in strings', () => {
