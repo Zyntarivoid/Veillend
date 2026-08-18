@@ -20,6 +20,25 @@ class FakePrismaService {
     string,
     { id: string; userId: string; token: string; expiresAt: Date }
   >();
+  private nonces = new Map<
+    string,
+    {
+      id: string;
+      walletAddress: string;
+      nonce: string;
+      expiresAt: Date;
+      used: boolean;
+    }
+  >();
+  private auditLogs: Array<{
+    id: string;
+    walletAddress: string;
+    event: string;
+    reason?: string;
+    ip?: string;
+    userAgent?: string;
+    correlationId?: string;
+  }> = [];
   private idCounter = 0;
 
   private nextId(): string {
@@ -38,6 +57,108 @@ class FakePrismaService {
       const created = { id: this.nextId(), walletAddress: where.walletAddress };
       this.users.set(where.walletAddress, created);
       return Promise.resolve(created);
+    },
+  };
+
+  walletNonce = {
+    updateMany: ({
+      where,
+      data,
+    }: {
+      where: {
+        walletAddress: string;
+        used?: boolean;
+        nonce?: string;
+        expiresAt?: any;
+      };
+      data: { used: boolean };
+    }) => {
+      let count = 0;
+      for (const [, nonce] of this.nonces.entries()) {
+        const matches =
+          nonce.walletAddress === where.walletAddress &&
+          (where.used === undefined || nonce.used === where.used) &&
+          (where.nonce === undefined || nonce.nonce === where.nonce);
+        if (matches) {
+          nonce.used = data.used;
+          count++;
+        }
+      }
+      return Promise.resolve({ count });
+    },
+    create: ({
+      data,
+    }: {
+      data: { walletAddress: string; nonce: string; expiresAt: Date };
+    }) => {
+      const record = { id: this.nextId(), ...data, used: false };
+      this.nonces.set(record.nonce, record);
+      return Promise.resolve(record);
+    },
+    findFirst: ({
+      where,
+      orderBy: _orderBy,
+    }: {
+      where: { walletAddress: string; nonce?: string };
+      orderBy?: any;
+    }) => {
+      for (const nonce of this.nonces.values()) {
+        if (
+          nonce.walletAddress === where.walletAddress &&
+          (where.nonce === undefined || nonce.nonce === where.nonce)
+        ) {
+          return Promise.resolve(nonce);
+        }
+      }
+      return Promise.resolve(null);
+    },
+    update: ({
+      where,
+      data,
+    }: {
+      where: { id: string };
+      data: { used: boolean };
+    }) => {
+      for (const nonce of this.nonces.values()) {
+        if (nonce.id === where.id) {
+          nonce.used = data.used;
+          return Promise.resolve(nonce);
+        }
+      }
+      return Promise.resolve(null);
+    },
+  };
+
+  authAuditLog = {
+    create: ({
+      data,
+    }: {
+      data: {
+        walletAddress: string;
+        event: string;
+        reason?: string;
+        ip?: string;
+        userAgent?: string;
+        correlationId?: string;
+      };
+    }) => {
+      const record = { id: this.nextId(), ...data, createdAt: new Date() };
+      this.auditLogs.push(record);
+      return Promise.resolve(record);
+    },
+    findMany: ({
+      where,
+      orderBy: _orderBy,
+      take,
+    }: {
+      where: { walletAddress: string };
+      orderBy?: any;
+      take?: number;
+    }) => {
+      const logs = this.auditLogs.filter(
+        (log) => log.walletAddress === where.walletAddress,
+      );
+      return Promise.resolve(take ? logs.slice(0, take) : logs);
     },
   };
 
