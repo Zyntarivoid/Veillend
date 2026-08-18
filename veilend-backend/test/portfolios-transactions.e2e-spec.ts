@@ -1,5 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication } from '@nestjs/common';
+import {
+  INestApplication,
+  ValidationPipe,
+  BadRequestException,
+  ValidationError,
+} from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
@@ -175,17 +180,39 @@ class FakePrismaService {
     }: {
       data: { userId: string; token: string; expiresAt: Date };
     }) => {
-      const record = { id: this.nextId(), ...data };
+      const record = { id: this.nextId(), ...data, lastSeenAt: new Date() };
       this.sessions.set(record.token, record);
       return Promise.resolve(record);
     },
-    findUnique: ({ where }: { where: { token: string } }) => {
+    findUnique: ({
+      where,
+      include,
+    }: {
+      where: { token: string };
+      include?: { user?: boolean };
+    }) => {
       const session = this.sessions.get(where.token);
       if (!session) return Promise.resolve(null);
-      const user = [...this.users.values()].find(
-        (u) => u.id === session.userId,
-      );
-      return Promise.resolve({ ...session, user });
+
+      if (include?.user) {
+        const user = [...this.users.values()].find(
+          (u) => u.id === session.userId,
+        );
+        return Promise.resolve({ ...session, user: user ?? null });
+      }
+      return Promise.resolve(session);
+    },
+    update: ({
+      where,
+      data,
+    }: {
+      where: { id: string };
+      data: { lastSeenAt?: Date };
+    }) => {
+      const entry = [...this.sessions.values()].find((s) => s.id === where.id);
+      if (!entry) return Promise.resolve(null);
+      Object.assign(entry, data);
+      return Promise.resolve(entry);
     },
   };
 
@@ -217,6 +244,19 @@ describe('Portfolios & Transactions (e2e)', () => {
       .compile();
 
     app = moduleFixture.createNestApplication();
+    app.useGlobalPipes(
+      new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: true,
+        transform: true,
+        exceptionFactory: (errors: ValidationError[]) => {
+          const message = errors
+            .flatMap((error) => Object.values(error.constraints ?? {}))
+            .join('; ');
+          return new BadRequestException(message || 'Validation failed');
+        },
+      }),
+    );
     await app.init();
   });
 
@@ -228,18 +268,27 @@ describe('Portfolios & Transactions (e2e)', () => {
     const nonceRes = await request(app.getHttpServer())
       .post('/auth/nonce')
       .send({ walletAddress });
-    const nonceBody = nonceRes.body as { nonce: string };
+    const nonceBody = nonceRes.body as {
+      success: boolean;
+      data: { nonce: string };
+    };
+
+    // 88-char base64 signature (valid format for DTO validation)
+    const fakeSignature = 'A'.repeat(86) + '==';
 
     const verifyRes = await request(app.getHttpServer())
       .post('/auth/verify')
       .send({
         walletAddress,
-        nonce: nonceBody.nonce,
-        signature: 'stubbed',
+        nonce: nonceBody.data.nonce,
+        signature: fakeSignature,
       });
-    const verifyBody = verifyRes.body as { accessToken: string };
+    const verifyBody = verifyRes.body as {
+      success: boolean;
+      data: { accessToken: string };
+    };
 
-    return verifyBody.accessToken;
+    return verifyBody.data.accessToken;
   }
 
   it('rejects unauthenticated requests to /portfolios/:walletAddress', async () => {

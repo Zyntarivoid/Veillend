@@ -3,6 +3,24 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
+import { PrismaService } from './../src/prisma/prisma.service';
+
+// Minimal fake PrismaService – this test only exercises the root endpoint
+// and error handling, so we just need to prevent a real database connection.
+class FakePrismaService {
+  async onModuleInit() {
+    /* no-op */
+  }
+  async onModuleDestroy() {
+    /* no-op */
+  }
+  $connect() {
+    return Promise.resolve();
+  }
+  $disconnect() {
+    return Promise.resolve();
+  }
+}
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -13,7 +31,10 @@ describe('Correlation ID (e2e)', () => {
   beforeEach(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(PrismaService)
+      .useValue(new FakePrismaService())
+      .compile();
 
     app = moduleFixture.createNestApplication();
     await app.init();
