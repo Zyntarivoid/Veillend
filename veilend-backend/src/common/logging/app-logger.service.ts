@@ -35,6 +35,10 @@ export class AppLoggerService implements LoggerService {
     trace?: string,
   ) {
     const correlationId = this.cls.isActive() ? this.cls.getId() : undefined;
+    const isProd = process.env.NODE_ENV === 'production';
+    const redactedMsg = redact(message);
+    const now = new Date().toISOString();
+
 
     // Resolve message: redact objects deeply, keep strings for final pass
     let resolvedMessage: unknown;
@@ -72,6 +76,36 @@ export class AppLoggerService implements LoggerService {
       // LAST step: apply PII regex redaction to the entire serialized line
       const line = JSON.stringify(record);
       process.stdout.write(redactString(line) + '\n');
+
+    if (isProd) {
+      // Production NDJSON schema optimized for Datadog/Loki/CloudWatch ingestion
+      const prodRecord: Record<string, unknown> = {
+        time: now,
+        timestamp: now,
+        level,
+        msg:
+          typeof redactedMsg === 'string'
+            ? redactedMsg
+            : JSON.stringify(redactedMsg),
+        message: redactedMsg,
+        component: context,
+        context,
+        correlationId,
+        ...(trace ? { trace } : {}),
+      };
+      process.stdout.write(JSON.stringify(prodRecord) + '\n');
+    } else {
+      // Development format
+      const record = {
+        timestamp: now,
+        level,
+        context,
+        correlationId,
+        message: redactedMsg,
+        ...(trace ? { trace } : {}),
+      };
+      process.stdout.write(JSON.stringify(record) + '\n');
+
     }
   }
 }

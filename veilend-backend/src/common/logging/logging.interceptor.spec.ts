@@ -7,7 +7,7 @@ import { AppLoggerService } from './app-logger.service';
 
 describe('LoggingInterceptor', () => {
   let interceptor: LoggingInterceptor;
-  let logger: { log: jest.Mock; warn: jest.Mock };
+  let logger: { log: jest.Mock; warn: jest.Mock; debug: jest.Mock };
   let cls: { isActive: jest.Mock; getId: jest.Mock };
 
 
@@ -22,6 +22,8 @@ describe('LoggingInterceptor', () => {
     const req = {
       method: 'GET',
       url: '/things',
+      ip: '192.168.1.100',
+      headers: {},
       user: { walletAddress: 'GBROWSERWALLET', sessionId: 'session-1' },
 
     };
@@ -35,7 +37,7 @@ describe('LoggingInterceptor', () => {
   }
 
   beforeEach(() => {
-    logger = { log: jest.fn(), warn: jest.fn() };
+    logger = { log: jest.fn(), warn: jest.fn(), debug: jest.fn() };
     cls = {
       isActive: jest.fn().mockReturnValue(true),
       getId: jest.fn().mockReturnValue('corr-123'),
@@ -46,12 +48,17 @@ describe('LoggingInterceptor', () => {
     );
   });
 
+
   it('logs request_start and request_end with structured data', (done) => {
+
+  it('logs request entry and successful exit with masked IP', (done) => {
+
     const context = makeContext();
     const handler: CallHandler = { handle: () => of('result') };
 
     interceptor.intercept(context, handler).subscribe({
       complete: () => {
+
 
         expect(logger.log).toHaveBeenCalledTimes(2);
 
@@ -66,12 +73,26 @@ describe('LoggingInterceptor', () => {
         expect(endPayload.status_code).toBe(200);
         expect(typeof endPayload.duration_ms).toBe('number');
 
+        expect(logger.debug).toHaveBeenCalledWith(
+          expect.objectContaining({
+            event: 'request_start',
+            method: 'GET',
+            url: '/things',
+            ip: '192.168.1.0',
+            correlationId: 'corr-123',
+          }),
+          'HTTP',
+        );
+
+
         expect(logger.log).toHaveBeenCalledTimes(1);
         expect(logger.log.mock.calls[0][0]).toEqual(
           expect.objectContaining({
+            event: 'request_end',
             method: 'GET',
             url: '/things',
             statusCode: 200,
+            ip: '192.168.1.0',
             correlationId: 'corr-123',
             walletAddress: 'GBROWSERWALLET',
             sessionId: 'session-1',
@@ -114,10 +135,11 @@ describe('LoggingInterceptor', () => {
 
         expect(logger.warn.mock.calls[0][0]).toEqual(
           expect.objectContaining({
+            event: 'request_end',
             method: 'GET',
             url: '/things',
+            ip: '192.168.1.0',
             correlationId: 'corr-123',
-            walletAddress: 'GBROWSERWALLET',
           }),
         );
 
