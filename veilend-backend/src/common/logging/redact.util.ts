@@ -30,7 +30,7 @@ const JWT_RE =
 const AUTH_BEARER_RE = /Authorization:\s*Bearer\s+\S+/gi;
 
 // Authorization: <any-value> (catch non-Bearer schemes)
-const AUTH_HEADER_RE = /Authorization:\s*\S+/gi;
+const AUTH_HEADER_RE = /Authorization:\s*.+/gi;
 
 // Signature blobs – hex hash (64-char hex = SHA-256)
 const SIGNATURE_HEX_RE = /\b[0-9a-fA-F]{64}\b/g;
@@ -53,9 +53,9 @@ export function redactString(value: string): string {
   // JWTs
   out = out.replace(JWT_RE, REDACTED);
 
-  // Authorization headers (Bearer first, then generic)
-  out = out.replace(AUTH_BEARER_RE, 'Authorization: Bearer [REDACTED]');
+  // Authorization headers – generic first (catches all schemes including Bearer)
   out = out.replace(AUTH_HEADER_RE, 'Authorization: [REDACTED]');
+  out = out.replace(AUTH_BEARER_RE, 'Authorization: Bearer [REDACTED]');
 
   // Signature hex hashes
   out = out.replace(SIGNATURE_HEX_RE, REDACTED);

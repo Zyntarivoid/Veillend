@@ -1,5 +1,5 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, type Prisma } from '@prisma/client';
 import { ClsService } from 'nestjs-cls';
 
 @Injectable()
@@ -17,21 +17,26 @@ export class PrismaService
     // Middleware that captures every Prisma operation and tags them with the
     // current correlation ID. The ID is stored on the params so downstream
     // logging / slow-query analysis can trace back to the originating request.
-    this.$use(async (params, next) => {
-      const correlationId = this.getCorrelationId();
+    this.$use(
+      async (
+        params: Prisma.MiddlewareParams,
+        next: (params: Prisma.MiddlewareParams) => Promise<unknown>,
+      ): Promise<unknown> => {
+        const correlationId = this.getCorrelationId();
 
-      if (correlationId) {
-        // Attach correlation ID to args for downstream visibility.
-        // Prisma will include these in query event logs when log level is set.
-        const args = (params as Record<string, unknown>)['args'] ?? {};
-        (params as Record<string, unknown>)['args'] = {
-          ...(typeof args === 'object' && args !== null ? args : {}),
-          __correlationId: correlationId,
-        };
-      }
+        if (correlationId) {
+          // Attach correlation ID to args for downstream visibility.
+          // Prisma will include these in query event logs when log level is set.
+          const args = (params as Record<string, unknown>)['args'] ?? {};
+          (params as Record<string, unknown>)['args'] = {
+            ...(typeof args === 'object' && args !== null ? args : {}),
+            __correlationId: correlationId,
+          };
+        }
 
-      return next(params);
-    });
+        return next(params);
+      },
+    );
   }
 
   async onModuleDestroy() {

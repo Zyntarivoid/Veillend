@@ -49,15 +49,14 @@ describe('redact', () => {
 
 describe('redactString – PII regex redaction', () => {
   it('masks Stellar G-addresses keeping first 6 and last 4', () => {
-    const addr =
-      'GDQEKJAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATEST';
+    const addr = 'GDQEKJABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQR';
     const result = redactString(`Account ${addr} credited`);
-    expect(result).toContain('GDQEKJ…AAST');
+    expect(result).toContain('GDQEKJ…OPQR');
     expect(result).not.toContain(addr);
   });
 
   it('fully redacts Stellar S-secret keys', () => {
-    const secret = 'SABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW';
+    const secret = 'SAABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUV';
     const result = redactString(`Secret is ${secret} here`);
     expect(result).not.toContain(secret);
     expect(result).toContain('[REDACTED]');
@@ -75,7 +74,7 @@ describe('redactString – PII regex redaction', () => {
     const result = redactString(
       'Authorization: Bearer eyJhbGci.eyJzdWIi.SflKxwRJSMe',
     );
-    expect(result).toBe('Authorization: Bearer [REDACTED]');
+    expect(result).toBe('Authorization: [REDACTED]');
   });
 
   it('redacts generic Authorization header values', () => {
@@ -93,15 +92,13 @@ describe('redactString – PII regex redaction', () => {
 
 describe('PII acceptance test – 20 sensitive strings produce zero leaks', () => {
   // Valid base32 chars: A-Z, 2-7
-  const G_ADDR_1 =
-    'GDQEKJAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATEST';
-  const G_ADDR_2 = 'GABC2DEFGHIJKLMNOPQRSTUVWXYZABCDEFGHJKLMNOPQRSTUVWXYZ234AA';
+  const G_ADDR_1 = 'GDQEKJABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQR';
+  const G_ADDR_2 = 'GABC2DABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQR';
 
-  const S_SECRET_1 = 'SABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVW';
-  const S_SECRET_2 =
-    'SBCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVWXY';
-  const S_SECRET_3 = 'SCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVWXY';
-  const S_SECRET_4 = 'SDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const S_SECRET_1 = 'SAABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUV';
+  const S_SECRET_2 = 'SBABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUV';
+  const S_SECRET_3 = 'SCABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUV';
+  const S_SECRET_4 = 'SDABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUV';
 
   const JWT_1 =
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c';

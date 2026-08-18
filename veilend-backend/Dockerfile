@@ -3,7 +3,7 @@
 # ─────────────────────────────────────────────────────────────
 
 # ── Stage 1: Dependencies (all, for build) ───────────────────
-FROM node:20-alpine AS deps
+FROM node:22-alpine AS deps
 
 WORKDIR /app
 
@@ -15,8 +15,8 @@ COPY prisma ./prisma/
 
 RUN npm ci
 
-# ── Stage 2: Build ───────────────────────────────────────────
-FROM node:20-alpine AS build
+# ── Stage 2: Build the application ────────────────────────────
+FROM node:22-alpine AS build
 
 WORKDIR /app
 
@@ -30,25 +30,24 @@ COPY scripts ./scripts/
 
 RUN npx nest build
 
-# ── Stage 3: Production ─────────────────────────────────────
-FROM node:20-alpine AS production
-
-WORKDIR /app
+# ── Stage 3: Production image ─────────────────────────────────
+FROM node:22-alpine AS production
 
 RUN apk add --no-cache openssl && \
     addgroup -S appuser && adduser -S appuser -G appuser
 
+WORKDIR /app
+
 ENV NODE_ENV=production \
     PORT=3000
 
+# Install production dependencies + generate Prisma client
 COPY package.json package-lock.json ./
 COPY prisma ./prisma/
-
-# Install production-only dependencies and generate Prisma Client
 RUN npm ci --omit=dev && \
     npx prisma generate
 
-# Copy the built application from the build stage
+# Copy compiled output from build stage
 COPY --from=build /app/dist ./dist
 
 # Entrypoint runs migrations then starts the app
