@@ -6,6 +6,7 @@ import { JwtStrategy } from '../auth/jwt.strategy';
 import { AppConfigService } from '../config/app-config.service';
 import { AdminActionRepository } from './admin-action.repository';
 import { AdminTransactionBuilderService } from './admin-transaction-builder.service';
+import { ClsService } from 'nestjs-cls';
 
 /**
  * Integration test for admin removal and session revocation
@@ -43,6 +44,13 @@ describe('Admin Session Revocation Integration', () => {
         {
           provide: AdminTransactionBuilderService,
           useValue: {},
+        },
+        {
+          provide: ClsService,
+          useValue: {
+            isActive: () => false,
+            getId: () => undefined,
+          },
         },
       ],
     }).compile();

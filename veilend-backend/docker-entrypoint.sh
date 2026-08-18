@@ -1,9 +1,10 @@
 #!/bin/sh
 set -e
 
-# Run pending Prisma migrations (idempotent – safe on every start)
+# Run Prisma migrations in production
 echo "Running database migrations..."
 npx prisma migrate deploy
 
+# Start the application
 echo "Starting VeilLend backend..."
-exec "$@"
+exec node dist/main

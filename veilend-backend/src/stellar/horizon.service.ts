@@ -4,6 +4,10 @@ import { Horizon } from '@stellar/stellar-sdk';
 import { Observable, from, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { ServiceResponse } from './types';
+
+import { ClsService } from 'nestjs-cls';
+import { CORRELATION_ID_HEADER } from '../common/logging/correlation-id.util';
+
 import { CircuitBreakerManager } from './retry-with-fallback';
 
 @Injectable()
@@ -11,7 +15,10 @@ export class HorizonService implements OnModuleInit {
   private readonly logger = new Logger(HorizonService.name);
   private circuitBreaker!: CircuitBreakerManager<Horizon.Server>;
 
-  constructor(private readonly configService: AppConfigService) {}
+  constructor(
+    private readonly configService: AppConfigService,
+    private readonly cls: ClsService,
+  ) {}
 
   onModuleInit() {
     const horizonUrls = this.configService.stellar.horizonUrls;
@@ -62,6 +69,37 @@ export class HorizonService implements OnModuleInit {
       mode: 'read',
     });
   }
+
+  /**
+   * Returns fetch options (headers) for outbound calls, including the
+   * current CLS correlation ID as X-Correlation-Id.
+   */
+  getOutboundFetchOptions(): RequestInit {
+    const correlationId = this.cls.isActive() ? this.cls.getId() : undefined;
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+
+    if (correlationId) {
+      headers[CORRELATION_ID_HEADER] = correlationId;
+    }
+
+    return { headers };
+  }
+
+  /**
+   * Perform an outbound HTTP request to the Horizon endpoint,
+   * automatically propagating the correlation ID header.
+   */
+  async horizonFetch(path: string): Promise<Response> {
+    const url = `${this.configService.stellar.horizonUrls[0]}/${path}`;
+    return fetch(url, this.getOutboundFetchOptions());
+  }
+
+  /**
+   * Perform an asynchronous connection validation check
+   */
 
   async validateConnection(): Promise<boolean> {
     let allHealthy = false;

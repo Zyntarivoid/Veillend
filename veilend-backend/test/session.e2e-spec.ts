@@ -1,5 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication } from '@nestjs/common';
+import {
+  INestApplication,
+  ValidationPipe,
+  BadRequestException,
+  ValidationError,
+} from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
@@ -20,6 +25,25 @@ class FakePrismaService {
     string,
     { id: string; userId: string; token: string; expiresAt: Date }
   >();
+  private nonces = new Map<
+    string,
+    {
+      id: string;
+      walletAddress: string;
+      nonce: string;
+      expiresAt: Date;
+      used: boolean;
+    }
+  >();
+  private auditLogs: Array<{
+    id: string;
+    walletAddress: string;
+    event: string;
+    reason?: string;
+    ip?: string;
+    userAgent?: string;
+    correlationId?: string;
+  }> = [];
   private idCounter = 0;
 
   private nextId(): string {
@@ -41,18 +65,147 @@ class FakePrismaService {
     },
   };
 
+  walletNonce = {
+    updateMany: ({
+      where,
+      data,
+    }: {
+      where: {
+        walletAddress: string;
+        used?: boolean;
+        nonce?: string;
+        expiresAt?: any;
+      };
+      data: { used: boolean };
+    }) => {
+      let count = 0;
+      for (const [, nonce] of this.nonces.entries()) {
+        const matches =
+          nonce.walletAddress === where.walletAddress &&
+          (where.used === undefined || nonce.used === where.used) &&
+          (where.nonce === undefined || nonce.nonce === where.nonce);
+        if (matches) {
+          nonce.used = data.used;
+          count++;
+        }
+      }
+      return Promise.resolve({ count });
+    },
+    create: ({
+      data,
+    }: {
+      data: { walletAddress: string; nonce: string; expiresAt: Date };
+    }) => {
+      const record = { id: this.nextId(), ...data, used: false };
+      this.nonces.set(record.nonce, record);
+      return Promise.resolve(record);
+    },
+    findFirst: ({
+      where,
+      orderBy: _orderBy,
+    }: {
+      where: { walletAddress: string; nonce?: string };
+      orderBy?: any;
+    }) => {
+      for (const nonce of this.nonces.values()) {
+        if (
+          nonce.walletAddress === where.walletAddress &&
+          (where.nonce === undefined || nonce.nonce === where.nonce)
+        ) {
+          return Promise.resolve(nonce);
+        }
+      }
+      return Promise.resolve(null);
+    },
+    update: ({
+      where,
+      data,
+    }: {
+      where: { id: string };
+      data: { used: boolean };
+    }) => {
+      for (const nonce of this.nonces.values()) {
+        if (nonce.id === where.id) {
+          nonce.used = data.used;
+          return Promise.resolve(nonce);
+        }
+      }
+      return Promise.resolve(null);
+    },
+  };
+
+  authAuditLog = {
+    create: ({
+      data,
+    }: {
+      data: {
+        walletAddress: string;
+        event: string;
+        reason?: string;
+        ip?: string;
+        userAgent?: string;
+        correlationId?: string;
+      };
+    }) => {
+      const record = { id: this.nextId(), ...data, createdAt: new Date() };
+      this.auditLogs.push(record);
+      return Promise.resolve(record);
+    },
+    findMany: ({
+      where,
+      orderBy: _orderBy,
+      take,
+    }: {
+      where: { walletAddress: string };
+      orderBy?: any;
+      take?: number;
+    }) => {
+      const logs = this.auditLogs.filter(
+        (log) => log.walletAddress === where.walletAddress,
+      );
+      return Promise.resolve(take ? logs.slice(0, take) : logs);
+    },
+  };
+
   session = {
     create: ({
       data,
     }: {
       data: { userId: string; token: string; expiresAt: Date };
     }) => {
-      const record = { id: this.nextId(), ...data };
+      const record = { id: this.nextId(), ...data, lastSeenAt: new Date() };
       this.sessions.set(record.token, record);
       return Promise.resolve(record);
     },
-    findUnique: ({ where }: { where: { token: string } }) => {
-      return Promise.resolve(this.sessions.get(where.token) ?? null);
+    findUnique: ({
+      where,
+      include,
+    }: {
+      where: { token: string };
+      include?: { user?: boolean };
+    }) => {
+      const session = this.sessions.get(where.token);
+      if (!session) return Promise.resolve(null);
+
+      if (include?.user) {
+        const user = [...this.users.values()].find(
+          (u) => u.id === session.userId,
+        );
+        return Promise.resolve({ ...session, user: user ?? null });
+      }
+      return Promise.resolve(session);
+    },
+    update: ({
+      where,
+      data,
+    }: {
+      where: { id: string };
+      data: { lastSeenAt?: Date };
+    }) => {
+      const entry = [...this.sessions.values()].find((s) => s.id === where.id);
+      if (!entry) return Promise.resolve(null);
+      Object.assign(entry, data);
+      return Promise.resolve(entry);
     },
     delete: ({ where }: { where: { id: string } }) => {
       const entry = [...this.sessions.values()].find((s) => s.id === where.id);
@@ -80,6 +233,19 @@ describe('Session lifecycle (e2e)', () => {
       .compile();
 
     app = moduleFixture.createNestApplication();
+    app.useGlobalPipes(
+      new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: true,
+        transform: true,
+        exceptionFactory: (errors: ValidationError[]) => {
+          const message = errors
+            .flatMap((error) => Object.values(error.constraints ?? {}))
+            .join('; ');
+          return new BadRequestException(message || 'Validation failed');
+        },
+      }),
+    );
     await app.init();
   });
 
@@ -91,18 +257,27 @@ describe('Session lifecycle (e2e)', () => {
     const nonceRes = await request(app.getHttpServer())
       .post('/auth/nonce')
       .send({ walletAddress: VALID_WALLET_ADDRESS });
-    const nonceBody = nonceRes.body as { nonce: string };
+    const nonceBody = nonceRes.body as {
+      success: boolean;
+      data: { nonce: string };
+    };
+
+    // 88-char base64 signature (valid format for DTO validation)
+    const fakeSignature = 'A'.repeat(86) + '==';
 
     const verifyRes = await request(app.getHttpServer())
       .post('/auth/verify')
       .send({
         walletAddress: VALID_WALLET_ADDRESS,
-        nonce: nonceBody.nonce,
-        signature: 'stubbed',
+        nonce: nonceBody.data.nonce,
+        signature: fakeSignature,
       });
-    const verifyBody = verifyRes.body as { accessToken: string };
+    const verifyBody = verifyRes.body as {
+      success: boolean;
+      data: { accessToken: string };
+    };
 
-    return verifyBody.accessToken;
+    return verifyBody.data.accessToken;
   }
 
   it('returns the wallet context for an active session', async () => {
@@ -111,11 +286,15 @@ describe('Session lifecycle (e2e)', () => {
     const res = await request(app.getHttpServer())
       .get('/auth/session')
       .set('Authorization', `Bearer ${token}`);
-    const body = res.body as { walletAddress: string; sessionId: string };
+    const body = res.body as {
+      success: boolean;
+      data: { walletAddress: string; sessionId: string };
+    };
 
     expect(res.status).toBe(200);
-    expect(body.walletAddress).toBe(VALID_WALLET_ADDRESS);
-    expect(typeof body.sessionId).toBe('string');
+    expect(body.success).toBe(true);
+    expect(body.data.walletAddress).toBe(VALID_WALLET_ADDRESS);
+    expect(typeof body.data.sessionId).toBe('string');
   });
 
   it('rejects session introspection without a token', async () => {
@@ -134,7 +313,7 @@ describe('Session lifecycle (e2e)', () => {
       .set('Authorization', `Bearer ${token}`);
 
     expect(logoutRes.status).toBe(201);
-    expect(logoutRes.body).toEqual({ revoked: true });
+    expect(logoutRes.body).toEqual({ success: true, data: { revoked: true } });
 
     const sessionRes = await request(app.getHttpServer())
       .get('/auth/session')

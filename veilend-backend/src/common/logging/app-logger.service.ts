@@ -1,6 +1,6 @@
 import { Injectable, LoggerService } from '@nestjs/common';
 import { ClsService } from 'nestjs-cls';
-import { redact } from './redact.util';
+import { redact, redactString } from './redact.util';
 
 @Injectable()
 export class AppLoggerService implements LoggerService {
@@ -33,38 +33,45 @@ export class AppLoggerService implements LoggerService {
     trace?: string,
   ) {
     const correlationId = this.cls.isActive() ? this.cls.getId() : undefined;
-    const isProd = process.env.NODE_ENV === 'production';
-    const redactedMsg = redact(message);
-    const now = new Date().toISOString();
+    const isProd = process.env['NODE_ENV'] === 'production';
+
+    // Resolve message: redact objects deeply, keep strings for final pass
+    let resolvedMessage: unknown;
+    if (typeof message === 'string') {
+      resolvedMessage = message;
+    } else {
+      resolvedMessage = redact(message);
+    }
 
     if (isProd) {
-      // Production NDJSON schema optimized for Datadog/Loki/CloudWatch ingestion
-      const prodRecord: Record<string, unknown> = {
-        time: now,
-        timestamp: now,
+      // NDJSON format for Loki / Datadog ingestion
+      const record: Record<string, unknown> = {
         level,
-        msg:
-          typeof redactedMsg === 'string'
-            ? redactedMsg
-            : JSON.stringify(redactedMsg),
-        message: redactedMsg,
+        time: new Date().toISOString(),
+        msg: resolvedMessage,
         component: context,
         context,
-        correlationId,
+        ...(correlationId ? { correlationId } : {}),
         ...(trace ? { trace } : {}),
       };
-      process.stdout.write(JSON.stringify(prodRecord) + '\n');
+
+      // LAST step: apply PII regex redaction to the entire serialized line
+      const line = JSON.stringify(record);
+      process.stdout.write(redactString(line) + '\n');
     } else {
-      // Development format
+      // Pretty dev format
       const record = {
-        timestamp: now,
+        timestamp: new Date().toISOString(),
         level,
         context,
         correlationId,
-        message: redactedMsg,
+        message: resolvedMessage,
         ...(trace ? { trace } : {}),
       };
-      process.stdout.write(JSON.stringify(record) + '\n');
+
+      // LAST step: apply PII regex redaction to the entire serialized line
+      const line = JSON.stringify(record);
+      process.stdout.write(redactString(line) + '\n');
     }
   }
 }

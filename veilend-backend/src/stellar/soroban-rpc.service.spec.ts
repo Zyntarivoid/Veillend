@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AppConfigService } from '../config/app-config.service';
 import { SorobanRpcService } from './soroban-rpc.service';
 import { rpc } from '@stellar/stellar-sdk';
+import { ClsService } from 'nestjs-cls';
 
 // Mock the rpc namespace and Server constructor
 jest.mock('@stellar/stellar-sdk', () => {
@@ -22,10 +23,16 @@ describe('SorobanRpcService', () => {
   let mockRpcServerInstance: {
     getHealth: jest.Mock;
   };
+  let clsMock: { isActive: jest.Mock; getId: jest.Mock };
 
   beforeEach(async () => {
     // Reset mocks before each test
     jest.clearAllMocks();
+
+    clsMock = {
+      isActive: jest.fn().mockReturnValue(true),
+      getId: jest.fn().mockReturnValue('test-correlation-id-123'),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -49,6 +56,10 @@ describe('SorobanRpcService', () => {
               pollIntervalMs: 5000,
             },
           },
+        },
+        {
+          provide: ClsService,
+          useValue: clsMock,
         },
       ],
     }).compile();
@@ -153,6 +164,31 @@ describe('SorobanRpcService', () => {
         );
         done();
       });
+    });
+  });
+
+  describe('getOutboundFetchOptions', () => {
+    it('should include X-Correlation-Id header matching current CLS id', () => {
+      const options = service.getOutboundFetchOptions();
+      const headers = options.headers as Record<string, string>;
+
+      expect(headers['x-correlation-id']).toBe('test-correlation-id-123');
+    });
+
+    it('should omit X-Correlation-Id when no active CLS context', () => {
+      clsMock.isActive.mockReturnValue(false);
+
+      const options = service.getOutboundFetchOptions();
+      const headers = options.headers as Record<string, string>;
+
+      expect(headers['x-correlation-id']).toBeUndefined();
+    });
+
+    it('should always include Content-Type header', () => {
+      const options = service.getOutboundFetchOptions();
+      const headers = options.headers as Record<string, string>;
+
+      expect(headers['Content-Type']).toBe('application/json');
     });
   });
 });
