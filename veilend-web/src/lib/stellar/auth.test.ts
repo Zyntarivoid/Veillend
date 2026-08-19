@@ -3,8 +3,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   challengeWalletAuth,
+  requestAuthNonce,
   validateStoredSession,
 } from "./auth";
+import { ValidationError } from "../validation/api-schemas";
 
 const TEST_ADDRESS = "GBXFXNDLV4LSWA4VB7YIL5GBD7BVNR22SGBTDKMO2SBZZHDXSKZYCP7L";
 const TEST_TOKEN = "mock-access-token";
@@ -31,6 +33,13 @@ describe("challenge-response wallet handshake", () => {
   });
 
   describe("challenge flow", () => {
+    it("rejects an invalid nonce response without retrying", async () => {
+      fetchMock.mockResolvedValue(jsonResponse({ nonce: 123 }));
+
+      await expect(requestAuthNonce(TEST_ADDRESS)).rejects.toBeInstanceOf(ValidationError);
+      expect(fetchMock).toHaveBeenCalledOnce();
+    });
+
     it("rejects the flow when a signature is not submitted and never authenticates", async () => {
       fetchMock.mockImplementation(async (url: string | URL) => {
         if (String(url).endsWith("/auth/nonce")) {

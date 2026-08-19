@@ -1,4 +1,21 @@
-import { DashboardData, AssetBalance, ActivityEvent, ActivityActionType } from '../types/dashboard';
+import {
+  IndexerPositionsResponseSchema,
+  IndexerTransactionsResponseSchema,
+  OraclePricesResponseSchema,
+  type IndexerPosition,
+  type IndexerTransaction,
+} from '@/lib/validation/api-schemas';
+import { requireSafeNumber } from '@/lib/validation/safe-numbers';
+import type {
+  ActivityActionType,
+  ActivityEvent,
+  AssetBalance,
+  DashboardData,
+} from '@/lib/types/dashboard';
+
+import { fetchValidated } from './validated-fetch';
+
+const DEFAULT_ASSET_DECIMALS = 7;
 
 export interface DashboardClientConfig {
   apiBaseUrl: string;
@@ -24,46 +41,42 @@ export class DashboardClient {
       const controller = new AbortController();
       const combinedSignal = signal ? this.combineSignals(signal, controller.signal) : controller.signal;
 
-      const [positionsRes, transactionsRes, pricesRes] = await Promise.all([
-        fetch(`${this.apiBaseUrl}/indexer/positions/${address}`, { 
-          signal: combinedSignal,
-          headers: { 'Cache-Control': 'no-cache' }
-        }),
-        fetch(`${this.apiBaseUrl}/indexer/transactions/${address}`, { 
-          signal: combinedSignal,
-          headers: { 'Cache-Control': 'no-cache' }
-        }),
-        fetch(`${this.apiBaseUrl}/oracle/prices`, { 
-          signal: combinedSignal,
-          headers: { 'Cache-Control': 'no-cache' }
-        })
-      ]);
-
-      if (!positionsRes.ok || !transactionsRes.ok || !pricesRes.ok) {
-        const errorDetails = {
-          positions: positionsRes.status,
-          transactions: transactionsRes.status,
-          prices: pricesRes.status
-        };
-        throw new Error(`Failed to fetch data from indexer: ${JSON.stringify(errorDetails)}`);
-      }
-
       const [positionsData, transactionsData, pricesData] = await Promise.all([
-        positionsRes.json(),
-        transactionsRes.json(),
-        pricesRes.json()
+        fetchValidated(
+          `${this.apiBaseUrl}/indexer/positions/${address}`,
+          IndexerPositionsResponseSchema,
+          {
+            signal: combinedSignal,
+            requestInit: { headers: { 'Cache-Control': 'no-cache' } },
+          },
+        ),
+        fetchValidated(
+          `${this.apiBaseUrl}/indexer/transactions/${address}`,
+          IndexerTransactionsResponseSchema,
+          {
+            signal: combinedSignal,
+            requestInit: { headers: { 'Cache-Control': 'no-cache' } },
+          },
+        ),
+        fetchValidated(`${this.apiBaseUrl}/oracle/prices`, OraclePricesResponseSchema, {
+          signal: combinedSignal,
+          requestInit: { headers: { 'Cache-Control': 'no-cache' } },
+        }),
       ]);
 
       return this.transformDashboardData(
-        positionsData.positions || [],
-        transactionsData.transactions || [],
-        pricesData.prices || {}
+        positionsData.positions,
+        transactionsData.transactions,
+        pricesData.prices,
       );
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
         throw error;
       }
       console.error('Dashboard API Error:', error);
+      if (error instanceof Error) {
+        throw error;
+      }
       throw new Error('Failed to fetch live dashboard data. Please check your connection.');
     }
   }
@@ -88,9 +101,9 @@ export class DashboardClient {
   }
 
   private transformDashboardData(
-    positions: Array<{ assetAddress: string; depositedAmount: string | number; borrowedAmount: string | number }>,
-    transactions: Array<{ id: string; type: string; amount: string | number; assetAddress: string; timestamp: string; txHash: string }>,
-    prices: Record<string, number>
+    positions: IndexerPosition[],
+    transactions: IndexerTransaction[],
+    prices: Record<string, number>,
   ): DashboardData {
     let totalDepositedUsd = 0;
     let totalBorrowedUsd = 0;
@@ -99,9 +112,17 @@ export class DashboardClient {
 
     // Process positions with real oracle prices
     if (Array.isArray(positions) && positions.length > 0) {
-      positions.forEach((pos) => {
-        const deposited = Number(pos.depositedAmount) / 1e7;
-        const borrowed = Number(pos.borrowedAmount) / 1e7;
+      positions.forEach((pos, index) => {
+        const deposited = requireSafeNumber(pos.depositedRaw, DEFAULT_ASSET_DECIMALS, [
+          'positions',
+          index,
+          'depositedRaw',
+        ]);
+        const borrowed = requireSafeNumber(pos.borrowedRaw, DEFAULT_ASSET_DECIMALS, [
+          'positions',
+          index,
+          'borrowedRaw',
+        ]);
         
         // Get price from oracle, default to 0 if not available
         const price = prices[pos.assetAddress] || 0;
@@ -141,8 +162,12 @@ export class DashboardClient {
     let recentActivity: ActivityEvent[] = [];
     
     if (Array.isArray(transactions) && transactions.length > 0) {
-      const mappedActivities = transactions.map((tx) => {
-        const amount = Number(tx.amount) / 1e7;
+      const mappedActivities = transactions.map((tx, index) => {
+        const amount = requireSafeNumber(tx.amount, DEFAULT_ASSET_DECIMALS, [
+          'transactions',
+          index,
+          'amount',
+        ]);
         const price = prices[tx.assetAddress] || 0;
         const usdValue = amount * price;
         

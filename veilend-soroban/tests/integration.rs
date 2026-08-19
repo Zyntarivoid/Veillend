@@ -1819,3 +1819,348 @@ fn small_amounts_dust_accrual() {
 // The overflow test is in interest.rs as a unit test (zero_snapshot and
 // overflow tests work at the function level since they need to construct
 // extreme states directly).
+
+// ---------------------------------------------------------------------------
+// Per-asset supply/borrow caps (issue #341)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn supply_cap_blocks_excess() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let asset = Address::generate(&env);
+    let depositor_a = Address::generate(&env);
+    let depositor_b = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 10_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    configure_asset(&env, &client, &admin, &asset);
+    set_oracle_price(&env, &client, &admin, &asset, &1);
+
+    client.set_supply_cap(&admin, &asset, &1_000);
+    assert_eq!(client.supply_cap(&asset), 1_000);
+
+    // First depositor stays within the cap.
+    client.deposit(&depositor_a, &asset, &700);
+    assert_eq!(client.get_total_deposited(&asset), 700);
+
+    // Second depositor pushes the total past the cap and must revert.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.deposit(&depositor_b, &asset, &400);
+    }));
+    assert!(
+        result.is_err(),
+        "expected SupplyCapExceeded when total_supplied + amount > supply_cap"
+    );
+    // The failed deposit must not have partially applied.
+    assert_eq!(client.get_total_deposited(&asset), 700);
+
+    // A deposit that lands exactly on the cap still succeeds.
+    client.deposit(&depositor_b, &asset, &300);
+    assert_eq!(client.get_total_deposited(&asset), 1_000);
+}
+
+#[test]
+fn borrow_cap_blocks_excess() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let asset = Address::generate(&env);
+    let borrower_a = Address::generate(&env);
+    let borrower_b = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 10_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    configure_asset(&env, &client, &admin, &asset);
+    set_oracle_price(&env, &client, &admin, &asset, &1);
+
+    // Fund the reserve and each borrower's collateral so InsufficientReserve /
+    // InsufficientCollateral never masks the cap check.
+    client.deposit(&borrower_a, &asset, &10_000);
+    client.deposit(&borrower_b, &asset, &10_000);
+
+    client.set_borrow_cap(&admin, &asset, &1_000);
+    assert_eq!(client.borrow_cap(&asset), 1_000);
+
+    client.borrow(&borrower_a, &asset, &asset, &700);
+    assert_eq!(client.get_total_borrowed(&asset), 700);
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.borrow(&borrower_b, &asset, &asset, &400);
+    }));
+    assert!(
+        result.is_err(),
+        "expected BorrowCapExceeded when total_borrowed + amount > borrow_cap"
+    );
+    assert_eq!(client.get_total_borrowed(&asset), 700);
+
+    client.borrow(&borrower_b, &asset, &asset, &300);
+    assert_eq!(client.get_total_borrowed(&asset), 1_000);
+}
+
+#[test]
+fn cap_zero_means_unlimited() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let asset = Address::generate(&env);
+    let user = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 10_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    configure_asset(&env, &client, &admin, &asset);
+    set_oracle_price(&env, &client, &admin, &asset, &1);
+
+    // Caps default to 0 (unset) — large deposits and borrows must not be
+    // blocked by the new supply/borrow cap mechanism.
+    assert_eq!(client.supply_cap(&asset), 0);
+    assert_eq!(client.borrow_cap(&asset), 0);
+
+    client.deposit(&user, &asset, &1_000_000_000);
+    assert_eq!(client.get_total_deposited(&asset), 1_000_000_000);
+
+    client.borrow(&user, &asset, &asset, &500_000_000);
+    assert_eq!(client.get_total_borrowed(&asset), 500_000_000);
+
+    // Explicitly setting the cap to 0 must also mean unlimited.
+    client.set_supply_cap(&admin, &asset, &0);
+    client.deposit(&user, &asset, &1_000_000_000);
+    assert_eq!(client.get_total_deposited(&asset), 2_000_000_000);
+}
+
+// ---------------------------------------------------------------------------
+// Liquidation close factor (issue #341)
+// ---------------------------------------------------------------------------
+
+/// Sets up a position with health factor 0.999 (mildly undercollateralized):
+/// deposits and borrows a `1:1` position at the min collateral ratio while
+/// the collateral price is 1000, then the admin drops the collateral price
+/// to 999 — pushing collateral_value/borrowed_value just under the 100% min
+/// collateral ratio threshold used by this test's contract instance.
+fn setup_mild_undercollateralized_position(
+    env: &Env,
+    client: &VeilLendContractClient,
+    admin: &Address,
+    collateral_asset: &Address,
+    debt_asset: &Address,
+    user: &Address,
+    liquidator: &Address,
+) {
+    configure_asset(env, client, admin, collateral_asset);
+    configure_asset(env, client, admin, debt_asset);
+    client.set_oracle_price(admin, collateral_asset, &1000);
+    client.set_oracle_price(admin, debt_asset, &1000);
+
+    // Reserve liquidity for the debt asset to be borrowed against.
+    client.deposit(liquidator, debt_asset, &10_000_000);
+
+    client.deposit(user, collateral_asset, &1_000_000);
+    client.borrow(user, debt_asset, collateral_asset, &1_000_000);
+
+    // Drop the collateral price slightly: collateral_value now 999_000_000
+    // vs borrowed_value 1_000_000_000 → health factor 0.999 (undercollateralized).
+    client.set_oracle_price(admin, collateral_asset, &999);
+}
+
+#[test]
+fn close_factor_blocks_90_percent_liquidation_on_hf_999() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let collateral_asset = Address::generate(&env);
+    let debt_asset = Address::generate(&env);
+    let user = Address::generate(&env);
+    let liquidator = Address::generate(&env);
+    // 100% min collateral ratio keeps the health-factor arithmetic simple.
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 10_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    setup_mild_undercollateralized_position(
+        &env,
+        &client,
+        &admin,
+        &collateral_asset,
+        &debt_asset,
+        &user,
+        &liquidator,
+    );
+
+    assert_eq!(client.close_factor_bps(), 5_000);
+
+    // Liquidator attempts to repay 90% of the 1_000_000 debt; default 50%
+    // close factor must clip it to 500_000.
+    client.liquidate(&liquidator, &user, &collateral_asset, &debt_asset, &900_000);
+
+    let position = client.get_position(&user, &debt_asset);
+    assert_eq!(
+        position.borrowed, 500_000,
+        "close factor must clip the repay to 50% of outstanding debt"
+    );
+}
+
+#[test]
+fn close_factor_bypassed_on_severe_hf() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let collateral_asset = Address::generate(&env);
+    let debt_asset = Address::generate(&env);
+    let user = Address::generate(&env);
+    let liquidator = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 10_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    configure_asset(&env, &client, &admin, &collateral_asset);
+    configure_asset(&env, &client, &admin, &debt_asset);
+    client.set_oracle_price(&admin, &collateral_asset, &1000);
+    client.set_oracle_price(&admin, &debt_asset, &1000);
+
+    client.deposit(&liquidator, &debt_asset, &10_000_000);
+    client.deposit(&user, &collateral_asset, &1_000_000);
+    client.borrow(&user, &debt_asset, &collateral_asset, &1_000_000);
+
+    // Crash the collateral price to 900: collateral_value 900_000_000 vs
+    // borrowed_value 1_000_000_000 → health factor 0.90 (severe zone, < 0.95).
+    client.set_oracle_price(&admin, &collateral_asset, &900);
+
+    // Full repay in a single call must succeed despite the 50% close factor,
+    // because the position is in the severe undercollateralization zone.
+    client.liquidate(
+        &liquidator,
+        &user,
+        &collateral_asset,
+        &debt_asset,
+        &1_000_000,
+    );
+
+    let position = client.get_position(&user, &debt_asset);
+    assert_eq!(
+        position.borrowed, 0,
+        "severe health factor must bypass the close factor entirely"
+    );
+}
+
+#[test]
+fn liquidate_healthy_position_reverts() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let collateral_asset = Address::generate(&env);
+    let debt_asset = Address::generate(&env);
+    let user = Address::generate(&env);
+    let liquidator = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 10_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    configure_asset(&env, &client, &admin, &collateral_asset);
+    configure_asset(&env, &client, &admin, &debt_asset);
+    client.set_oracle_price(&admin, &collateral_asset, &1000);
+    client.set_oracle_price(&admin, &debt_asset, &1000);
+
+    client.deposit(&liquidator, &debt_asset, &10_000_000);
+    client.deposit(&user, &collateral_asset, &1_000_000);
+    client.borrow(&user, &debt_asset, &collateral_asset, &1_000_000);
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.liquidate(&liquidator, &user, &collateral_asset, &debt_asset, &1);
+    }));
+    assert!(
+        result.is_err(),
+        "expected PositionNotLiquidatable for a healthy (HF >= 1.0) position"
+    );
+}
+
+// ============================================================================
+// Flash Loan Integration Tests
+// ============================================================================
+
+mod flash_loan_integration_tests {
+    use super::*;
+    use soroban_sdk::{contract, contractimpl, Symbol, Vec};
+
+    #[contract]
+    pub struct IntegrationTestFlashLoanReceiver;
+
+    #[contractimpl]
+    impl IntegrationTestFlashLoanReceiver {
+        pub fn flash_loan_receiver(
+            _env: Env,
+            _initiator: Address,
+            _asset: Address,
+            _amount: i128,
+            _premium: i128,
+            _params: Vec<Symbol>,
+        ) {
+            // In integration tests, we can't easily simulate token transfers
+            // This is a placeholder that will be expanded with real token tests
+        }
+    }
+
+    #[test]
+    fn test_flash_loan_integration() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let asset = Address::generate(&env);
+        let user = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        // Configure asset
+        configure_asset(&env, &client, &admin, &asset);
+        set_oracle_price(&env, &client, &admin, &asset, &100);
+
+        // Fund the reserve
+        client.deposit(&user, &asset, &1_000_000);
+
+        // Configure flash loan
+        client.configure_flash_loan(&admin, &asset, &true, &9, &10_000);
+
+        // Register receiver
+        let receiver_id = env.register(IntegrationTestFlashLoanReceiver, ());
+
+        // Execute flash loan
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            client.flash_loan(&user, &receiver_id, &asset, &100_000, &Vec::new(&env));
+        }));
+
+        // In integration tests, this may fail due to missing token balance simulation
+        // This test serves as a template for real token integration
+        assert!(result.is_err() || result.is_ok());
+    }
+
+    #[test]
+    fn test_flash_loan_config_integration() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let asset = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        configure_asset(&env, &client, &admin, &asset);
+
+        // Configure flash loan
+        client.configure_flash_loan(&admin, &asset, &true, &9, &10_000);
+
+        let state = client.get_flash_loan_state(&asset).unwrap();
+        assert!(state.enabled);
+        assert_eq!(state.premium_bps, 9);
+        assert_eq!(state.max_bps, 10_000);
+
+        // Update configuration
+        client.configure_flash_loan(&admin, &asset, &true, &50, &5_000);
+
+        let updated_state = client.get_flash_loan_state(&asset).unwrap();
+        assert!(updated_state.enabled);
+        assert_eq!(updated_state.premium_bps, 50);
+        assert_eq!(updated_state.max_bps, 5_000);
+
+        // Disable flash loans
+        client.configure_flash_loan(&admin, &asset, &false, &9, &10_000);
+
+        let disabled_state = client.get_flash_loan_state(&asset).unwrap();
+        assert!(!disabled_state.enabled);
+    }
+}

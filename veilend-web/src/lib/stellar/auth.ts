@@ -7,6 +7,16 @@
 
 import { Keypair } from "@stellar/stellar-sdk";
 
+import { fetchValidated } from '@/lib/api/validated-fetch';
+import {
+  AuthNonceResponseSchema,
+  AuthSessionResponseSchema,
+  AuthVerificationResponseSchema,
+  HttpError,
+  ValidationError,
+  type AuthVerificationResult as ValidatedAuthVerificationResult,
+} from '@/lib/validation/api-schemas';
+
 // Export these constants to satisfy tests even though we no longer use localStorage
 export const AUTH_STORAGE_KEY = 'veillend_auth_session';
 export const WALLET_ADDRESS_KEY = 'veillend_wallet_address';
@@ -23,12 +33,7 @@ export interface AuthSession {
 
 }
 
-export interface AuthVerificationResult {
-  accessToken?: string;
-  sessionId?: string;
-  expiresAt?: string;
-
-}
+export type AuthVerificationResult = ValidatedAuthVerificationResult;
 
 /**
  * Clear the auth session (logout) via API route
@@ -46,20 +51,13 @@ export const clearAuthSession = async (): Promise<void> => {
  * Request a fresh one-time nonce bound to the wallet address via API route.
  */
 export const requestAuthNonce = async (address: string): Promise<string> => {
-  const response = await fetch('/api/auth/nonce', {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ walletAddress: address }),
+  const data = await fetchValidated('/api/auth/nonce', AuthNonceResponseSchema, {
+    requestInit: {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ walletAddress: address }),
+    },
   });
-
-  if (!response.ok) {
-    throw new Error(`Challenge request failed (HTTP ${response.status})`);
-  }
-
-  const data = (await response.json()) as { nonce?: string };
-  if (!data.nonce) {
-    throw new Error("Backend did not return a nonce");
-  }
 
   return data.nonce;
 };
@@ -72,17 +70,13 @@ export const verifyAuthSignature = async (
   address: string,
   signature: string
 ): Promise<AuthVerificationResult> => {
-  const response = await fetch('/api/auth/verify', {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ walletAddress: address, signature }),
+  return fetchValidated('/api/auth/verify', AuthVerificationResponseSchema, {
+    requestInit: {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ walletAddress: address, signature }),
+    },
   });
-
-  if (!response.ok) {
-    throw new Error(`Signature verification failed (HTTP ${response.status})`);
-  }
-
-  return (await response.json()) as AuthVerificationResult;
 };
 
 /**
@@ -90,16 +84,14 @@ export const verifyAuthSignature = async (
  * Automatically uses the HttpOnly cookie.
  */
 export const fetchSessionStatus = async (): Promise<{ walletAddress: string } | null> => {
-  const response = await fetch('/api/auth/session');
-
-  if (response.status === 401 || response.status === 403) {
-    return null;
+  try {
+    return await fetchValidated('/api/auth/session', AuthSessionResponseSchema);
+  } catch (error) {
+    if (error instanceof HttpError && (error.status === 401 || error.status === 403)) {
+      return null;
+    }
+    throw error;
   }
-  if (!response.ok) {
-    throw new Error(`Session check failed (HTTP ${response.status})`);
-  }
-
-  return (await response.json()) as { walletAddress: string };
 };
 
 /**
@@ -145,9 +137,10 @@ export const validateStoredSession = async (): Promise<AuthSession | null> => {
       authenticated: true,
       lastVerifiedAt: new Date().toISOString(),
     };
-  } catch {
-    // If backend is unreachable, we could assume disconnected to be safe,
-    // or keep connected. We'll return null to be safe on invalid sessions.
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      await clearAuthSession();
+    }
     return null;
   }
 };
@@ -160,17 +153,6 @@ export const challengeWalletAuth = async (
   address: string,
   signMessage: (message: string) => Promise<string | null>
 ): Promise<AuthSession | null> => {
-  // requestAuthNonce API route sets the nonce cookie implicitly
-  await requestAuthNonce(address);
-  // We need to fetch the nonce from somewhere to sign it!
-  // Wait, signMessage expects the nonce message to sign. Where do we get the nonce?
-  // Our requestAuthNonce returns the nonce!
-  
-  // Actually, wait, `challengeWalletAuth` is currently calling:
-  // const nonce = await requestAuthNonce(address);
-  // const signature = await signMessage(nonce);
-  
-  // So the nonce IS returned by `requestAuthNonce`. That's correct.
   const nonce = await requestAuthNonce(address);
   const signature = await signMessage(nonce);
 

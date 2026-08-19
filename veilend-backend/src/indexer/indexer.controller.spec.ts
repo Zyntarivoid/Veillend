@@ -2,10 +2,16 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { BadRequestException } from '@nestjs/common';
+import { UnauthorizedException } from '@nestjs/common';
 import { IndexerController } from './indexer.controller';
 import { IndexerService } from './indexer.service';
 import { IndexerRepository } from './indexer.repository';
 import { PrismaService } from '../prisma/prisma.service';
+
+const VALID_ADDRESS_A =
+  'GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ';
+const VALID_ADDRESS_B =
+  'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5';
 
 describe('IndexerController', () => {
   let controller: IndexerController;
@@ -17,6 +23,7 @@ describe('IndexerController', () => {
   };
   let repository: { getCheckpoint: jest.Mock };
   let configService: { get: jest.Mock };
+  let prisma: { adminAuditLog: { create: jest.Mock } };
 
   const mockAdminReq = {
     user: { walletAddress: 'GADMIN123' },
@@ -33,6 +40,7 @@ describe('IndexerController', () => {
     configService = {
       get: jest.fn((_key: string, fallback: unknown) => fallback),
     };
+    prisma = { adminAuditLog: { create: jest.fn() } };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [IndexerController],
@@ -41,6 +49,7 @@ describe('IndexerController', () => {
         { provide: IndexerRepository, useValue: repository },
         { provide: ConfigService, useValue: configService },
         { provide: PrismaService, useValue: {} },
+        { provide: PrismaService, useValue: prisma },
       ],
     }).compile();
 
@@ -60,10 +69,12 @@ describe('IndexerController', () => {
   it('GET /indexer/positions/:address returns { address, positions }', async () => {
     indexerService.getPositions.mockResolvedValue([{ deposited: '100' }]);
 
-    const result = await controller.getPositions('GABC');
+    const result = await controller.getPositions({
+      address: VALID_ADDRESS_A,
+    });
 
     expect(result).toEqual({
-      address: 'GABC',
+      address: VALID_ADDRESS_A,
       positions: [{ deposited: '100' }],
     });
   });
@@ -71,10 +82,12 @@ describe('IndexerController', () => {
   it('GET /indexer/transactions/:address returns { address, transactions }', async () => {
     indexerService.getTransactions.mockResolvedValue([{ id: 'evt-1' }]);
 
-    const result = await controller.getTransactions('GABC');
+    const result = await controller.getTransactions({
+      address: VALID_ADDRESS_B,
+    });
 
     expect(result).toEqual({
-      address: 'GABC',
+      address: VALID_ADDRESS_B,
       transactions: [{ id: 'evt-1' }],
     });
   });
@@ -130,6 +143,36 @@ describe('IndexerController', () => {
       await expect(
         controller.triggerReplay('invalid', undefined, mockAdminReq as any),
       ).rejects.toThrow(BadRequestException);
+    it('triggers a replay, records an audit row, and returns a message', async () => {
+      const req = { user: { walletAddress: VALID_ADDRESS_A } };
+
+      const result = await controller.triggerReplay(req);
+
+      expect(indexerService.forceReplay).toHaveBeenCalled();
+      expect(prisma.adminAuditLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            actorWallet: VALID_ADDRESS_A,
+            action: 'INDEXER_REPLAY',
+          }),
+        }),
+      );
+      expect(result).toEqual(
+        expect.objectContaining({ message: expect.any(String) }),
+      );
+    });
+
+    // Route-level auth is enforced by `@UseGuards(JwtAuthGuard, AdminGuard)`
+    // (exercised via the guards' own unit tests / e2e); this test documents
+    // that a request that somehow reaches the handler without an
+    // authenticated user is still rejected rather than silently proceeding.
+    it('does not run a replay when no authenticated user is present', async () => {
+      const req = { user: undefined };
+
+      await expect(controller.triggerReplay(req)).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(indexerService.forceReplay).not.toHaveBeenCalled();
     });
   });
 });

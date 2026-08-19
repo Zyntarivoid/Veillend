@@ -61,16 +61,11 @@ describe('AdminTransactionBuilderService', () => {
   });
 
   function mockAccount(sequence = '12345') {
-    mockRpcService.getClient.mockReturnValue({
-      // Return a fresh Account per call: TransactionBuilder mutates the
-      // account's sequence when building, so a shared instance would advance
-      // the nonce between builds.
-      getAccount: jest
-        .fn()
-        .mockImplementation(() =>
-          Promise.resolve(new Account(ADMIN_ADDRESS, sequence)),
-        ),
-    });
+    mockRpcService.getAccount = jest
+      .fn()
+      .mockImplementation(() =>
+        Promise.resolve(new Account(ADMIN_ADDRESS, sequence)),
+      );
   }
 
   function parseTx(xdrStr: string): Transaction {

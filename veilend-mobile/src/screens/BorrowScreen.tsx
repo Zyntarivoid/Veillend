@@ -48,6 +48,9 @@ export default function BorrowScreen() {
       icon: getAssetIcon(asset.symbol),
     }));
 
+  const getAssetAccessibilityLabel = (asset: SupportedAsset & { balance: number }) =>
+    `${asset.name} (${asset.symbol}), APY unavailable, wallet balance ${asset.balance} ${asset.symbol}`;
+
   const openBorrowModal = (asset: any) => {
     setSelectedAsset({ symbol: asset.symbol, name: asset.name, balance: asset.balance });
     setAmount('1');
@@ -98,6 +101,8 @@ export default function BorrowScreen() {
             key={asset.code ?? asset.symbol}
             style={styles.assetCard}
             onPress={() => openBorrowModal(asset)}
+            accessibilityRole="button"
+            accessibilityLabel={getAssetAccessibilityLabel(asset)}
           >
             <View style={styles.assetLeft}>
               <View style={styles.iconContainer}>
@@ -156,7 +161,7 @@ export default function BorrowScreen() {
           animationType="slide"
           onRequestClose={() => setModalVisible(false)}
         >
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
+          <KeyboardAvoidingView behavior={Platform.select({ ios: 'padding', android: 'height' })} style={styles.modalOverlay}>
             <View style={styles.modalContent}>
               <OfflineBanner />
               <Text style={styles.modalTitle}>Borrow {selectedAsset?.symbol}</Text>
@@ -167,12 +172,22 @@ export default function BorrowScreen() {
                 style={styles.amountInput}
                 placeholder="Amount"
                 placeholderTextColor="#888"
+                returnKeyType="done"
+                onSubmitEditing={confirmBorrow}
               />
+              <TouchableOpacity
+                style={styles.maxButton}
+                onPress={() => setAmount(String(availableToBorrow))}
+                accessibilityRole="button"
+                accessibilityLabel={`Use maximum ${selectedAsset?.symbol ?? 'asset'} amount`}
+              >
+                <Text style={styles.maxButtonText}>MAX</Text>
+              </TouchableOpacity>
               <View style={styles.modalButtons}>
-                <TouchableOpacity onPress={() => setModalVisible(false)} style={[styles.modalBtn, { backgroundColor: '#333' }]}>
+                <TouchableOpacity onPress={() => setModalVisible(false)} style={[styles.modalBtn, { backgroundColor: '#333' }]} accessibilityRole="button" accessibilityLabel="Cancel borrow">
                   <Text style={styles.buttonText}>Cancel</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={confirmBorrow} style={[styles.modalBtn, { backgroundColor: '#A855F7' }]} disabled={lendingLoading}>
+                <TouchableOpacity onPress={confirmBorrow} style={[styles.modalBtn, { backgroundColor: '#A855F7' }]} disabled={lendingLoading} accessibilityRole="button" accessibilityLabel="Confirm borrow">
                   {lendingLoading ? <ActivityIndicator color="#fff"/> : <Text style={styles.buttonText}>Confirm</Text>}
                 </TouchableOpacity>
               </View>
@@ -347,6 +362,19 @@ const styles = StyleSheet.create({
   modalButtons: {
     flexDirection: 'row',
     gap: 12,
+  },
+  maxButton: {
+    alignSelf: 'flex-end',
+    marginBottom: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(168, 85, 247, 0.14)',
+  },
+  maxButtonText: {
+    color: '#A855F7',
+    fontSize: 12,
+    fontWeight: '700',
   },
   modalBtn: {
     flex: 1,

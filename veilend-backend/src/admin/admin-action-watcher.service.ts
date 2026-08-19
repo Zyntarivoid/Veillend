@@ -70,9 +70,7 @@ export class AdminActionWatcherService
           continue;
         }
         try {
-          const result = await this.rpcService
-            .getClient()
-            .getTransaction(action.txHash);
+          const result = await this.rpcService.getTransaction(action.txHash);
 
           if (result.status === rpc.Api.GetTransactionStatus.SUCCESS) {
             await this.repository.markConfirmed(action.id);

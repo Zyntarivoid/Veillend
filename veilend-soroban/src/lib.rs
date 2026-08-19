@@ -7,17 +7,28 @@ use soroban_sdk::{
     symbol_short, Address, Env, Symbol, Vec,
 };
 
+mod flash_loan;
+mod flash_loan_receiver_example;
+
+#[cfg(test)]
+mod test_flash_loan;
+
+pub use flash_loan::{
+    calculate_premium_rounded_up, FlashLoanReceiverClient, FlashLoanState,
+    DEFAULT_FLASH_LOAN_PREMIUM_BPS, MAX_FLASH_LOAN_PREMIUM_BPS, MIN_FLASH_LOAN_PREMIUM_BPS,
+};
+
 /// Increment this only when a contract interface change requires consumers to adapt.
-pub const CONTRACT_VERSION: u32 = 4;
+pub const CONTRACT_VERSION: u32 = 5;
 
 /// Increment this only when the serialized `DataKey` or stored value layout changes.
-pub const STORAGE_SCHEMA_VERSION: u32 = 3;
+pub const STORAGE_SCHEMA_VERSION: u32 = 4;
 
 /// Values <= this amount after repay/withdraw are rounded to zero.
 pub const DUST_THRESHOLD: i128 = 100;
 
 /// A compact, stable identifier for the current `DataKey` storage layout.
-const STORAGE_SCHEMA_ID: Symbol = symbol_short!("VLENDV3");
+const STORAGE_SCHEMA_ID: Symbol = symbol_short!("VLENDV4");
 
 /// Default delay (in ledgers) before a proposed privileged action becomes
 /// executable. ~5 minutes on Futurenet.
@@ -46,8 +57,10 @@ pub struct ContractMetadata {
 /// Persistent storage: `SupportedAsset(Address): bool`,
 /// `Position(Address, Address): Position`, `OraclePrice(Address): i128`,
 /// `DepositCap(Address)`/`BorrowCap(Address): i128`,
+/// `AssetSupplyCap(Address)`/`AssetBorrowCap(Address): i128` (0 = unlimited),
 /// `TotalDeposited(Address)`/`TotalBorrowed(Address): i128`, `Paused: bool`,
-/// and `InterestState(Address): InterestState`.
+/// and `InterestState(Address): InterestState`. Instance storage additionally
+/// holds `GlobalCloseFactorBps: u32`.
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
@@ -91,6 +104,20 @@ pub enum DataKey {
     /// Admin-configured upper bound on single-call protocol fees, in bps.
     /// 0 (default / never set) means the bound is disabled.
     MaxProtocolFeeBps,
+    /// Per-asset aggregate supply (deposit) ceiling, in the asset's native
+    /// decimal scale. 0 = unset = unlimited.
+    AssetSupplyCap(Address),
+    /// Per-asset aggregate borrow ceiling, in the asset's native decimal
+    /// scale. 0 = unset = unlimited.
+    AssetBorrowCap(Address),
+    /// Max fraction (bps) of a position's outstanding debt that may be
+    /// seized in a single `liquidate` call. Default 5_000 (50%).
+    GlobalCloseFactorBps,
+
+    /// Flash loan reentrancy guard (stored in instance storage)
+    ReentrancyGuard,
+    /// Flash loan configuration for an asset (stored in persistent storage)
+    FlashLoanState(Address),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -248,6 +275,24 @@ pub enum VeilLendError {
     ProtocolFeeExceedsLimit = 29,
     /// Arithmetic overflow or underflow in interest accrual or index computation.
     ArithmeticOverflow = 30,
+    /// Aggregate supply (deposit) cap for this asset would be exceeded.
+    SupplyCapExceeded = 31,
+    /// Position's health factor is at or above 1.0; nothing to liquidate.
+    PositionNotLiquidatable = 32,
+    /// Flash loan is not configured for this asset
+    FlashLoanNotConfigured = 33,
+    /// Flash loans are disabled for this asset
+    FlashLoanDisabled = 34,
+    /// Flash loan amount exceeds configured max bps of reserve
+    FlashLoanExceedsMaxBps = 35,
+    /// Flash loan receiver did not repay the required amount (principal + premium)
+    FlashLoanUnderRepayment = 36,
+    /// Flash loan reentrancy detected (nested flash loan on same asset)
+    FlashLoanReentrancy = 37,
+    /// Invalid flash loan premium (outside allowed range)
+    InvalidFlashLoanPremium = 38,
+    /// Invalid flash loan max bps (outside allowed range)
+    InvalidFlashLoanMaxBps = 39,
 }
 
 #[contractevent(topics = ["veillend", "asset_configured"])]
@@ -309,6 +354,49 @@ pub struct CapsUpdated {
     pub asset: Address,
     pub deposit_cap: i128,
     pub borrow_cap: i128,
+}
+
+#[contractevent(topics = ["veillend", "supply_cap_set"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SupplyCapSet {
+    #[topic]
+    pub admin: Address,
+    #[topic]
+    pub asset: Address,
+    pub cap: i128,
+}
+
+#[contractevent(topics = ["veillend", "borrow_cap_set"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BorrowCapSet {
+    #[topic]
+    pub admin: Address,
+    #[topic]
+    pub asset: Address,
+    pub cap: i128,
+}
+
+#[contractevent(topics = ["veillend", "liquidate"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LiquidateEvent {
+    #[topic]
+    pub liquidator: Address,
+    #[topic]
+    pub user: Address,
+    pub collateral_asset: Address,
+    pub debt_asset: Address,
+    pub repaid: i128,
+    pub seized: i128,
+}
+
+#[contractevent(topics = ["veillend", "liquidation_clipped"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LiquidationClipped {
+    #[topic]
+    pub liquidator: Address,
+    #[topic]
+    pub user: Address,
+    pub by_bps: u32,
 }
 
 #[contractevent(topics = ["veillend", "circuit_breaker"])]
@@ -886,6 +974,7 @@ impl VeilLendContract {
 
         // Check deposit cap
         Self::check_deposit_cap(&env, &asset, amount);
+        Self::enforce_supply_cap(&env, &asset, amount);
 
         let mut position = interest::compute_accrued_position(
             &Self::read_position(&env, &user, &asset),
@@ -931,6 +1020,7 @@ impl VeilLendContract {
 
         // Check borrow cap
         Self::check_borrow_cap(&env, &borrow_asset, amount);
+        Self::enforce_borrow_cap(&env, &borrow_asset, amount);
 
         let mut position = interest::compute_accrued_position(
             &Self::read_position(&env, &user, &borrow_asset),
@@ -1195,6 +1285,225 @@ impl VeilLendContract {
             .instance()
             .get(&DataKey::MinCollateralRatioBps)
             .unwrap_or(15_000)
+    }
+
+    /// Sets the aggregate supply (deposit) cap for `asset`, in the asset's
+    /// native decimal scale. Admin-only, immediate (not timelocked) — mirrors
+    /// `set_max_protocol_fee_bps`'s pattern for operational risk parameters
+    /// that need fast response. `cap == 0` means unlimited (the default).
+    pub fn set_supply_cap(env: Env, admin: Address, asset: Address, cap: i128) {
+        Self::require_admin(&env, &admin);
+        Self::require_supported_asset(&env, &asset);
+        admin.require_auth();
+
+        if cap < 0 {
+            panic_with_error!(&env, VeilLendError::InvalidCap);
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::AssetSupplyCap(asset.clone()), &cap);
+
+        SupplyCapSet { admin, asset, cap }.publish(&env);
+    }
+
+    /// Sets the aggregate borrow cap for `asset`, in the asset's native
+    /// decimal scale. Mirrors `set_supply_cap`. `cap == 0` means unlimited.
+    pub fn set_borrow_cap(env: Env, admin: Address, asset: Address, cap: i128) {
+        Self::require_admin(&env, &admin);
+        Self::require_supported_asset(&env, &asset);
+        admin.require_auth();
+
+        if cap < 0 {
+            panic_with_error!(&env, VeilLendError::InvalidCap);
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::AssetBorrowCap(asset.clone()), &cap);
+
+        BorrowCapSet { admin, asset, cap }.publish(&env);
+    }
+
+    /// Returns the aggregate supply cap for `asset` (0 = unlimited).
+    pub fn supply_cap(env: Env, asset: Address) -> i128 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::AssetSupplyCap(asset))
+            .unwrap_or(0)
+    }
+
+    /// Returns the aggregate borrow cap for `asset` (0 = unlimited).
+    pub fn borrow_cap(env: Env, asset: Address) -> i128 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::AssetBorrowCap(asset))
+            .unwrap_or(0)
+    }
+
+    /// Sets the global liquidation close factor, in bps of a position's
+    /// outstanding debt that may be seized in a single `liquidate` call.
+    /// Bounded to `[1_000, 10_000]` (10%-100%). Admin-only, immediate.
+    pub fn set_close_factor(env: Env, admin: Address, bps: u32) {
+        Self::require_admin(&env, &admin);
+        admin.require_auth();
+
+        if !(1_000..=10_000).contains(&bps) {
+            panic_with_error!(&env, VeilLendError::InvalidCap);
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::GlobalCloseFactorBps, &bps);
+    }
+
+    /// Returns the current global close factor in bps (default 5_000 = 50%).
+    pub fn close_factor_bps(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::GlobalCloseFactorBps)
+            .unwrap_or(5_000)
+    }
+
+    /// Liquidates part (or, in a severe undercollateralization zone, all) of
+    /// `user`'s `debt_asset` borrow against their `collateral_asset`
+    /// collateral. The caller (`liquidator`) repays `debt_asset` on the
+    /// user's behalf and receives an equal-value amount of the user's
+    /// `collateral_asset` collateral (no liquidation bonus is modeled yet —
+    /// see the reserve-accounting note on `withdraw`/`repay`: this contract
+    /// does not move real tokens, only internal accounting).
+    ///
+    /// The position must currently be undercollateralized (health factor
+    /// < 1.0) or the call panics with `PositionNotLiquidatable`. Below a
+    /// health factor of 1.0 but at or above 0.95, at most `close_factor_bps`
+    /// of the outstanding debt may be repaid in one call — a caller-supplied
+    /// `repay_amount` above that ceiling is silently clipped (see
+    /// `LiquidationClipped`). Below a health factor of 0.95 (severe
+    /// undercollateralization, at risk of bad debt) the close factor is
+    /// bypassed and the full outstanding debt may be repaid in one call.
+    pub fn liquidate(
+        env: Env,
+        liquidator: Address,
+        user: Address,
+        collateral_asset: Address,
+        debt_asset: Address,
+        repay_amount: i128,
+    ) {
+        Self::require_supported_asset(&env, &collateral_asset);
+        Self::require_supported_asset(&env, &debt_asset);
+        Self::require_positive_amount(&env, repay_amount);
+        liquidator.require_auth();
+
+        let debt_interest_state = Self::accrue_and_persist_interest(&env, &debt_asset).state;
+        let collateral_interest_state =
+            Self::accrue_and_persist_interest(&env, &collateral_asset).state;
+
+        let debt_position = interest::compute_accrued_position(
+            &Self::read_position(&env, &user, &debt_asset),
+            &debt_interest_state,
+        );
+        let collateral_position = interest::compute_accrued_position(
+            &Self::read_position(&env, &user, &collateral_asset),
+            &collateral_interest_state,
+        );
+
+        if debt_position.borrowed == 0 {
+            panic_with_error!(&env, VeilLendError::PositionNotLiquidatable);
+        }
+
+        let collateral_ratio_bps = Self::min_collateral_ratio_bps(env.clone()) as i128;
+        let collateral_price = Self::read_oracle_price(&env, &collateral_asset);
+        let debt_price = Self::read_oracle_price(&env, &debt_asset);
+
+        let collateral_value = collateral_position.deposited * collateral_price;
+        let borrowed_value = debt_position.borrowed * debt_price;
+
+        // Only undercollateralized positions (health factor < 1.0) may be
+        // liquidated; this mirrors assert_collateralized's healthy condition.
+        if collateral_value * 10_000 >= borrowed_value * collateral_ratio_bps {
+            panic_with_error!(&env, VeilLendError::PositionNotLiquidatable);
+        }
+
+        // health_factor_bps == 10_000 at exactly the min-collateral-ratio
+        // threshold; below that the position is undercollateralized.
+        let health_factor_bps =
+            (collateral_value * 10_000 * 10_000) / (borrowed_value * collateral_ratio_bps);
+
+        const SEVERE_HEALTH_FACTOR_BPS: i128 = 9_500; // 0.95
+
+        let max_repay = if health_factor_bps < SEVERE_HEALTH_FACTOR_BPS {
+            debt_position.borrowed
+        } else {
+            let close_factor_bps = Self::close_factor_bps(env.clone()) as i128;
+            (debt_position.borrowed * close_factor_bps) / 10_000
+        };
+
+        let mut actual_repay = repay_amount.min(debt_position.borrowed);
+        if actual_repay > max_repay {
+            let by_bps = (((actual_repay - max_repay) * 10_000) / actual_repay) as u32;
+            actual_repay = max_repay;
+
+            LiquidationClipped {
+                liquidator: liquidator.clone(),
+                user: user.clone(),
+                by_bps,
+            }
+            .publish(&env);
+        }
+
+        if actual_repay <= 0 {
+            panic_with_error!(&env, VeilLendError::ZeroAmount);
+        }
+
+        let seize_amount =
+            ((actual_repay * debt_price) / collateral_price).min(collateral_position.deposited);
+
+        let mut new_debt_position = debt_position;
+        new_debt_position.borrowed -= actual_repay;
+        let mut debt_reserve = Self::read_asset_reserve(&env, &debt_asset);
+        debt_reserve.total_balance += actual_repay;
+        Self::write_position(&env, &user, &debt_asset, &new_debt_position);
+        Self::write_asset_reserve(&env, &debt_asset, &debt_reserve);
+        let total_borrowed =
+            Self::get_total_borrowed(env.clone(), debt_asset.clone()) - actual_repay;
+        env.storage()
+            .persistent()
+            .set(&DataKey::TotalBorrowed(debt_asset.clone()), &total_borrowed);
+
+        let mut new_collateral_position = collateral_position;
+        new_collateral_position.deposited -= seize_amount;
+        let mut collateral_reserve = Self::read_asset_reserve(&env, &collateral_asset);
+        collateral_reserve.total_balance -= seize_amount;
+        Self::write_position(&env, &user, &collateral_asset, &new_collateral_position);
+        Self::write_asset_reserve(&env, &collateral_asset, &collateral_reserve);
+        let total_deposited =
+            Self::get_total_deposited(env.clone(), collateral_asset.clone()) - seize_amount;
+        env.storage().persistent().set(
+            &DataKey::TotalDeposited(collateral_asset.clone()),
+            &total_deposited,
+        );
+
+        LiquidateEvent {
+            liquidator,
+            user,
+            collateral_asset: collateral_asset.clone(),
+            debt_asset: debt_asset.clone(),
+            repaid: actual_repay,
+            seized: seize_amount,
+        }
+        .publish(&env);
+        Self::publish_asset_reserve_updated(
+            &env,
+            &debt_asset,
+            &debt_reserve,
+            ReserveUpdateKind::Repay,
+        );
+        Self::publish_asset_reserve_updated(
+            &env,
+            &collateral_asset,
+            &collateral_reserve,
+            ReserveUpdateKind::Withdraw,
+        );
     }
 }
 
@@ -1899,6 +2208,48 @@ impl VeilLendContract {
         }
     }
 
+    /// Enforces the admin-configured aggregate supply cap (`AssetSupplyCap`,
+    /// 0 = unlimited) for `asset`. Distinct from the legacy `DepositCap`
+    /// (-1 = unlimited) mechanism checked by `check_deposit_cap`; both are
+    /// enforced independently.
+    fn enforce_supply_cap(env: &Env, asset: &Address, amount: i128) {
+        let cap: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AssetSupplyCap(asset.clone()))
+            .unwrap_or(0);
+
+        if cap == 0 {
+            return;
+        }
+
+        let current_total = Self::get_total_deposited(env.clone(), asset.clone());
+        if current_total + amount > cap {
+            panic_with_error!(env, VeilLendError::SupplyCapExceeded);
+        }
+    }
+
+    /// Enforces the admin-configured aggregate borrow cap (`AssetBorrowCap`,
+    /// 0 = unlimited) for `asset`. Distinct from the legacy `BorrowCap`
+    /// (-1 = unlimited) mechanism checked by `check_borrow_cap`; both are
+    /// enforced independently.
+    fn enforce_borrow_cap(env: &Env, asset: &Address, amount: i128) {
+        let cap: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AssetBorrowCap(asset.clone()))
+            .unwrap_or(0);
+
+        if cap == 0 {
+            return;
+        }
+
+        let current_total = Self::get_total_borrowed(env.clone(), asset.clone());
+        if current_total + amount > cap {
+            panic_with_error!(env, VeilLendError::BorrowCapExceeded);
+        }
+    }
+
     /// Validates a user's post-action cross-asset collateral health.
     ///
     /// `collateral_asset` and `debt_asset` may differ: the collateral value
@@ -2043,15 +2394,17 @@ mod tests {
         assert_eq!(VeilLendError::CapBelowOutstanding as u32, 28);
         assert_eq!(VeilLendError::ProtocolFeeExceedsLimit as u32, 29);
         assert_eq!(VeilLendError::ArithmeticOverflow as u32, 30);
+        assert_eq!(VeilLendError::SupplyCapExceeded as u32, 31);
+        assert_eq!(VeilLendError::PositionNotLiquidatable as u32, 32);
     }
 
     #[test]
     fn test_contract_metadata_identifies_current_storage_shape() {
         let metadata = VeilLendContract::contract_metadata(Env::default());
 
-        assert_eq!(metadata.contract_version, 4);
-        assert_eq!(metadata.storage_schema_version, 3);
-        assert_eq!(metadata.storage_schema_id, symbol_short!("VLENDV3"));
+        assert_eq!(metadata.contract_version, 5);
+        assert_eq!(metadata.storage_schema_version, 4);
+        assert_eq!(metadata.storage_schema_id, symbol_short!("VLENDV4"));
     }
 
     #[test]
@@ -2088,6 +2441,8 @@ mod tests {
             VeilLendError::CapBelowOutstanding as u32,
             VeilLendError::ProtocolFeeExceedsLimit as u32,
             VeilLendError::ArithmeticOverflow as u32,
+            VeilLendError::SupplyCapExceeded as u32,
+            VeilLendError::PositionNotLiquidatable as u32,
         ];
         let mut sorted = codes.to_vec();
         sorted.sort();

@@ -67,14 +67,17 @@ describe('campaignAnalytics', () => {
 
   describe('StrictMode double-mount & deduplication (Test a)', () => {
     it('fires POST exactly once per event type when track() is called with the same event ID', async () => {
-      const fetchSpy = vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({ ok: true }),
+      const fetchSpy = vi.fn().mockImplementation(async (_url, init: RequestInit) => {
+        const body = JSON.parse(String(init.body));
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ ok: true, id: body.id }),
+        };
       });
       vi.stubGlobal('fetch', fetchSpy);
 
-      const eventId = 'test-event-uuid-1234';
+      const eventId = '00000000-0000-4000-8000-000000000123';
 
       // Simulating React StrictMode mount 1
       const res1 = track('campaign_page_visit', { path: '/' }, eventId);
@@ -96,10 +99,13 @@ describe('campaignAnalytics', () => {
     });
 
     it('generates unique event IDs for distinct track calls', async () => {
-      const fetchSpy = vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({ ok: true }),
+      const fetchSpy = vi.fn().mockImplementation(async (_url, init: RequestInit) => {
+        const body = JSON.parse(String(init.body));
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ ok: true, id: body.id }),
+        };
       });
       vi.stubGlobal('fetch', fetchSpy);
 
@@ -116,6 +122,37 @@ describe('campaignAnalytics', () => {
   });
 
   describe('Event transport & retry queue (Test b)', () => {
+    it('drops malformed stored events while retaining valid queued events', () => {
+      const validEvent = {
+        id: '00000000-0000-4000-8000-000000000001',
+        sessionId: '00000000-0000-4000-8000-000000000002',
+        ts: Date.now(),
+        type: 'campaign_page_visit',
+        payload: { path: '/' },
+      };
+      localStorageStore.veilend_campaign_pending_events = JSON.stringify([
+        validEvent,
+        { id: 42, type: 'corrupt' },
+      ]);
+
+      expect(getPendingQueue()).toEqual([validEvent]);
+      expect(JSON.parse(localStorageStore.veilend_campaign_pending_events)).toEqual([validEvent]);
+    });
+
+    it('keeps an event queued when the success response shape is invalid', async () => {
+      const fetchSpy = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: false, id: 42 }),
+      });
+      vi.stubGlobal('fetch', fetchSpy);
+
+      const event = trackCampaignEvent('campaign_cta_click', { ctaId: 'btn-invalid' });
+      await flushQueue();
+
+      expect(getPendingQueue()).toEqual([event]);
+    });
+
     it('enqueues failed fetch events and empties queue after POST returns 2xx on retries', async () => {
       // 1. Inject failing fetch
       const failingFetch = vi.fn().mockRejectedValue(new Error('Network error'));
@@ -145,10 +182,13 @@ describe('campaignAnalytics', () => {
       expect(queue[0].id).toBe(event?.id);
 
       // 2. Network recovers: POST returns 2xx (200 OK)
-      const successFetch = vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({ ok: true }),
+      const successFetch = vi.fn().mockImplementation(async (_url, init: RequestInit) => {
+        const body = JSON.parse(String(init.body));
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ ok: true, id: body.id }),
+        };
       });
       vi.stubGlobal('fetch', successFetch);
 

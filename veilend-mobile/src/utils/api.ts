@@ -57,7 +57,9 @@ api.interceptors.response.use(
       if (store.authLoading || store.lendingLoading || store.shieldedLoading) {
         return Promise.reject(error);
       }
-      store.logout();
+      // Fire-and-forget: the interceptor is synchronous at its boundary;
+      // logout() attempts backend revocation then clears local state.
+      store.logout().catch(() => {});
       ToastComponent.show({
         type: 'error',
         text1: 'Session expired',

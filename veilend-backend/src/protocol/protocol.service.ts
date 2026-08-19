@@ -92,8 +92,8 @@ export class ProtocolService {
 
     return plainToInstance(NetworkConfigDto, {
       network: stellar.network,
-      horizonUrl: stellar.horizonUrl,
-      sorobanRpcUrl: stellar.sorobanRpcUrl,
+      horizonUrl: stellar.horizonUrls[0],
+      sorobanRpcUrl: stellar.sorobanRpcUrls[0],
       networkPassphrase: stellar.networkPassphrase,
       contractId: indexer.contractId,
     });

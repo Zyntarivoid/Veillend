@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Query, Req, UseGuards } from '@nestjs/common';
 import { PortfoliosService } from './portfolios.service';
 import { PortfolioResponseDto } from './dto/portfolio-response.dto';
 import { WalletAddressParamDto } from '../common/dto/wallet-address-param.dto';
@@ -19,8 +19,15 @@ export class PortfoliosController {
   async getPortfolio(
     @Param() { walletAddress }: WalletAddressParamDto,
     @Req() req: AuthenticatedRequest,
+    @Query('allowStale') allowStale?: string,
   ): Promise<PortfolioResponseDto> {
-    await assertWalletAccess(this.prisma, req.user.walletAddress, walletAddress);
-    return this.portfoliosService.getPortfolio(walletAddress);
+    await assertWalletAccess(
+      this.prisma,
+      req.user.walletAddress,
+      walletAddress,
+    );
+    return this.portfoliosService.getPortfolio(walletAddress, {
+      allowStale: allowStale === 'true' || allowStale === '1',
+    });
   }
 }

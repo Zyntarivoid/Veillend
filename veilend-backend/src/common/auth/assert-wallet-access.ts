@@ -28,7 +28,7 @@ export async function assertWalletAccess(
 
   if (!admin) {
     throw new ForbiddenException(
-      'You are not permitted to access this wallet\'s data',
+      "You are not permitted to access this wallet's data",
     );
   }
 }

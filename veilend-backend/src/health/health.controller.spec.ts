@@ -27,19 +27,15 @@ const makePrismaStub = (up: boolean) => ({
 });
 
 const makeSorobanStub = (up: boolean, seq = 1234) => ({
-  getClient: () => ({
-    getLatestLedger: up
-      ? jest.fn().mockResolvedValue({ sequence: seq })
-      : jest.fn().mockRejectedValue(new Error('RPC down')),
-  }),
+  getLatestLedger: up
+    ? jest.fn().mockResolvedValue({ sequence: seq })
+    : jest.fn().mockRejectedValue(new Error('RPC down')),
 });
 
 const makeHorizonStub = (up: boolean, ledger = 5678) => ({
-  getClient: () => ({
-    root: up
-      ? jest.fn().mockResolvedValue({ core_latest_ledger: ledger })
-      : jest.fn().mockRejectedValue(new Error('Horizon down')),
-  }),
+  getRoot: up
+    ? jest.fn().mockResolvedValue({ core_latest_ledger: ledger })
+    : jest.fn().mockRejectedValue(new Error('Horizon down')),
 });
 
 // ── Helper to spin up a lightweight NestJS app ────────────────────────────────
@@ -88,6 +84,7 @@ describe('HealthController', () => {
     afterAll(() => app.close());
 
     it('returns 200 with status ok', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       const res = await request(app.getHttpServer()).get('/health').expect(200);
       const body = res.body as HealthBody;
       expect(body.status).toBe('ok');
@@ -107,6 +104,7 @@ describe('HealthController', () => {
     afterAll(() => app.close());
 
     it('returns 200 with status degraded', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       const res = await request(app.getHttpServer()).get('/health').expect(200);
       const body = res.body as HealthBody;
       expect(body.status).toBe('degraded');
@@ -125,6 +123,7 @@ describe('HealthController', () => {
     afterAll(() => app.close());
 
     it('returns 503 when every probe fails', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       const res = await request(app.getHttpServer())
         .get('/health')
         .expect(HttpStatus.SERVICE_UNAVAILABLE);
@@ -136,12 +135,14 @@ describe('HealthController', () => {
   describe('GET /ready', () => {
     it('returns 200 when Prisma is up', async () => {
       const app = await createApp(true, false, false);
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       await request(app.getHttpServer()).get('/ready').expect(200);
       await app.close();
     });
 
     it('returns 503 when Prisma is down', async () => {
       const app = await createApp(false, true, true);
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       await request(app.getHttpServer())
         .get('/ready')
         .expect(HttpStatus.SERVICE_UNAVAILABLE);

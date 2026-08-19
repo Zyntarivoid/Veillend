@@ -242,7 +242,7 @@ export class IndexerRepository {
   /**
    * Atomically applies a single indexed event: dedupes on the event's
    * sorobanEventId, inserts the TransactionHistory row, and applies the
-   * Position delta in ONE database transaction.
+   * Position delta in ONE database transaction under Serializable isolation.
    *
    * Returns `true` when this call newly indexed the event (and updated the
    * position); returns `false` when the event's sorobanEventId was already
@@ -250,7 +250,8 @@ export class IndexerRepository {
    *
    * The Position read-modify-write acquires a row-level lock (SELECT … FOR
    * UPDATE) so concurrent writers on the same (user, asset) cannot lose
-   * deltas.
+   * deltas.  Serializable isolation guards against write-skew on overlapping
+   * reads within the same snapshot.
    */
   async applyEvent(
     tx: IndexerTransaction,
@@ -261,7 +262,7 @@ export class IndexerRepository {
     let isNew = false;
 
     try {
-      await this.prisma.$transaction(async (db) => {
+      await this.prisma.withSerializable(async (db) => {
         const existing = await db.transactionHistory.findUnique({
           where: { sorobanEventId: tx.id },
         });

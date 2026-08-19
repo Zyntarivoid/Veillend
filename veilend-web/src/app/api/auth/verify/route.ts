@@ -1,17 +1,17 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { z } from 'zod';
+import { fetchValidated } from '@/lib/api/validated-fetch';
 import { parseOr422 } from '@/lib/server/validation';
 import { captureException } from '@/lib/server/telemetry';
+import {
+  AuthVerificationResponseSchema,
+  AuthVerifyRequestSchema,
+  HttpError,
+  ValidationError,
+  type AuthVerifyRequest,
+} from '@/lib/validation/api-schemas';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-
-// Reuses the same shared helper as /api/campaign-events; new auth
-// endpoints (connect/logout) should follow this pattern too.
-const VerifyRequestSchema = z.object({
-  walletAddress: z.string().min(1),
-  signature: z.string().min(1),
-});
 
 export async function POST(request: Request) {
   try {
@@ -22,9 +22,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid JSON payload' }, { status: 400 });
     }
 
-    let parsed: { data: z.infer<typeof VerifyRequestSchema> };
+    let parsed: { data: AuthVerifyRequest };
     try {
-      parsed = await parseOr422(VerifyRequestSchema, body);
+      parsed = await parseOr422(AuthVerifyRequestSchema, body);
     } catch (err) {
       if (err instanceof Response) return err;
       throw err;
@@ -41,19 +41,20 @@ export async function POST(request: Request) {
 
     const nonce = nonceCookie.value;
 
-    const res = await fetch(`${API_BASE_URL}/auth/verify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ walletAddress, nonce, signature }),
-    });
+    const data = await fetchValidated(
+      `${API_BASE_URL}/auth/verify`,
+      AuthVerificationResponseSchema,
+      {
+        requestInit: {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ walletAddress, nonce, signature }),
+        },
+      },
+    );
 
-    if (!res.ok) {
-      return NextResponse.json({ error: 'Signature verification failed' }, { status: res.status });
-    }
-
-    const data = await res.json();
     if (!data.accessToken) {
-      return NextResponse.json({ error: 'Backend did not return an access token' }, { status: 500 });
+      return NextResponse.json({ error: 'Backend did not return an access token' }, { status: 502 });
     }
 
     // Set secure, HTTP-only session cookie
@@ -78,6 +79,16 @@ export async function POST(request: Request) {
 
     return NextResponse.json(data);
   } catch (error) {
+    if (error instanceof HttpError) {
+      return NextResponse.json(
+        { error: 'Signature verification failed' },
+        { status: error.status },
+      );
+    }
+    if (error instanceof ValidationError) {
+      captureException(error);
+      return NextResponse.json({ error: 'Invalid backend response' }, { status: 502 });
+    }
     captureException(error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }

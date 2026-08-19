@@ -14,19 +14,23 @@ export class WalletService {
    * frontend challenge-response can be verified without trusting the client.
    */
   verifySignature(walletAddress: string, message: string, signature: string) {
-    const keypair = Keypair.fromPublicKey(walletAddress);
+    try {
+      const keypair = Keypair.fromPublicKey(walletAddress);
 
-    const encodedMessage = Buffer.concat([
-      Buffer.from(MESSAGE_PREFIX, 'utf8'),
-      Buffer.from(message, 'utf8'),
-    ]);
-    const messageHash = createHash('sha256').update(encodedMessage).digest();
+      const encodedMessage = Buffer.concat([
+        Buffer.from(MESSAGE_PREFIX, 'utf8'),
+        Buffer.from(message, 'utf8'),
+      ]);
+      const messageHash = createHash('sha256').update(encodedMessage).digest();
 
-    const signatureBytes = Buffer.from(signature, 'base64');
-    if (signatureBytes.length !== 64) {
+      const signatureBytes = Buffer.from(signature, 'base64');
+      if (signatureBytes.length !== 64) {
+        return false;
+      }
+
+      return keypair.verify(messageHash, signatureBytes);
+    } catch {
       return false;
     }
-
-    return keypair.verify(messageHash, signatureBytes);
   }
 }

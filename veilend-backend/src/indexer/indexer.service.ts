@@ -86,11 +86,9 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
         lastLedger = configStartLedger - 1;
       }
 
-      const rpcClient = this.rpcService.getClient();
-
       // Safety check: check RPC retention window
       try {
-        const health = await rpcClient.getHealth();
+        const health = await this.rpcService.getHealth();
         if (lastLedger + 1 < health.oldestLedger) {
           this.logger.warn(
             `Last indexed ledger (${lastLedger}) is older than RPC retention oldest ledger (${health.oldestLedger}). Forwarding checkpoint to oldest available ledger.`,
@@ -103,7 +101,7 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
         );
       }
 
-      const latestLedgerResp = await rpcClient.getLatestLedger();
+      const latestLedgerResp = await this.rpcService.getLatestLedger();
       const latestLedger = latestLedgerResp.sequence;
 
       if (latestLedger > lastLedger) {
@@ -126,7 +124,6 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
     endLedger: number,
     contractId: string,
   ) {
-    const rpcClient = this.rpcService.getClient();
     let currentLedger = startLedger - 1;
     let cursor: string | undefined = undefined;
 
@@ -149,7 +146,7 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
         } as unknown as rpc.Api.GetEventsRequest;
 
         // fetch events using current pagination state
-        const response = await rpcClient.getEvents(requestParams);
+        const response = await this.rpcService.getEvents(requestParams);
         const events = response.events || [];
 
         for (const event of events) {
@@ -239,6 +236,8 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
           borrowedDelta = -amount;
         }
 
+        // applyEvent already runs under Serializable + deadlock retry inside
+        // the repository; the retry counter and warn logs live in PrismaService.
         const isNewTx = await this.repository.applyEvent(
           {
             id,

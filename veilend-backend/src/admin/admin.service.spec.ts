@@ -16,6 +16,8 @@ describe('AdminService', () => {
 
   const mockPrismaService = {
     $transaction: jest.fn(),
+    withSerializable: jest.fn(),
+    withRepeatableRead: jest.fn(),
     admin: {
       create: jest.fn(),
       delete: jest.fn(),
@@ -83,7 +85,7 @@ describe('AdminService', () => {
       const actorWallet = '0xACTOR123';
       const mockAdmin = { id: 'admin-1', ...dto, createdAt: new Date() };
 
-      mockPrismaService.$transaction.mockImplementation((callback: any) => {
+      mockPrismaService.withSerializable.mockImplementation((callback: any) => {
         const txMock = {
           admin: {
             create: jest.fn().mockResolvedValue(mockAdmin),
@@ -99,7 +101,7 @@ describe('AdminService', () => {
       const result = await service.addAdmin(dto, actorWallet);
 
       expect(result).toEqual(mockAdmin);
-      expect(mockPrismaService.$transaction).toHaveBeenCalled();
+      expect(mockPrismaService.withSerializable).toHaveBeenCalled();
     });
   });
 
@@ -110,7 +112,7 @@ describe('AdminService', () => {
       const mockUser = { id: 'user-1', walletAddress };
       const mockAdmin = { id: 'admin-1', walletAddress, createdAt: new Date() };
 
-      mockPrismaService.$transaction.mockImplementation((callback: any) => {
+      mockPrismaService.withSerializable.mockImplementation((callback: any) => {
         const txMock = {
           user: {
             findUnique: jest.fn().mockResolvedValue(mockUser),
@@ -132,7 +134,7 @@ describe('AdminService', () => {
       const result = await service.removeAdmin(walletAddress, actorWallet);
 
       expect(result).toEqual(mockAdmin);
-      expect(mockPrismaService.$transaction).toHaveBeenCalled();
+      expect(mockPrismaService.withSerializable).toHaveBeenCalled();
     });
 
     it('should delete admin and log action even when user does not exist', async () => {
@@ -140,7 +142,7 @@ describe('AdminService', () => {
       const actorWallet = '0xACTOR123';
       const mockAdmin = { id: 'admin-1', walletAddress, createdAt: new Date() };
 
-      mockPrismaService.$transaction.mockImplementation((callback: any) => {
+      mockPrismaService.withSerializable.mockImplementation((callback: any) => {
         const txMock = {
           user: {
             findUnique: jest.fn().mockResolvedValue(null),
@@ -162,7 +164,7 @@ describe('AdminService', () => {
       const result = await service.removeAdmin(walletAddress, actorWallet);
 
       expect(result).toEqual(mockAdmin);
-      expect(mockPrismaService.$transaction).toHaveBeenCalled();
+      expect(mockPrismaService.withSerializable).toHaveBeenCalled();
     });
   });
 
@@ -397,18 +399,24 @@ describe('AdminService', () => {
         },
       ];
 
-      mockPrismaService.adminAuditLog.findMany.mockResolvedValue(mockLogs);
-      mockPrismaService.adminAuditLog.count.mockResolvedValue(1);
+      mockPrismaService.withRepeatableRead.mockImplementation(
+        (callback: any) => {
+          const dbMock = {
+            adminAuditLog: {
+              findMany: jest.fn().mockResolvedValue(mockLogs),
+              count: jest.fn().mockResolvedValue(1),
+            },
+          };
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call
+          return callback(dbMock);
+        },
+      );
 
       const result = await service.getAuditLog(pageOptionsDto);
 
       expect(result.data).toEqual(mockLogs);
       expect(result.meta.itemCount).toBe(1);
-      expect(mockPrismaService.adminAuditLog.findMany).toHaveBeenCalledWith({
-        take: 10,
-        skip: 0,
-        orderBy: { createdAt: 'desc' },
-      });
+      expect(mockPrismaService.withRepeatableRead).toHaveBeenCalled();
     });
   });
 });

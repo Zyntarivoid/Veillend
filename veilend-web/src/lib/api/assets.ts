@@ -1,3 +1,10 @@
+import { fetchValidated } from '@/lib/api/validated-fetch';
+import {
+  SupportedAssetsResponseSchema,
+  ValidationError,
+  type SupportedAssetItem,
+} from '@/lib/validation/api-schemas';
+
 export interface SupportedAsset {
   symbol: string;
   name: string;
@@ -8,22 +15,6 @@ export interface SupportedAsset {
   depositedBalance: number;
   borrowedBalance: number;
   isSupported: boolean;
-  logoUrl?: string;
-}
-
-interface RawAssetItem {
-  symbol?: string;
-  code?: string;
-  name?: string;
-  contractId?: string;
-  assetAddress?: string;
-  decimals?: number;
-  priceUsd?: number;
-  price?: number;
-  walletBalance?: number;
-  depositedBalance?: number;
-  borrowedBalance?: number;
-  isSupported?: boolean;
   logoUrl?: string;
 }
 
@@ -88,38 +79,29 @@ export async function fetchSupportedAssets(
       ? `${baseUrl}/assets?supported=true&address=${encodeURIComponent(userAddress)}`
       : `${baseUrl}/assets?supported=true`;
 
-    const res = await fetch(url, {
-      headers: { 'Cache-Control': 'no-cache' },
+    const assetsData = await fetchValidated(url, SupportedAssetsResponseSchema, {
+      requestInit: { headers: { 'Cache-Control': 'no-cache' } },
     });
 
-    if (!res.ok) {
-      return DEFAULT_SUPPORTED_ASSETS;
-    }
-
-    const json = await res.json();
-    const assetsData: RawAssetItem[] = json.data || json.assets || json;
-
-    if (!Array.isArray(assetsData) || assetsData.length === 0) {
-      return DEFAULT_SUPPORTED_ASSETS;
-    }
-
-    return assetsData.map((item: RawAssetItem, index: number) => {
+    return assetsData.map((item: SupportedAssetItem, index: number) => {
       const fallback = DEFAULT_SUPPORTED_ASSETS[index % DEFAULT_SUPPORTED_ASSETS.length];
       return {
-        symbol: item.symbol || item.code || fallback.symbol,
-        name: item.name || fallback.name,
-        contractId: item.contractId || item.assetAddress || fallback.contractId,
-        decimals: item.decimals ?? 7,
+        symbol: item.symbol,
+        name: item.name,
+        contractId: item.contractId ?? item.assetAddress ?? fallback.contractId,
+        decimals: item.decimals,
         priceUsd: item.priceUsd ?? item.price ?? fallback.priceUsd,
         walletBalance: item.walletBalance ?? fallback.walletBalance,
         depositedBalance: item.depositedBalance ?? fallback.depositedBalance,
         borrowedBalance: item.borrowedBalance ?? fallback.borrowedBalance,
-        isSupported: item.isSupported ?? true,
-        logoUrl: item.logoUrl,
+        isSupported: item.isSupported,
+        logoUrl: item.logoUrl ?? undefined,
       };
     });
-  } catch {
-    // Return fallback defaults when offline or during test execution
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      console.warn('[Assets] API response validation failed; using fallback assets.', error);
+    }
     return DEFAULT_SUPPORTED_ASSETS;
   }
 }

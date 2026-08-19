@@ -3,15 +3,18 @@ import { ActionTray } from '@/components/ActionTray';
 import { Flex, Grid } from '@/components/Layout';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fetchDashboardData } from '@/lib/api/dashboard';
+import { isRetryableApiError } from '@/lib/api/validated-fetch';
 import type { ActivityEvent, AssetBalance, DashboardData } from '@/lib/types/dashboard';
+import { ValidationError } from '@/lib/validation/api-schemas';
 import { HfBreakdownTooltip } from './hf-breakdown-tooltip';
 
 type DashboardResult =
   | { data: DashboardData; error: null }
-  | { data: null; error: string };
+  | { data: null; error: Error };
 
 const getDashboardResult = cache(async (walletAddress: string): Promise<DashboardResult> => {
   try {
@@ -19,7 +22,7 @@ const getDashboardResult = cache(async (walletAddress: string): Promise<Dashboar
   } catch (error) {
     return {
       data: null,
-      error: error instanceof Error ? error.message : 'Failed to load dashboard data',
+      error: error instanceof Error ? error : new Error('Failed to load dashboard data'),
     };
   }
 });
@@ -28,22 +31,45 @@ export function preloadDashboardData(walletAddress: string): void {
   void getDashboardResult(walletAddress);
 }
 
-const formatUsd = (value: number): string =>
-  new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value);
+const formatUsd = (value: number): string => {
+  if (!Number.isFinite(value)) return '—';
+  return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value);
+};
 
-const formatHealthFactor = (factor: number): string =>
-  factor === Infinity ? '∞' : factor.toFixed(2);
+function CardError({
+  title,
+  error,
+  numeric = false,
+}: {
+  title: string;
+  error: Error;
+  numeric?: boolean;
+}) {
+  const validationFailed = error instanceof ValidationError;
+  const message = validationFailed
+    ? `Data validation warning: ${error.message}`
+    : error.message;
 
-function CardError({ message }: { message: string }) {
   return (
-    <Alert variant="destructive">
-      <AlertDescription>{message}</AlertDescription>
-    </Alert>
+    <Card>
+      <CardHeader><CardTitle>{title}</CardTitle></CardHeader>
+      <CardContent>
+        {numeric && <div className="mb-3 text-3xl font-bold text-text-secondary">—</div>}
+        <Alert variant="destructive">
+          <AlertDescription>{message}</AlertDescription>
+        </Alert>
+        {isRetryableApiError(error) && (
+          <Button asChild variant="outline" className="mt-3">
+            <a href="/dashboard">Try Again</a>
+          </Button>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -62,7 +88,7 @@ export function SummaryCardSkeleton({ titleWidth = 'w-32' }: { titleWidth?: stri
 
 export async function TotalBalanceCard({ walletAddress }: { walletAddress: string }) {
   const result = await getDashboardResult(walletAddress);
-  if (!result.data) return <CardError message={result.error} />;
+  if (!result.data) return <CardError title="Total Balance" error={result.error} numeric />;
 
   const { totalBalanceUsd } = result.data.portfolio;
   return (
@@ -79,7 +105,7 @@ export async function TotalBalanceCard({ walletAddress }: { walletAddress: strin
 
 export async function TotalDepositedCard({ walletAddress }: { walletAddress: string }) {
   const result = await getDashboardResult(walletAddress);
-  if (!result.data) return <CardError message={result.error} />;
+  if (!result.data) return <CardError title="Total Deposited" error={result.error} numeric />;
 
   return (
     <Card>
@@ -95,7 +121,7 @@ export async function TotalDepositedCard({ walletAddress }: { walletAddress: str
 
 export async function TotalBorrowedCard({ walletAddress }: { walletAddress: string }) {
   const result = await getDashboardResult(walletAddress);
-  if (!result.data) return <CardError message={result.error} />;
+  if (!result.data) return <CardError title="Total Borrowed" error={result.error} numeric />;
 
   const { healthFactor, totalBorrowedUsd, hfBreakdown, hfWarning } = result.data.portfolio;
   return (
@@ -226,7 +252,7 @@ function AssetRows({
 
 export async function DepositedAssetsCard({ walletAddress }: { walletAddress: string }) {
   const result = await getDashboardResult(walletAddress);
-  if (!result.data) return <CardError message={result.error} />;
+  if (!result.data) return <CardError title="Deposited Assets" error={result.error} />;
   return (
     <Card>
       <CardHeader><CardTitle>Deposited Assets</CardTitle></CardHeader>
@@ -243,7 +269,7 @@ export async function DepositedAssetsCard({ walletAddress }: { walletAddress: st
 
 export async function BorrowedAssetsCard({ walletAddress }: { walletAddress: string }) {
   const result = await getDashboardResult(walletAddress);
-  if (!result.data) return <CardError message={result.error} />;
+  if (!result.data) return <CardError title="Borrowed Assets" error={result.error} />;
   return (
     <Card>
       <CardHeader><CardTitle>Borrowed Assets</CardTitle></CardHeader>
@@ -332,7 +358,7 @@ async function RecentActivityRow({
 
 export async function RecentActivityCard({ walletAddress }: { walletAddress: string }) {
   const result = await getDashboardResult(walletAddress);
-  if (!result.data) return <CardError message={result.error} />;
+  if (!result.data) return <CardError title="Recent Activity" error={result.error} />;
   const activity = result.data.recentActivity;
 
   return (

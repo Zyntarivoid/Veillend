@@ -17,9 +17,13 @@ const flushPersistence = async () => {
 // Helper to reset store between tests
 beforeEach(async () => {
   await SecureStoreShim.clearAllAsync();
+  // Reset the api stubs to simple no-ops between tests
+  (api as any).get = async () => ({ data: {} });
+  (api as any).post = async () => ({ data: {} });
   useStore.setState({
     address: null,
     authToken: null,
+    sessionId: null,
     isPrivacyMode: false,
     profileName: null,
     profileImage: null,
@@ -55,7 +59,7 @@ beforeEach(async () => {
     dashboardLoading: false,
     dashboardError: null,
     pendingTransactions: [],
-  });
+  } as any);
 });
 
 describe('Backend-backed dashboard data (issue #315)', () => {
@@ -180,7 +184,7 @@ describe('Auth persistence (issue #59)', () => {
     assert.equal(useStore.getState().authToken, null);
   });
 
-  it('logout should clear address, authToken, and isPrivacyMode', () => {
+  it('logout should clear address, authToken, and isPrivacyMode', async () => {
     useStore.setState({
       address: 'WALLET',
       authToken: 'TOKEN',
@@ -188,7 +192,7 @@ describe('Auth persistence (issue #59)', () => {
     });
 
     const { logout } = useStore.getState();
-    logout();
+    await logout();
 
     assert.equal(useStore.getState().address, null);
     assert.equal(useStore.getState().authToken, null);
@@ -222,7 +226,7 @@ describe('Profile customization persistence (issue #60)', () => {
     setProfileImage('file:///avatar.png');
     await flushPersistence();
 
-    logout();
+    await logout();
     await flushPersistence();
 
     assert.equal(useStore.getState().profileName, null);
@@ -282,7 +286,7 @@ describe('Settings preferences persistence (issue #190)', () => {
     setNotificationsEnabled(false);
     await flushPersistence();
 
-    logout();
+    await logout();
     await flushPersistence();
 
     assert.equal(useStore.getState().currency, 'USD');
@@ -397,5 +401,159 @@ describe('refreshDashboard (issue #304)', () => {
     const s = useStore.getState();
     assert.equal(s.dashboardLoading, false);
     assert.equal(s.dashboardError, null);
+  });
+});
+
+describe('Stellar signed-challenge auth flow (issue #314)', () => {
+  it('verify stores sessionId returned by the backend', async () => {
+    (api as any).post = async (url: string) => {
+      if (url === '/auth/nonce') return { data: { nonce: 'test-nonce-abc' } };
+      if (url === '/auth/verify') {
+        return {
+          data: {
+            accessToken: 'jwt-token',
+            sessionId: 'server-session-id',
+            expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+          },
+        };
+      }
+      return { data: {} };
+    };
+
+    await useStore.getState().verify({
+      walletAddress: 'GABC123',
+      nonce: 'test-nonce-abc',
+      signature: 'base64sig==',
+    });
+
+    const s = useStore.getState();
+    assert.equal(s.authToken, 'jwt-token');
+    assert.equal((s as any).sessionId, 'server-session-id');
+    assert.equal(s.address, 'GABC123');
+  });
+
+  it('second verify with the same nonce/sig payload is rejected and does not update state silently', async () => {
+    let callCount = 0;
+    (api as any).post = async (url: string) => {
+      if (url === '/auth/nonce') return { data: { nonce: 'shared-nonce' } };
+      if (url === '/auth/verify') {
+        callCount += 1;
+        if (callCount === 1) {
+          return {
+            data: {
+              accessToken: 'first-jwt',
+              sessionId: 'sid-1',
+              expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+            },
+          };
+        }
+        // Second call simulates the backend rejecting the replayed nonce.
+        const err: any = new Error('Nonce has already been used - request a new challenge');
+        err.response = { status: 401 };
+        throw err;
+      }
+      return { data: {} };
+    };
+
+    // First verify succeeds.
+    await useStore.getState().verify({
+      walletAddress: 'GABC123',
+      nonce: 'shared-nonce',
+      signature: 'base64sig==',
+    });
+
+    assert.equal(useStore.getState().authToken, 'first-jwt');
+
+    // Second verify with the same payload must throw, not silently succeed.
+    await assert.rejects(
+      () =>
+        useStore.getState().verify({
+          walletAddress: 'GABC123',
+          nonce: 'shared-nonce',
+          signature: 'base64sig==',
+        }),
+      /Signature verification failed|already been used|request a new/i,
+    );
+
+    // Auth token must remain the first one; no silent overwrite.
+    assert.equal(useStore.getState().authToken, 'first-jwt');
+  });
+
+  it('verify throws a human-readable error for 401 from backend', async () => {
+    (api as any).post = async (url: string) => {
+      if (url === '/auth/nonce') return { data: { nonce: 'n' } };
+      const err: any = new Error('Unauthorized');
+      err.response = { status: 401 };
+      throw err;
+    };
+
+    await assert.rejects(
+      () =>
+        useStore.getState().verify({
+          walletAddress: 'GABC123',
+          nonce: 'n',
+          signature: 'badsig',
+        }),
+      /Signature verification failed/,
+    );
+    assert.equal(useStore.getState().authToken, null);
+  });
+
+  it('verify throws a human-readable error for 403 from backend', async () => {
+    (api as any).post = async (url: string) => {
+      if (url === '/auth/nonce') return { data: { nonce: 'n' } };
+      const err: any = new Error('Forbidden');
+      err.response = { status: 403 };
+      throw err;
+    };
+
+    await assert.rejects(
+      () =>
+        useStore.getState().verify({
+          walletAddress: 'GABC123',
+          nonce: 'n',
+          signature: 'badsig',
+        }),
+      /Access denied/,
+    );
+  });
+
+  it('logout calls POST /auth/logout and clears authToken, sessionId, and address', async () => {
+    let logoutCalled = false;
+    (api as any).post = async (url: string) => {
+      if (url === '/auth/logout') {
+        logoutCalled = true;
+        return { data: { revoked: true } };
+      }
+      return { data: {} };
+    };
+
+    useStore.setState({
+      authToken: 'jwt-token',
+      sessionId: 'sid-1',
+      address: 'GABC123',
+    } as any);
+
+    await useStore.getState().logout();
+
+    assert.equal(logoutCalled, true, 'POST /auth/logout should be called');
+    assert.equal(useStore.getState().authToken, null);
+    assert.equal((useStore.getState() as any).sessionId, null);
+    assert.equal(useStore.getState().address, null);
+  });
+
+  it('logout clears local state even when POST /auth/logout network call fails', async () => {
+    (api as any).post = async (url: string) => {
+      if (url === '/auth/logout') throw new Error('network error');
+      return { data: {} };
+    };
+
+    useStore.setState({ authToken: 'jwt-token', address: 'GABC123' } as any);
+
+    // Should not throw even though the network call failed.
+    await useStore.getState().logout();
+
+    assert.equal(useStore.getState().authToken, null);
+    assert.equal(useStore.getState().address, null);
   });
 });

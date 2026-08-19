@@ -7,10 +7,8 @@ import { WalletService } from './../src/wallet/wallet.service';
 import { PrismaService } from './../src/prisma/prisma.service';
 
 // Two syntactically valid Stellar Ed25519 public keys.
-const OWN_WALLET =
-  'GBJEI2M7C3VCWLNGMVIUCA5MNNJICYGKRPS75OZHNUCX33RTRJNQK6MH';
-const OTHER_WALLET =
-  'GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3B2WSQHG4W37';
+const OWN_WALLET = 'GBJEI2M7C3VCWLNGMVIUCA5MNNJICYGKRPS75OZHNUCX33RTRJNQK6MH';
+const OTHER_WALLET = 'GDQP2KPQGKIHYJGXNUIYOMHARUARCA7DJT5FO2FFOOKY3B2WSQHG4W37';
 
 interface FakeUser {
   id: string;
@@ -174,7 +172,7 @@ describe('Portfolios & Transactions (e2e)', () => {
     expect(data.meta).toBeDefined();
   });
 
-  it('returns 403 when a non-admin requests another wallet\'s portfolio', async () => {
+  it("returns 403 when a non-admin requests another wallet's portfolio", async () => {
     const token = await login(OWN_WALLET);
 
     const res = await request(app.getHttpServer())
@@ -184,7 +182,7 @@ describe('Portfolios & Transactions (e2e)', () => {
     expect(res.status).toBe(403);
   });
 
-  it('returns 403 when a non-admin requests another wallet\'s transactions', async () => {
+  it("returns 403 when a non-admin requests another wallet's transactions", async () => {
     const token = await login(OWN_WALLET);
 
     const res = await request(app.getHttpServer())

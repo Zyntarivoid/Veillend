@@ -65,6 +65,7 @@ export default function ProtocolStatusBanners({
               <TouchableOpacity
                 accessibilityRole="button"
                 accessibilityLabel={banner.actionLabel}
+                accessibilityHint={isWalletBanner ? 'Reconnect your wallet' : 'Retry protocol status sync'}
                 disabled={isRefreshing && !isWalletBanner}
                 onPress={onPress}
                 style={styles.action}

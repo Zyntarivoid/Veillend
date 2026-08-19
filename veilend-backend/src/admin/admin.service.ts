@@ -33,10 +33,12 @@ export class AdminService {
   ) {}
 
   /**
-   * Add a new admin and log the action
+   * Add a new admin and log the action.
+   * Runs under Serializable isolation to prevent concurrent additions of the
+   * same wallet address racing past each other.
    */
   async addAdmin(dto: AddAdminDto, actorWallet: string) {
-    return await this.prisma.$transaction(async (tx) => {
+    return await this.prisma.withSerializable(async (tx) => {
       const admin = await tx.admin.create({
         data: {
           walletAddress: dto.walletAddress,
@@ -57,10 +59,12 @@ export class AdminService {
   }
 
   /**
-   * Remove an admin and revoke all their sessions in a transaction
+   * Remove an admin and revoke all their sessions in a transaction.
+   * Runs under Serializable isolation so session deletion and admin removal
+   * are fully atomic and consistent.
    */
   async removeAdmin(walletAddress: string, actorWallet: string) {
-    return await this.prisma.$transaction(async (tx) => {
+    return await this.prisma.withSerializable(async (tx) => {
       // Find the user associated with this wallet address
       const user = await tx.user.findUnique({
         where: { walletAddress },
@@ -224,22 +228,25 @@ export class AdminService {
   }
 
   /**
-   * Get paginated audit log
+   * Get paginated audit log.
+   * Uses RepeatableRead so the count and the page rows see the same snapshot.
    */
   async getAuditLog(pageOptionsDto: PageOptionsDto) {
-    const [logs, itemCount] = await Promise.all([
-      this.prisma.adminAuditLog.findMany({
-        take: pageOptionsDto.take,
-        skip: pageOptionsDto.skip,
-        orderBy: {
-          createdAt: pageOptionsDto.order.toLowerCase() as 'asc' | 'desc',
-        },
-      }),
-      this.prisma.adminAuditLog.count(),
-    ]);
+    return this.prisma.withRepeatableRead(async (db) => {
+      const [logs, itemCount] = await Promise.all([
+        db.adminAuditLog.findMany({
+          take: pageOptionsDto.take,
+          skip: pageOptionsDto.skip,
+          orderBy: {
+            createdAt: pageOptionsDto.order.toLowerCase() as 'asc' | 'desc',
+          },
+        }),
+        db.adminAuditLog.count(),
+      ]);
 
-    const pageMetaDto = new PageMetaDto({ pageOptionsDto, itemCount });
+      const pageMetaDto = new PageMetaDto({ pageOptionsDto, itemCount });
 
-    return new PageDto(logs, pageMetaDto);
+      return new PageDto(logs, pageMetaDto);
+    });
   }
 }

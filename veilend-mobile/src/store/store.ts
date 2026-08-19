@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { Clipboard } from 'react-native';
 import api, { fetchWithRetry } from '../utils/api';
 import { getSecureItem, setSecureItem, deleteSecureItem } from '../utils/secureStorage';
 
@@ -15,15 +16,19 @@ const PERSIST_KEYS = {
   currency: 'currency',
   notificationsEnabled: 'notificationsEnabled',
   backupConfirmed: 'wallet_backup_confirmed',
+  sessionId: 'sessionId',
 
 } as const;
 
 type AuthState = {
   address: Nullable<string>;
   authToken: Nullable<string>;
+  /** Server-issued session ID returned by POST /auth/verify. Used to call
+   *  POST /auth/logout so the server-side session is revoked on logout. */
+  sessionId: Nullable<string>;
   setAddress: (address: string | null) => void;
   setAuthToken: (token: string | null) => void;
-  logout: () => void;
+  logout: () => Promise<void>;
   requestNonce: (walletAddress: string) => Promise<string>;
   verify: (payload: { walletAddress: string; nonce: string; signature: string }) => Promise<string>;
   authLoading: boolean;
@@ -249,6 +254,7 @@ export const useStore = create<StoreState>(
     // Auth
     address: null,
     authToken: null,
+    sessionId: null,
     authLoading: false,
     sessionRestored: false,
     setAddress: (address: string | null) => {
@@ -269,11 +275,24 @@ export const useStore = create<StoreState>(
         // ignore persistence errors
       }
     },
-    logout: () => {
+    logout: async () => {
+      // Attempt to revoke the server-side session before clearing local state.
+      // Fire-and-forget: a network failure must NOT block the local logout so
+      // the user is never stuck with a locally-live session they cannot clear.
+      const { authToken } = get();
+      if (authToken) {
+        try {
+          await api.post('/auth/logout');
+        } catch (_e) {
+          // Backend revocation is best-effort. The JWT strategy also checks DB
+          // session existence, so an un-revoked token simply expires naturally.
+        }
+      }
       // Clear in-memory state
       set({
         address: null,
         authToken: null,
+        sessionId: null,
         isPrivacyMode: false,
         profileName: null,
         profileImage: null,
@@ -288,6 +307,7 @@ export const useStore = create<StoreState>(
       try {
         deleteSecureItem(PERSIST_KEYS.authToken);
         deleteSecureItem(PERSIST_KEYS.address);
+        deleteSecureItem(PERSIST_KEYS.sessionId);
         deleteSecureItem(PERSIST_KEYS.isPrivacyMode);
         deleteSecureItem(PERSIST_KEYS.profileName);
         deleteSecureItem(PERSIST_KEYS.profileImage);
@@ -298,6 +318,9 @@ export const useStore = create<StoreState>(
       } catch (e) {
         // ignore persistence errors
       }
+      try {
+        Clipboard.setString('');
+      } catch (e) {}
     },
 
     // UI
@@ -395,14 +418,28 @@ export const useStore = create<StoreState>(
       try {
         const res = await api.post('/auth/verify', { walletAddress, nonce, signature });
         const token = res.data?.accessToken || null;
-        set({ authLoading: false });
-        set({ authToken: token, address: walletAddress });
+        const sid = res.data?.sessionId || null;
+        set({ authLoading: false, authToken: token, address: walletAddress, sessionId: sid });
         try {
           if (token) setSecureItem(PERSIST_KEYS.authToken, token);
+          if (sid) setSecureItem(PERSIST_KEYS.sessionId, sid);
         } catch (e) {}
         return token;
-      } catch (err) {
+      } catch (err: any) {
         set({ authLoading: false });
+        // Surface 401/403 as a human-readable error so ConnectWalletScreen
+        // can display an inline banner instead of crashing or swallowing it.
+        const status = err?.response?.status;
+        if (status === 401) {
+          throw new Error('Signature verification failed. Please try again.');
+        }
+        if (status === 403) {
+          throw new Error('Access denied. Wallet not authorized.');
+        }
+        // Nonce already used / expired — friendly message for replay case.
+        if (status === 410) {
+          throw new Error('Challenge expired. Please request a new one.');
+        }
         throw err;
       }
     },
@@ -608,7 +645,7 @@ const optimisticDelta = (kind: LendingKind, amount: number): number => {
 // ──────────────────────────────────────────────
 (async () => {
   try {
-    const [token, address, privacyMode, profileName, profileImage, currency, notificationsEnabled] =
+    const [token, address, privacyMode, profileName, profileImage, currency, notificationsEnabled, sessionId] =
       await Promise.all([
         getSecureItem(PERSIST_KEYS.authToken),
         getSecureItem(PERSIST_KEYS.address),
@@ -617,11 +654,13 @@ const optimisticDelta = (kind: LendingKind, amount: number): number => {
         getSecureItem(PERSIST_KEYS.profileImage),
         getSecureItem(PERSIST_KEYS.currency),
         getSecureItem(PERSIST_KEYS.notificationsEnabled),
+        getSecureItem(PERSIST_KEYS.sessionId),
       ]);
 
     const patch: Partial<AuthState & UiState> = { sessionRestored: true };
     if (token) patch.authToken = token;
     if (address) patch.address = address;
+    if (sessionId) (patch as any).sessionId = sessionId;
     if (privacyMode === 'true') patch.isPrivacyMode = true;
     if (profileName) patch.profileName = profileName;
     if (profileImage) patch.profileImage = profileImage;

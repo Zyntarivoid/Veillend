@@ -58,9 +58,8 @@ export class AdminTransactionBuilderService {
       );
     }
 
-    const rpcClient = this.rpcService.getClient();
     // Source account + current sequence number (the replay-safe nonce).
-    const account: Account = await rpcClient.getAccount(adminAddress);
+    const account: Account = await this.rpcService.getAccount(adminAddress);
 
     const contract = new Contract(contractId);
     const adminScVal = new Address(adminAddress).toScVal();

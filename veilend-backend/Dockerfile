@@ -3,27 +3,29 @@
 # ─────────────────────────────────────────────────────────────
 
 # ── Stage 1: Dependencies (all, for build) ───────────────────
-FROM node:20-alpine AS deps
+FROM node:22-alpine AS deps
 
 WORKDIR /app
 
 # OpenSSL required by Prisma's native query engine on Alpine
 RUN apk add --no-cache openssl
 
-COPY package.json package-lock.json ./
+# .npmrc carries engine-strict=true, so the image enforces the same Node floor
+# as local installs and CI do.
+COPY package.json package-lock.json .npmrc ./
 COPY prisma ./prisma/
 
 RUN npm ci
 
 # ── Stage 2: Build ───────────────────────────────────────────
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
 
 WORKDIR /app
 
 RUN apk add --no-cache openssl
 
 COPY --from=deps /app/node_modules ./node_modules
-COPY package.json package-lock.json tsconfig.json tsconfig.build.json nest-cli.json ./
+COPY package.json package-lock.json .npmrc tsconfig.json tsconfig.build.json nest-cli.json ./
 COPY prisma ./prisma/
 COPY src ./src/
 COPY scripts ./scripts/
@@ -31,7 +33,7 @@ COPY scripts ./scripts/
 RUN npx nest build
 
 # ── Stage 3: Production ─────────────────────────────────────
-FROM node:20-alpine AS production
+FROM node:22-alpine AS production
 
 WORKDIR /app
 
@@ -41,7 +43,7 @@ RUN apk add --no-cache openssl && \
 ENV NODE_ENV=production \
     PORT=3000
 
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json .npmrc ./
 COPY prisma ./prisma/
 
 # Install production-only dependencies and generate Prisma Client

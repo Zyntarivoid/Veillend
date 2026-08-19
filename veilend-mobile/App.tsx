@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import RootNavigator from './src/navigation';
 import { StatusBar } from 'expo-status-bar';
-import { View, StyleSheet, ActivityIndicator } from 'react-native';
+import { AccessibilityInfo, View, StyleSheet, ActivityIndicator } from 'react-native';
 import Toast from './src/utils/toast';
 import { useStore } from './src/store/store';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -18,6 +18,12 @@ export default function App() {
   const shieldedLoading = useStore((s) => s.shieldedLoading);
   const anyLoading = authLoading || lendingLoading || shieldedLoading;
 
+  useEffect(() => {
+    if (anyLoading) {
+      AccessibilityInfo.announceForAccessibility('Loading, please wait');
+    }
+  }, [anyLoading]);
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ErrorBoundary component="App">
@@ -27,7 +33,13 @@ export default function App() {
             <StatusBar style="light" />
 
             {anyLoading && (
-              <View style={styles.loadingOverlay} pointerEvents="none">
+              <View
+                style={styles.loadingOverlay}
+                pointerEvents="none"
+                accessibilityViewIsModal={true}
+                accessibilityLabel="Loading, please wait"
+                accessibilityRole="progressbar"
+              >
                 <ActivityIndicator size="large" color="#fff" />
               </View>
             )}

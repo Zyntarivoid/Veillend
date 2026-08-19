@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import { TransactionType, TransactionStatus } from '@prisma/client';
@@ -11,6 +12,12 @@ describe('TransactionsService', () => {
   let service: TransactionsService;
 
   const mockPrismaService = {
+    // Passthrough: runs the callback with the mock itself so unit tests can
+    // set up return values on mockPrismaService.user / .transactionHistory directly.
+    withRepeatableRead: jest.fn(
+      async (fn: (db: typeof mockPrismaService) => Promise<unknown>) =>
+        fn(mockPrismaService),
+    ),
     user: {
       findUnique: jest.fn(),
     },

@@ -4,84 +4,93 @@ import { Horizon } from '@stellar/stellar-sdk';
 import { Observable, from, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { ServiceResponse } from './types';
+import { CircuitBreakerManager } from './retry-with-fallback';
 
 @Injectable()
 export class HorizonService implements OnModuleInit {
   private readonly logger = new Logger(HorizonService.name);
-  private client!: Horizon.Server;
-  private healthy = false;
-  private lastErrorMsg: string | null = null;
+  private circuitBreaker!: CircuitBreakerManager<Horizon.Server>;
 
   constructor(private readonly configService: AppConfigService) {}
 
   onModuleInit() {
-    const horizonUrl = this.configService.stellar.horizonUrl;
-    this.logger.log(`Initializing Horizon Client with URL: ${horizonUrl}`);
+    const horizonUrls = this.configService.stellar.horizonUrls;
+    this.logger.log(
+      `Initializing Horizon Clients with URLs: ${horizonUrls.join(', ')}`,
+    );
 
-    try {
-      this.client = new Horizon.Server(horizonUrl);
-      // Asynchronously check connection so startup isn't blocked
-      void this.validateConnection();
-    } catch (error) {
-      this.healthy = false;
-      this.lastErrorMsg =
-        error instanceof Error ? error.message : String(error);
-      this.logger.error(
-        `Critical: Failed to initialize Horizon client instance: ${this.lastErrorMsg}`,
-      );
-    }
+    this.circuitBreaker = new CircuitBreakerManager<Horizon.Server>(
+      'Horizon',
+      horizonUrls,
+      (url) => new Horizon.Server(url),
+    );
+
+    // Asynchronously check connection so startup isn't blocked
+    void this.validateConnection();
   }
 
-  /**
-   * Exposes the underlying Horizon Server instance.
-   * Developers can access this if they need direct, advanced client methods.
-   */
-  getClient(): Horizon.Server {
-    if (!this.client) {
-      throw new Error('Horizon client is not initialized yet.');
-    }
-    return this.client;
+  async loadAccount(accountId: string): Promise<Horizon.AccountResponse> {
+    return this.circuitBreaker.execute(
+      'loadAccount',
+      (client) => client.loadAccount(accountId),
+      { mode: 'read' },
+    );
   }
 
-  /**
-   * Perform an asynchronous connection validation check
-   */
+  async getAccountTransactions(
+    accountId: string,
+    limit: number,
+    order: 'asc' | 'desc' = 'desc',
+  ): Promise<
+    Horizon.ServerApi.CollectionPage<Horizon.ServerApi.TransactionRecord>
+  > {
+    return this.circuitBreaker.execute(
+      'getAccountTransactions',
+      (client) =>
+        client
+          .transactions()
+          .forAccount(accountId)
+          .limit(limit)
+          .order(order)
+          .call(),
+      { mode: 'read' },
+    );
+  }
+
+  async getRoot(): Promise<any> {
+    return this.circuitBreaker.execute('getRoot', (client) => client.root(), {
+      mode: 'read',
+    });
+  }
+
   async validateConnection(): Promise<boolean> {
-    try {
-      if (!this.client) {
-        return false;
+    let allHealthy = false;
+    for (const { client, provider } of this.circuitBreaker.getProviders()) {
+      try {
+        await client.root();
+        provider.state = 'closed';
+        provider.failureCount = 0;
+        this.logger.log(`Horizon connection to ${provider.url} successful.`);
+        allHealthy = true;
+      } catch (error) {
+        this.logger.warn(
+          `Horizon connection to ${provider.url} failed.`,
+          error,
+        );
+        provider.state = 'open';
       }
-      // Query Horizon root endpoint
-      await this.client.root();
-      this.healthy = true;
-      this.lastErrorMsg = null;
-      this.logger.log(
-        'Horizon client connected successfully to Stellar network.',
-      );
-      return true;
-    } catch (error) {
-      this.healthy = false;
-      this.lastErrorMsg =
-        error instanceof Error ? error.message : String(error);
-      this.logger.warn(
-        `Horizon client connection check failed: ${this.lastErrorMsg}`,
-      );
-      return false;
     }
+    return allHealthy;
   }
 
-  /**
-   * Safe check for current health state
-   */
   isHealthy(): boolean {
-    return this.healthy;
+    return this.circuitBreaker
+      .getProviders()
+      .some((p) => p.provider.state !== 'open');
   }
 
-  /**
-   * Returns details of the last health check / connection error if any
-   */
   getLastError(): string | null {
-    return this.lastErrorMsg;
+    return this.isHealthy() ? null : 'All Horizon providers are unhealthy';
   }
 
   /**
@@ -97,7 +106,7 @@ export class HorizonService implements OnModuleInit {
           return {
             success: false,
             data: { connected: false },
-            error: { message: this.lastErrorMsg || 'Connection failed' },
+            error: { message: this.getLastError() || 'Connection failed' },
           };
         }
       }),

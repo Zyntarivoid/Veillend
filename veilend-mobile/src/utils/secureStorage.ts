@@ -35,7 +35,8 @@ export type SecureStorageKey =
   | 'profileImage'
   | 'currency'
   | 'notificationsEnabled'
-  | 'wallet_backup_confirmed';
+  | 'wallet_backup_confirmed'
+  | 'sessionId';
 
 type SecureStoreOptions = {
   keychainAccessible?: string;
@@ -67,6 +68,10 @@ const KEY_OPTIONS: Record<SecureStorageKey, (store: SecureStoreLike) => SecureSt
   currency: () => ({}),
   notificationsEnabled: () => ({}),
   wallet_backup_confirmed: () => ({}),
+  // Session ID is re-issuable on next login; device-only, no biometric prompt.
+  sessionId: (store) => ({
+    keychainAccessible: store.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
+  }),
 };
 
 function getOptions(key: SecureStorageKey, store: SecureStoreLike): SecureStoreOptions {

@@ -17,6 +17,8 @@ model User {
   positions     Position[]
   transactions  TransactionHistory[]
   sessions      Session[]
+  refreshTokens RefreshToken[]
+  jtiRegistrations JtiRegistry[]
   syncCheckpoints SyncCheckpoint[]
 }
 
@@ -28,17 +30,72 @@ model WalletNonce {
   used          Boolean  @default(false)
 }
 
+// A logical "device login" that persists across access-token refreshes.
+// The bearer token presented on `Authorization` rotates every 15 minutes
+// (see RefreshToken/JtiRegistry below); this row is what GET /auth/sessions
+// lists and what DELETE /auth/sessions[/:id] revokes.
 model Session {
   id            String   @id @default(uuid())
   userId        String
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  token         String   @unique
-  expiresAt     DateTime
+  token         String   @unique // most recently issued access token (informational; new-format
+                                  // tokens are authorized via JtiRegistry, not this field)
+  expiresAt     DateTime          // expiry of `token` above
   createdAt     DateTime @default(now())
   lastSeenAt    DateTime @default(now())
+  userAgent     String?
+  ip            String?
+
+  refreshTokens RefreshToken[]
+  jtis          JtiRegistry[]
 
   @@index([userId])
   @@index([token])
+}
+
+// One-time-use opaque refresh token (never a JWT). Each successful refresh
+// revokes the token it was exchanged with and mints a new pair, so a given
+// row's lifecycle is: created -> (optionally) revoked when rotated or
+// explicitly logged out. A revoked row is kept (not deleted) so a replay of
+// it can be told apart from a token that never existed, which is what lets
+// `AuthService.refreshTokens` detect refresh-token-family compromise.
+model RefreshToken {
+  id            String    @id @default(uuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionId     String
+  session       Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  tokenHash     String    @unique // SHA-256 of the opaque token; the raw token is never stored
+  jti           String              // jti of the access token minted alongside this refresh token
+  expiresAt     DateTime
+  createdAt     DateTime  @default(now())
+  lastRotatedAt DateTime  @default(now())
+  revokedAt     DateTime?
+  userAgent     String?
+  ip            String?
+
+  @@index([userId])
+  @@index([sessionId])
+  @@index([expiresAt])
+}
+
+// Revocation registry for access-token `jti` claims. Every new-format access
+// token gets a row here at issue time (same transaction as the Session /
+// RefreshToken it's paired with); JwtStrategy checks it on every request so
+// a single access token — not just its parent session — can be revoked
+// immediately instead of waiting out its 15-minute TTL.
+model JtiRegistry {
+  jti         String    @id
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionId   String?
+  session     Session?  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  expiresAt   DateTime
+  revokedAt   DateTime?
+
+  @@index([userId])
+  @@index([sessionId])
+  @@index([expiresAt])
 }
 
 // ─── Stellar Assets ──────────────────────────────────────────────────────────
@@ -241,6 +298,32 @@ model AdminAction {
   @@index([action])
   @@index([status])
   @@index([txHash])
+}
+
+// ─── Auth Audit Log ──────────────────────────────────────────────────────────
+
+enum AuthEventType {
+  NONCE_GENERATED
+  LOGIN_SUCCESS
+  LOGIN_FAILED
+  LOGOUT
+  TOKEN_REFRESH
+  TOKEN_REFRESH_REUSE_DETECTED
+  SESSION_REVOKED
+  SESSION_REVOKE_ALL
+}
+
+model AuthAuditLog {
+  id            String        @id @default(uuid())
+  walletAddress String
+  event         AuthEventType
+  reason        String?
+  ip            String?
+  userAgent     String?
+  correlationId String?
+  createdAt     DateTime      @default(now())
+
+  @@index([walletAddress, createdAt(sort: Desc)])
 }
 
 // ─── Indexer Checkpoint ──────────────────────────────────────────────────────

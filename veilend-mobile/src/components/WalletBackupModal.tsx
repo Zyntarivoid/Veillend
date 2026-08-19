@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,62 +9,198 @@ import {
   Dimensions,
   TextInput,
   Platform,
-  Clipboard,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Toast from '../utils/toast';
+import { useWalletSecurity, SECURE_TIMER_DURATION } from '../hooks/useWalletSecurity';
 
 const { width } = Dimensions.get('window');
 
+// Single source of truth lives in the hook; use it here so both stay in sync.
+const TIMER_DURATION_MS = SECURE_TIMER_DURATION;
+const WARNING_BEFORE_MS = 5_000; // show warning this many ms before auto-hide
+
 type WalletBackupModalProps = {
   visible: boolean;
-  secretKey: string | null;
+  onRequestSecret: () => Promise<string | null>;
   onClose: () => void;
   onBackupConfirmed: () => void;
+  /**
+   * When `true` the modal is shown as part of the initial onboarding flow:
+   *  - The X close button and Android hardware-back do nothing on `reveal`
+   *    and `confirm` steps.
+   *  - The modal becomes freely closable on the `success` step.
+   * When `false` (default) the modal is freely closable at any time, matching
+   * the re-entry behaviour from the Settings screen.
+   */
+  isOnboardingFlow?: boolean;
 };
 
 type BackupStep = 'reveal' | 'confirm' | 'success';
 
 export function WalletBackupModal({
   visible,
-  secretKey,
+  onRequestSecret,
   onClose,
   onBackupConfirmed,
+  isOnboardingFlow = false,
 }: WalletBackupModalProps) {
   const [step, setStep] = useState<BackupStep>('reveal');
   const [confirmInput, setConfirmInput] = useState('');
   const [isSecretRevealed, setIsSecretRevealed] = useState(false);
   const [maskedKey, setMaskedKey] = useState('');
+  const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
+
+  // Countdown display value (seconds remaining, null when timer is not active)
+  const [countdownSecs, setCountdownSecs] = useState<number | null>(null);
+
+  const revealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const warningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tickIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const revealStartRef = useRef<number | null>(null);
+
+  const { copyToClipboard, confirmBackup } = useWalletSecurity();
+
+  // ─── helpers ──────────────────────────────────────────────────────────────
+
+  const clearAllTimers = useCallback(() => {
+    if (revealTimerRef.current) {
+      clearTimeout(revealTimerRef.current);
+      revealTimerRef.current = null;
+    }
+    if (warningTimerRef.current) {
+      clearTimeout(warningTimerRef.current);
+      warningTimerRef.current = null;
+    }
+    if (tickIntervalRef.current) {
+      clearInterval(tickIntervalRef.current);
+      tickIntervalRef.current = null;
+    }
+    revealStartRef.current = null;
+  }, []);
+
+  const maskSecret = useCallback(() => {
+    setIsSecretRevealed(false);
+    setRevealedSecret(null);
+    setCountdownSecs(null);
+    clearAllTimers();
+  }, [clearAllTimers]);
+
+  // ─── load masked key preview ───────────────────────────────────────────────
 
   useEffect(() => {
-    if (secretKey && secretKey.length > 0) {
-      // Show only first 4 and last 4 characters with dots in between
-      const firstFour = secretKey.slice(0, 4);
-      const lastFour = secretKey.slice(-4);
-      const dotCount = Math.min(secretKey.length - 8, 20);
-      setMaskedKey(`${firstFour}${'•'.repeat(dotCount > 0 ? dotCount : 0)}${lastFour}`);
+    if (!visible) return;
+    let mounted = true;
+    (async () => {
+      try {
+        const secret = await onRequestSecret();
+        if (!mounted || !secret) return;
+        const firstFour = secret.slice(0, 4);
+        const lastFour = secret.slice(-4);
+        const dotCount = Math.min(secret.length - 8, 20);
+        setMaskedKey(
+          `${firstFour}${'•'.repeat(dotCount > 0 ? dotCount : 0)}${lastFour}`,
+        );
+      } catch {
+        // ignore – user will tap reveal to try again
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [onRequestSecret, visible]);
+
+  // ─── clear timers on unmount or when modal closes ──────────────────────────
+
+  useEffect(() => {
+    if (!visible) {
+      maskSecret();
+      setMaskedKey('');
     }
-  }, [secretKey]);
+    return clearAllTimers;
+  }, [visible, maskSecret, clearAllTimers]);
 
-  const handleReveal = () => {
-    setIsSecretRevealed(true);
-  };
+  // ─── reveal with 30 s auto-hide + 5 s warning ─────────────────────────────
 
-  const handleCopyToClipboard = async () => {
-    if (secretKey) {
-      await Clipboard.setString(secretKey);
+  const startRevealTimer = useCallback(
+    (secret: string) => {
+      clearAllTimers();
+
+      const startedAt = Date.now();
+      revealStartRef.current = startedAt;
+
+      // Tick every second to keep countdownSecs in sync
+      tickIntervalRef.current = setInterval(() => {
+        if (!revealStartRef.current) return;
+        const elapsed = Date.now() - revealStartRef.current;
+        const remaining = Math.max(
+          0,
+          Math.ceil((TIMER_DURATION_MS - elapsed) / 1000),
+        );
+        setCountdownSecs(remaining);
+      }, 1000);
+
+      // Warning toast at T-5 s
+      warningTimerRef.current = setTimeout(() => {
+        Toast.show({
+          type: 'info',
+          text1: 'Secret key hiding soon',
+          text2: 'Your secret key will be hidden in 5 seconds',
+        });
+      }, TIMER_DURATION_MS - WARNING_BEFORE_MS);
+
+      // Auto-hide at T=30 s
+      revealTimerRef.current = setTimeout(() => {
+        maskSecret();
+        Toast.show({
+          type: 'info',
+          text1: 'Secret key hidden',
+          text2: 'Tap the eye icon to reveal again',
+        });
+      }, TIMER_DURATION_MS);
+
+      setRevealedSecret(secret);
+      setIsSecretRevealed(true);
+      setCountdownSecs(TIMER_DURATION_MS / 1000);
+    },
+    [clearAllTimers, maskSecret],
+  );
+
+  const handleReveal = useCallback(async () => {
+    try {
+      const secret = await onRequestSecret();
+      if (!secret) return;
+      startRevealTimer(secret);
+    } catch {
+      // ignore
+    }
+  }, [onRequestSecret, startRevealTimer]);
+
+  // ─── secure clipboard copy ─────────────────────────────────────────────────
+
+  const handleCopyToClipboard = useCallback(async () => {
+    const secret = revealedSecret ?? (await onRequestSecret());
+    if (!secret) return;
+    const ok = await copyToClipboard(secret);
+    if (ok) {
       Toast.show({
         type: 'success',
-        text1: 'Copied to clipboard',
-        text2: 'Secret key copied securely',
+        text1: 'Copied',
+        text2: 'Clipboard will clear in 30s',
       });
     }
-  };
+  }, [revealedSecret, onRequestSecret, copyToClipboard]);
 
-  const handleConfirm = () => {
-    if (confirmInput.trim() === secretKey) {
-      setStep('success');
+  // ─── confirm step ──────────────────────────────────────────────────────────
+
+  const handleConfirm = useCallback(async () => {
+    const secret = revealedSecret ?? (await onRequestSecret());
+    if (secret && confirmInput.trim() === secret) {
+      // Persist the backup-confirmed flag via the hook so it round-trips
+      // through SecureStore and survives app restart / rehydration.
+      await confirmBackup();
       onBackupConfirmed();
+      setStep('success');
       Toast.show({
         type: 'success',
         text1: 'Backup Confirmed',
@@ -77,14 +213,36 @@ export function WalletBackupModal({
         text2: 'The secret key you entered does not match',
       });
     }
-  };
+  }, [revealedSecret, onRequestSecret, confirmInput, confirmBackup, onBackupConfirmed]);
 
-  const handleClose = () => {
+  // ─── close handling ────────────────────────────────────────────────────────
+
+  const handleClose = useCallback(() => {
     setStep('reveal');
     setIsSecretRevealed(false);
     setConfirmInput('');
+    maskSecret();
     onClose();
-  };
+  }, [maskSecret, onClose]);
+
+  /**
+   * Whether close is currently blocked.
+   * Blocked when isOnboardingFlow=true and the user has not yet completed
+   * the backup (i.e. step is not 'success').
+   */
+  const isClosingBlocked = isOnboardingFlow && step !== 'success';
+
+  const handleRequestClose = useCallback(() => {
+    if (isClosingBlocked) return; // swallow Android back gesture
+    handleClose();
+  }, [isClosingBlocked, handleClose]);
+
+  const handleXPress = useCallback(() => {
+    if (isClosingBlocked) return;
+    handleClose();
+  }, [isClosingBlocked, handleClose]);
+
+  // ─── render helpers ────────────────────────────────────────────────────────
 
   const renderRevealStep = () => (
     <View style={styles.stepContainer}>
@@ -93,18 +251,46 @@ export function WalletBackupModal({
       </View>
       <Text style={styles.stepTitle}>Backup Your Wallet</Text>
       <Text style={styles.stepDescription}>
-        Your secret key is the only way to recover your wallet. Please backup this key securely.
+        Your secret key is the only way to recover your wallet. Please backup
+        this key securely.
       </Text>
 
       <View style={styles.secretKeyContainer}>
-        <Text style={styles.secretKeyLabel}>Your Secret Key</Text>
+        <View style={styles.secretKeyLabelRow}>
+          <Text style={styles.secretKeyLabel}>Your Secret Key</Text>
+          {isSecretRevealed && countdownSecs !== null && (
+            <Text
+              style={[
+                styles.countdownText,
+                countdownSecs <= 5 && styles.countdownTextUrgent,
+              ]}
+              accessibilityLabel={`Secret key hides in ${countdownSecs} seconds`}
+            >
+              {countdownSecs}s
+            </Text>
+          )}
+        </View>
         <View style={styles.secretKeyBox}>
-          <Text style={styles.secretKeyText}>
-            {isSecretRevealed ? secretKey : maskedKey}
+          {/*
+           * selectable={false} prevents accidental long-press text selection
+           * outside the intended copy flow on both platforms.
+           */}
+          <Text
+            style={styles.secretKeyText}
+            selectable={false}
+            accessibilityLabel={
+              isSecretRevealed ? 'Secret key revealed' : 'Secret key hidden'
+            }
+          >
+            {isSecretRevealed ? (revealedSecret ?? '') : maskedKey}
           </Text>
           <TouchableOpacity
             style={styles.eyeButton}
             onPress={handleReveal}
+            accessibilityRole="button"
+            accessibilityLabel={
+              isSecretRevealed ? 'Hide secret key' : 'Reveal secret key'
+            }
           >
             <Ionicons
               name={isSecretRevealed ? 'eye-off-outline' : 'eye-outline'}
@@ -118,7 +304,8 @@ export function WalletBackupModal({
       <View style={styles.warningContainer}>
         <Ionicons name="warning-outline" size={20} color="#FFD700" />
         <Text style={styles.warningText}>
-          Never share your secret key with anyone. Store it in a secure location.
+          Never share your secret key with anyone. Store it in a secure
+          location.
         </Text>
       </View>
 
@@ -127,6 +314,8 @@ export function WalletBackupModal({
           style={[styles.actionButton, styles.copyButton]}
           onPress={handleCopyToClipboard}
           disabled={!isSecretRevealed}
+          accessibilityRole="button"
+          accessibilityLabel="Copy secret key"
         >
           <Ionicons name="copy-outline" size={20} color="#FFFFFF" />
           <Text style={styles.copyButtonText}>Copy</Text>
@@ -134,8 +323,13 @@ export function WalletBackupModal({
 
         <TouchableOpacity
           style={[styles.actionButton, styles.nextButton]}
-          onPress={() => setStep('confirm')}
+          onPress={() => {
+            maskSecret();
+            setStep('confirm');
+          }}
           disabled={!isSecretRevealed}
+          accessibilityRole="button"
+          accessibilityLabel="Continue to confirm wallet backup"
         >
           <Text style={styles.nextButtonText}>I've Saved It →</Text>
         </TouchableOpacity>
@@ -146,7 +340,11 @@ export function WalletBackupModal({
   const renderConfirmStep = () => (
     <View style={styles.stepContainer}>
       <View style={styles.iconContainer}>
-        <Ionicons name="checkmark-circle-outline" size={48} color="#09cc71" />
+        <Ionicons
+          name="checkmark-circle-outline"
+          size={48}
+          color="#09cc71"
+        />
       </View>
       <Text style={styles.stepTitle}>Confirm Backup</Text>
       <Text style={styles.stepDescription}>
@@ -170,7 +368,11 @@ export function WalletBackupModal({
       </View>
 
       <View style={styles.warningContainer}>
-        <Ionicons name="information-circle-outline" size={20} color="#00D1FF" />
+        <Ionicons
+          name="information-circle-outline"
+          size={20}
+          color="#00D1FF"
+        />
         <Text style={styles.infoText}>
           This confirms you have safely stored your secret key.
         </Text>
@@ -183,6 +385,8 @@ export function WalletBackupModal({
             setStep('reveal');
             setIsSecretRevealed(false);
           }}
+          accessibilityRole="button"
+          accessibilityLabel="Go back to reveal wallet backup"
         >
           <Text style={styles.backButtonText}>← Back</Text>
         </TouchableOpacity>
@@ -195,6 +399,8 @@ export function WalletBackupModal({
           ]}
           onPress={handleConfirm}
           disabled={!confirmInput.trim()}
+          accessibilityRole="button"
+          accessibilityLabel="Confirm wallet backup"
         >
           <Text style={styles.confirmButtonText}>Confirm</Text>
         </TouchableOpacity>
@@ -209,7 +415,8 @@ export function WalletBackupModal({
       </View>
       <Text style={styles.successTitle}>Backup Complete! 🎉</Text>
       <Text style={styles.successDescription}>
-        Your wallet has been securely backed up. Remember to keep your secret key in a safe place.
+        Your wallet has been securely backed up. Remember to keep your secret
+        key in a safe place.
       </Text>
 
       <View style={styles.successTips}>
@@ -230,6 +437,8 @@ export function WalletBackupModal({
       <TouchableOpacity
         style={[styles.actionButton, styles.doneButton]}
         onPress={handleClose}
+        accessibilityRole="button"
+        accessibilityLabel="Continue to app"
       >
         <Text style={styles.doneButtonText}>Continue to App</Text>
       </TouchableOpacity>
@@ -241,11 +450,26 @@ export function WalletBackupModal({
       visible={visible}
       transparent={true}
       animationType="slide"
-      onRequestClose={handleClose}
+      onRequestClose={handleRequestClose}
     >
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
-          <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
+          {/*
+           * X button is rendered but non-interactive (opacity 0.3) when
+           * closing is blocked so the user has a visual cue that it exists
+           * without being able to tap out.
+           */}
+          <TouchableOpacity
+            style={[
+              styles.closeButton,
+              isClosingBlocked && styles.closeButtonBlocked,
+            ]}
+            onPress={handleXPress}
+            accessibilityRole="button"
+            accessibilityLabel="Close modal"
+            accessibilityState={{ disabled: isClosingBlocked }}
+            disabled={isClosingBlocked}
+          >
             <Ionicons name="close-outline" size={28} color="#888" />
           </TouchableOpacity>
 
@@ -286,6 +510,9 @@ const styles = StyleSheet.create({
     zIndex: 10,
     padding: 8,
   },
+  closeButtonBlocked: {
+    opacity: 0.3,
+  },
   scrollContent: {
     paddingTop: 16,
     paddingBottom: 8,
@@ -323,11 +550,24 @@ const styles = StyleSheet.create({
     width: '100%',
     marginBottom: 16,
   },
+  secretKeyLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
   secretKeyLabel: {
     color: '#A1A1A1',
     fontSize: 14,
     fontWeight: '600',
-    marginBottom: 8,
+  },
+  countdownText: {
+    color: '#A1A1A1',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  countdownTextUrgent: {
+    color: '#FFD700',
   },
   secretKeyBox: {
     flexDirection: 'row',

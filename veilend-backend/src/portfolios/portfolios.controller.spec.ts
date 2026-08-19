@@ -41,7 +41,9 @@ describe('PortfoliosController', () => {
   });
 
   it('allows a user to fetch their own portfolio', async () => {
-    mockPortfoliosService.getPortfolio.mockResolvedValue({ walletAddress: OWN_WALLET });
+    mockPortfoliosService.getPortfolio.mockResolvedValue({
+      walletAddress: OWN_WALLET,
+    });
 
     const result = await controller.getPortfolio(
       { walletAddress: OWN_WALLET },
@@ -52,7 +54,7 @@ describe('PortfoliosController', () => {
     expect(mockPrismaService.admin.findUnique).not.toHaveBeenCalled();
   });
 
-  it('rejects a non-admin requesting another wallet\'s portfolio with 403', async () => {
+  it("rejects a non-admin requesting another wallet's portfolio with 403", async () => {
     mockPrismaService.admin.findUnique.mockResolvedValue(null);
 
     await expect(
@@ -65,12 +67,14 @@ describe('PortfoliosController', () => {
     expect(mockPortfoliosService.getPortfolio).not.toHaveBeenCalled();
   });
 
-  it('allows an admin to fetch any wallet\'s portfolio', async () => {
+  it("allows an admin to fetch any wallet's portfolio", async () => {
     mockPrismaService.admin.findUnique.mockResolvedValue({
       id: 'admin-1',
       walletAddress: OWN_WALLET,
     });
-    mockPortfoliosService.getPortfolio.mockResolvedValue({ walletAddress: OTHER_WALLET });
+    mockPortfoliosService.getPortfolio.mockResolvedValue({
+      walletAddress: OTHER_WALLET,
+    });
 
     const result = await controller.getPortfolio(
       { walletAddress: OTHER_WALLET },

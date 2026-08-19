@@ -7,8 +7,10 @@ describe('AppLoggerService', () => {
   let service: AppLoggerService;
   let cls: { isActive: jest.Mock; getId: jest.Mock };
   let writeSpy: jest.SpyInstance;
+  const originalEnv = process.env.NODE_ENV;
 
   beforeEach(async () => {
+    process.env.NODE_ENV = 'development';
     cls = {
       isActive: jest.fn().mockReturnValue(true),
       getId: jest.fn().mockReturnValue('corr-123'),
@@ -25,6 +27,7 @@ describe('AppLoggerService', () => {
   });
 
   afterEach(() => {
+    process.env.NODE_ENV = originalEnv;
     writeSpy.mockRestore();
     jest.clearAllMocks();
   });
@@ -49,11 +52,40 @@ describe('AppLoggerService', () => {
     expect(typeof record.timestamp).toBe('string');
   });
 
+  it('emits NDJSON formatted records in production environment (NODE_ENV=production)', () => {
+    process.env.NODE_ENV = 'production';
+    service.log('User signed in', 'AuthService');
+
+    const record = lastLine();
+    expect(record).toMatchObject({
+      level: 'log',
+      component: 'AuthService',
+      context: 'AuthService',
+      correlationId: 'corr-123',
+      msg: 'User signed in',
+    });
+    expect(typeof record.time).toBe('string');
+  });
+
   it('redacts object messages before serializing', () => {
     service.log({ password: 'hunter2', ok: true }, 'TestContext');
 
     const record = lastLine();
     expect(record.message).toEqual({ password: '[REDACTED]', ok: true });
+  });
+
+  it('redacts G-addresses and secret keys in string log messages', () => {
+    service.warn(
+      'Verify failed for GCKZ27M7C3VCWLNGMVIUCA5MNNJICYGKRPS75OZHNUCX33RTRJNQK6MH with seed SCZANGBA5YHTNYVVV4C3U252E2B6P6IRKD4D876OQO7D6EUZPIF274IH',
+      'Security',
+    );
+
+    const record = lastLine();
+    expect(record.message).toContain('GCKZ27...K6MH');
+    expect(record.message).toContain('[REDACTED_SECRET_KEY]');
+    expect(record.message).not.toContain(
+      'SCZANGBA5YHTNYVVV4C3U252E2B6P6IRKD4D876OQO7D6EUZPIF274IH',
+    );
   });
 
   it('includes trace on error logs', () => {

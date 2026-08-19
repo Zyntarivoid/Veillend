@@ -49,6 +49,9 @@ export default function DepositScreen() {
       icon: getAssetIcon(asset.symbol),
     }));
 
+  const getAssetAccessibilityLabel = (asset: SupportedAsset & { balance: number }) =>
+    `${asset.name} (${asset.symbol}), APY unavailable, wallet balance ${asset.balance} ${asset.symbol}`;
+
   const openDepositModal = (asset: any) => {
     setSelectedAsset({ symbol: asset.symbol, name: asset.name, balance: asset.balance });
     setAmount(asset.balance > 0 ? String(asset.balance) : '');
@@ -99,6 +102,8 @@ export default function DepositScreen() {
             key={asset.code ?? asset.symbol}
             style={styles.assetCard}
             onPress={() => openDepositModal(asset)}
+            accessibilityRole="button"
+            accessibilityLabel={getAssetAccessibilityLabel(asset)}
           >
             <View style={styles.assetLeft}>
               <View style={styles.iconContainer}>
@@ -157,7 +162,7 @@ export default function DepositScreen() {
           animationType="slide"
           onRequestClose={() => setModalVisible(false)}
         >
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
+          <KeyboardAvoidingView behavior={Platform.select({ ios: 'padding', android: 'height' })} style={styles.modalOverlay}>
             <View style={styles.modalContent}>
               <OfflineBanner />
               <Text style={styles.modalTitle}>Deposit {selectedAsset?.symbol}</Text>
@@ -168,12 +173,22 @@ export default function DepositScreen() {
                 style={styles.amountInput}
                 placeholder="Amount"
                 placeholderTextColor="#888"
+                returnKeyType="done"
+                onSubmitEditing={confirmDeposit}
               />
+              <TouchableOpacity
+                style={styles.maxButton}
+                onPress={() => setAmount(String(selectedAsset?.balance ?? 0))}
+                accessibilityRole="button"
+                accessibilityLabel={`Use maximum ${selectedAsset?.symbol ?? 'asset'} amount`}
+              >
+                <Text style={styles.maxButtonText}>MAX</Text>
+              </TouchableOpacity>
               <View style={styles.modalButtons}>
-                <TouchableOpacity onPress={() => setModalVisible(false)} style={[styles.modalBtn, { backgroundColor: '#333' }]}>
+                <TouchableOpacity onPress={() => setModalVisible(false)} style={[styles.modalBtn, { backgroundColor: '#333' }]} accessibilityRole="button" accessibilityLabel="Cancel deposit">
                     <Text style={styles.buttonText}>Cancel</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity onPress={confirmDeposit} style={[styles.modalBtn, { backgroundColor: '#A855F7' }]} disabled={lendingLoading}>
+                  <TouchableOpacity onPress={confirmDeposit} style={[styles.modalBtn, { backgroundColor: '#A855F7' }]} disabled={lendingLoading} accessibilityRole="button" accessibilityLabel="Confirm deposit">
                     {lendingLoading ? <ActivityIndicator color="#fff"/> : <Text style={styles.buttonText}>Confirm</Text>}
                   </TouchableOpacity>
               </View>
@@ -348,6 +363,19 @@ const styles = StyleSheet.create({
   modalButtons: {
     flexDirection: 'row',
     gap: 12,
+  },
+  maxButton: {
+    alignSelf: 'flex-end',
+    marginBottom: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(168, 85, 247, 0.14)',
+  },
+  maxButtonText: {
+    color: '#A855F7',
+    fontSize: 12,
+    fontWeight: '700',
   },
   modalBtn: {
     flex: 1,

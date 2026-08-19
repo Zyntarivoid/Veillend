@@ -1,29 +1,17 @@
-export type CampaignEventName =
-  | 'campaign_page_visit'
-  | 'campaign_cta_click'
-  | 'campaign_contributor_interest';
+import { parseApiResponse } from '@/lib/validation/api-schemas';
+import {
+  CampaignEventResponseSchema,
+  CampaignEventSchema,
+  type CampaignEvent,
+  type CampaignEventName,
+  type CampaignEventPayload,
+} from '@/lib/validation/campaign-schemas';
 
-export type CampaignEventPayload = {
-  path?: string;
-  referrer?: string;
-  source?: string;
-  ctaId?: string;
-  ctaLabel?: string;
-  targetUrl?: string;
-  interestArea?: string;
-};
-
-export type CampaignEvent = {
-  id: string;
-  sessionId: string;
-  ts: number;
-  type: CampaignEventName;
-  payload: CampaignEventPayload;
-  // Backwards compatibility fields
-  event?: CampaignEventName;
-  campaign?: 'grantfox-oss-stellar';
-  timestamp?: string;
-};
+export type {
+  CampaignEvent,
+  CampaignEventName,
+  CampaignEventPayload,
+} from '@/lib/validation/campaign-schemas';
 
 const ANALYTICS_ENDPOINT = '/api/campaign-events';
 const QUEUE_STORAGE_KEY = 'veilend_campaign_pending_events';
@@ -62,7 +50,16 @@ export function getPendingQueue(): CampaignEvent[] {
   if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem(QUEUE_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    const validEvents = parsed.flatMap((value) => {
+      const result = CampaignEventSchema.safeParse(value);
+      return result.success ? [result.data] : [];
+    });
+    localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(validEvents));
+    return validEvents;
   } catch {
     return [];
   }
@@ -100,12 +97,9 @@ export function clearPendingQueue(): void {
   }
 }
 
-let isFlushing = false;
+let flushPromise: Promise<void> | null = null;
 
-export async function flushQueue(): Promise<void> {
-  if (typeof window === 'undefined' || isFlushing) return;
-
-  isFlushing = true;
+async function performFlush(): Promise<void> {
   try {
     while (true) {
       const queue = getPendingQueue();
@@ -122,8 +116,10 @@ export async function flushQueue(): Promise<void> {
           keepalive: true,
         });
 
-        // 2xx success or 409 Conflict (duplicate already on server) -> remove from queue
-        if (response.ok || response.status === 409) {
+        if (response.ok) {
+          parseApiResponse(CampaignEventResponseSchema, await response.json());
+          removeFromQueue(event.id);
+        } else if (response.status === 409) {
           removeFromQueue(event.id);
         } else {
           // Rate limited (429) or non-2xx failure, stop flushing for this tick
@@ -135,8 +131,16 @@ export async function flushQueue(): Promise<void> {
       }
     }
   } finally {
-    isFlushing = false;
+    flushPromise = null;
   }
+}
+
+export function flushQueue(): Promise<void> {
+  if (typeof window === 'undefined') return Promise.resolve();
+  if (!flushPromise) {
+    flushPromise = performFlush();
+  }
+  return flushPromise;
 }
 
 function isDebugEnabled(): boolean {
@@ -226,4 +230,3 @@ if (typeof window !== 'undefined') {
     }
   });
 }
-

@@ -72,7 +72,7 @@ For list-based endpoints, the following conventions apply:
 
 ### Prerequisites
 
-- **Node.js 20+** and npm
+- **Node.js 22+** and npm — the exact version used by CI is pinned in the repo-root `.nvmrc` (`nvm use` from the repo root). `engines.node` is `>=22` and `.npmrc` sets `engine-strict=true`, so `npm ci` refuses to install on anything older.
 - **PostgreSQL 16+** (or Docker for the Compose workflow)
 - _(Optional)_ **Docker & Docker Compose** for the containerized workflow
 

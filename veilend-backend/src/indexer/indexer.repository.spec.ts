@@ -27,6 +27,7 @@ describe('IndexerRepository', () => {
       deleteMany: jest.Mock;
     };
     $transaction: jest.Mock;
+    withSerializable: jest.Mock;
     $queryRaw: jest.Mock;
     $executeRaw: jest.Mock;
   };
@@ -52,6 +53,10 @@ describe('IndexerRepository', () => {
         upsert: jest.fn(),
         deleteMany: jest.fn(),
       },
+      // withSerializable passthrough: delegates directly to the callback
+      // with `prisma` itself so unit tests don't need a real DB.
+      withSerializable: jest.fn(async (fn: (tx: typeof prisma) => Promise<unknown>) => fn(prisma)),
+      // Keep $transaction for the resetDatabase batch path (array form).
       $transaction: jest.fn(async (arg: unknown) => {
         if (Array.isArray(arg)) return Promise.all(arg);
         return (arg as (tx: typeof prisma) => Promise<unknown>)(prisma);

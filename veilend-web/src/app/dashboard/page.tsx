@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import { Container, Flex, Grid, Section } from '@/components/Layout';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getAbsoluteUrl, SITE_DESCRIPTION, SITE_NAME } from '@/lib/site';
+import { JwtPayloadSchema } from '@/lib/validation/api-schemas';
 import {
   AssetCardSkeleton,
   BorrowedAssetsCard,
@@ -23,7 +24,8 @@ export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
 
 const title = 'Portfolio Dashboard';
-const description = 'Monitor private Stellar lending positions, deposits, borrowing, and recent VeilLend activity.';
+const description =
+  'Monitor private Stellar lending positions, deposits, borrowing, and recent VeilLend activity.';
 
 export const metadata: Metadata = {
   title,
@@ -65,12 +67,12 @@ async function getWalletAddress(): Promise<string | null> {
   try {
     const parts = session.split('.');
     if (parts.length !== 3) return null;
-    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString()) as {
-      walletAddress?: string;
-      sub?: string;
-    };
+    const decoded: unknown = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
+    const parsed = JwtPayloadSchema.safeParse(decoded);
+    if (!parsed.success) return null;
+    const payload = parsed.data;
     const address = payload.walletAddress || payload.sub;
-    return address?.startsWith('G') ? address : null;
+    return address ?? null;
   } catch {
     return null;
   }
@@ -88,7 +90,9 @@ export default async function DashboardPage() {
     <main className="min-h-screen bg-background">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, '\\u003c') }}
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(structuredData).replace(/</g, '\\u003c'),
+        }}
       />
       <Container className="pb-16">
         <Section className="pt-20 pb-10">

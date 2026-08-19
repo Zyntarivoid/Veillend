@@ -1,5 +1,19 @@
-import { DashboardData, HfBreakdownItem, ActivityActionType, AssetBalance } from '../types/dashboard';
 import { backendFetch } from '@/lib/server/backendFetch';
+import {
+  AssetRegistryResponseSchema,
+  IndexerPositionsResponseSchema,
+  IndexerTransactionsResponseSchema,
+  OraclePricesResponseSchema,
+  type IndexerTransaction,
+} from '@/lib/validation/api-schemas';
+import { requireSafeNumber } from '@/lib/validation/safe-numbers';
+import type {
+  ActivityActionType,
+  AssetBalance,
+  DashboardData,
+  HfBreakdownItem,
+} from '@/lib/types/dashboard';
+
 import {
   buildAssetRegistry,
   registryDecimals,
@@ -8,40 +22,7 @@ import {
   registryMcr,
   warnRegistryUnavailable,
 } from './assetRegistry';
-
-// ---------------------------------------------------------------------------
-// API response shapes
-// ---------------------------------------------------------------------------
-
-interface IndexerPosition {
-  assetAddress: string;
-  depositedAmount: string | number;
-  borrowedAmount: string | number;
-}
-
-interface IndexerTransaction {
-  id: string;
-  type: string;
-  amount: string | number;
-  assetAddress: string;
-  timestamp: string;
-  txHash: string;
-}
-
-interface OraclePrice {
-  [assetAddress: string]: number;
-}
-
-interface RawAssetDto {
-  symbol?: string;
-  code?: string;
-  name?: string;
-  decimals?: number;
-  contractId?: string | null;
-  isNative?: boolean;
-  logoUrl?: string | null;
-  minCollateralRatio?: number | null;
-}
+import { fetchValidated } from './validated-fetch';
 
 // ---------------------------------------------------------------------------
 // Main function
@@ -58,63 +39,43 @@ export async function fetchDashboardData(address: string): Promise<DashboardData
   }
 
   try {
-    // Fetch all four in parallel; /assets is non-fatal (5-min revalidate)
-    const [positionsRes, transactionsRes, pricesRes, assetsRes] = await Promise.all([
-      backendFetch(`/indexer/positions/${address}`, {
-        next: { revalidate: 10 },
-        headers: { 'Cache-Control': 'no-cache' },
+    const fetcher = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
+      backendFetch(String(input), init);
+    const [positionsData, transactionsData, pricesData, rawAssets] = await Promise.all([
+      fetchValidated(`/indexer/positions/${address}`, IndexerPositionsResponseSchema, {
+        fetcher,
+        requestInit: {
+          next: { revalidate: 10 },
+          headers: { 'Cache-Control': 'no-cache' },
+        },
       }),
-      backendFetch(`/indexer/transactions/${address}`, {
-        next: { revalidate: 10 },
-        headers: { 'Cache-Control': 'no-cache' },
+      fetchValidated(`/indexer/transactions/${address}`, IndexerTransactionsResponseSchema, {
+        fetcher,
+        requestInit: {
+          next: { revalidate: 10 },
+          headers: { 'Cache-Control': 'no-cache' },
+        },
       }),
-      backendFetch(`/oracle/prices`, {
-        next: { revalidate: 10 },
-        headers: { 'Cache-Control': 'no-cache' },
+      fetchValidated('/oracle/prices', OraclePricesResponseSchema, {
+        fetcher,
+        requestInit: {
+          next: { revalidate: 10 },
+          headers: { 'Cache-Control': 'no-cache' },
+        },
       }),
-      // Non-fatal: registry miss → fallback table
-      backendFetch(`/assets`, { next: { revalidate: 300 } }).catch(() => null),
+      fetchValidated('/assets', AssetRegistryResponseSchema, {
+        fetcher,
+        requestInit: { next: { revalidate: 300 } },
+      }).catch(() => {
+        warnRegistryUnavailable();
+        return [];
+      }),
     ]);
-
-    if (!positionsRes.ok || !transactionsRes.ok || !pricesRes.ok) {
-      throw new Error(
-        `Failed to fetch data from indexer: ${JSON.stringify({
-          positions: positionsRes.status,
-          transactions: transactionsRes.status,
-          prices: pricesRes.status,
-        })}`,
-      );
-    }
-
-    // ── Parse asset registry ──────────────────────────────────────────────
-    const rawAssetsJson = assetsRes?.ok
-      ? (await assetsRes.json() as { data?: RawAssetDto[]; assets?: RawAssetDto[] } | RawAssetDto[])
-      : null;
-
-    let rawAssets: RawAssetDto[] = [];
-    if (rawAssetsJson) {
-      if (Array.isArray(rawAssetsJson)) {
-        rawAssets = rawAssetsJson;
-      } else {
-        rawAssets = rawAssetsJson.data ?? rawAssetsJson.assets ?? [];
-      }
-    } else {
-      warnRegistryUnavailable();
-    }
     const registry = buildAssetRegistry(rawAssets);
 
-    // ── Parse core data ───────────────────────────────────────────────────
-    const positionsData = await positionsRes.json() as { positions: IndexerPosition[] };
-    const transactionsData = await transactionsRes.json() as { transactions: IndexerTransaction[] };
-    const pricesData = await pricesRes.json() as { prices: OraclePrice };
-
-    if (!positionsData.positions || !Array.isArray(positionsData.positions)) {
-      throw new Error('Invalid positions data format received from indexer');
-    }
-
     const positions = positionsData.positions;
-    const transactions = transactionsData.transactions ?? [];
-    const prices = pricesData.prices ?? {};
+    const transactions = transactionsData.transactions;
+    const prices = pricesData.prices;
 
     // ── Process positions ─────────────────────────────────────────────────
     let totalDepositedUsd = 0;
@@ -125,10 +86,18 @@ export async function fetchDashboardData(address: string): Promise<DashboardData
     let weightedCollateral = 0;
     let missingMcrSymbol: string | null = null;
 
-    for (const pos of positions) {
+    for (const [index, pos] of positions.entries()) {
       const decimals = registryDecimals(registry, pos.assetAddress);
-      const deposited = Number(pos.depositedAmount) / (10 ** decimals);
-      const borrowed  = Number(pos.borrowedAmount)  / (10 ** decimals);
+      const deposited = requireSafeNumber(pos.depositedRaw, decimals, [
+        'positions',
+        index,
+        'depositedRaw',
+      ]);
+      const borrowed = requireSafeNumber(pos.borrowedRaw, decimals, [
+        'positions',
+        index,
+        'borrowedRaw',
+      ]);
       const symbol    = registrySymbol(registry, pos.assetAddress);
       const name      = registryName(registry, pos.assetAddress);
       const price     = prices[pos.assetAddress] ?? 0;
@@ -186,11 +155,14 @@ export async function fetchDashboardData(address: string): Promise<DashboardData
     const totalBalanceUsd = totalDepositedUsd - totalBorrowedUsd;
 
     // ── Process transactions ──────────────────────────────────────────────
-    const recentActivity = Array.isArray(transactions)
-      ? transactions
-          .map((tx: IndexerTransaction) => {
+    const recentActivity = transactions
+          .map((tx: IndexerTransaction, index) => {
             const decimals = registryDecimals(registry, tx.assetAddress);
-            const amount   = Number(tx.amount) / (10 ** decimals);
+            const amount = requireSafeNumber(tx.amount, decimals, [
+              'transactions',
+              index,
+              'amount',
+            ]);
             const price    = prices[tx.assetAddress] ?? 0;
             return {
               id: tx.id,
@@ -205,8 +177,7 @@ export async function fetchDashboardData(address: string): Promise<DashboardData
           })
           .filter((activity) => activity.usdValue > 0)
           .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-          .slice(0, 50)
-      : [];
+          .slice(0, 50);
 
     return {
       portfolio: {
@@ -225,7 +196,7 @@ export async function fetchDashboardData(address: string): Promise<DashboardData
   } catch (error) {
     console.error('Dashboard API Error:', error);
     if (error instanceof Error) {
-      throw new Error(`Failed to load dashboard data: ${error.message}`);
+      throw error;
     }
     throw new Error('Could not load live dashboard data. Please check your connection.');
   }

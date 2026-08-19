@@ -124,7 +124,7 @@ All contract errors are typed via `VeilLendError` (`#[contracterror]`, `#[repr(u
 ## 🚀 Getting Started
 
 ### Prerequisites
-- **Node.js** (v18+; nodejs.org)
+- **Node.js 22+** (nodejs.org). The repo pins an exact version in `.nvmrc` — run `nvm use` from the repo root to match CI. The JS workspaces set `engines.node >= 22` with `engine-strict=true`, so `npm ci` fails fast on an older runtime.
 - **Rust toolchain** (for Soroban contracts; install via rustup.rs)
 - **Stellar CLI** (for contract deployment; on Ubuntu install `pkg-config`, `libdbus-1-dev`, and `libudev-dev` first, then run `cargo install --locked stellar-cli --version 23.0.1`)
 - **Docker** (for local Stellar network; docker.com)

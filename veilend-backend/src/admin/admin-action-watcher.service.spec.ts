@@ -15,7 +15,7 @@ describe('AdminActionWatcherService', () => {
 
   const getTransaction = jest.fn();
   const mockRpcService = {
-    getClient: jest.fn(() => ({ getTransaction })),
+    getTransaction,
   };
 
   const mockRepository = {

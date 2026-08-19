@@ -1,47 +1,11 @@
 import { NextResponse } from 'next/server';
-import { z } from 'zod';
 import { parseOr422 } from '@/lib/server/validation';
 import { captureEvent } from '@/lib/server/telemetry';
+import { CampaignEventSchema, type CampaignEvent } from '@/lib/validation/campaign-schemas';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 15;
-
-const CAMPAIGN_EVENT_TYPES = [
-  'campaign_page_visit',
-  'campaign_cta_click',
-  'campaign_contributor_interest',
-] as const;
-
-// Rejects payloads over ~1MB so a bad client can't flood the dedup cache
-// or logs with oversized JSON blobs.
-const MAX_PAYLOAD_BYTES = 1_000_000;
-
-export const CampaignEventSchema = z
-  .object({
-    id: z.string().uuid(),
-    sessionId: z.string().uuid(),
-    ts: z.number().int().positive(),
-    type: z.enum(CAMPAIGN_EVENT_TYPES),
-    campaign: z.literal('grantfox-oss-stellar').default('grantfox-oss-stellar'),
-    payload: z
-      .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))
-      .optional(),
-  })
-  .superRefine((data, ctx) => {
-    if (data.payload && JSON.stringify(data.payload).length > MAX_PAYLOAD_BYTES) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.too_big,
-        maximum: MAX_PAYLOAD_BYTES,
-        type: 'string',
-        inclusive: true,
-        path: ['payload'],
-        message: `Payload exceeds ${MAX_PAYLOAD_BYTES} byte limit`,
-      });
-    }
-  });
-
-export type CampaignEventInput = z.infer<typeof CampaignEventSchema>;
 
 // Per-IP Rate Limiting (60 requests per 1 minute window)
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
@@ -79,13 +43,8 @@ function isAllowedOrigin(originHeader: string | null): boolean {
     return true;
   }
 
-  const configuredOrigin =
-    process.env.NEXT_PUBLIC_APP_URL || process.env.ALLOWED_ORIGIN;
-  const defaultAllowed = [
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-    'https://veillend.app',
-  ];
+  const configuredOrigin = process.env.NEXT_PUBLIC_APP_URL || process.env.ALLOWED_ORIGIN;
+  const defaultAllowed = ['http://localhost:3000', 'http://127.0.0.1:3000', 'https://veillend.app'];
 
   if (configuredOrigin && originHeader === configuredOrigin) {
     return true;
@@ -97,10 +56,7 @@ function isAllowedOrigin(originHeader: string | null): boolean {
 
   try {
     const parsedOrigin = new URL(originHeader);
-    if (
-      parsedOrigin.hostname === 'localhost' ||
-      parsedOrigin.hostname === '127.0.0.1'
-    ) {
+    if (parsedOrigin.hostname === 'localhost' || parsedOrigin.hostname === '127.0.0.1') {
       return true;
     }
   } catch {
@@ -155,7 +111,7 @@ export async function POST(request: Request) {
 
   // 4. Validate against the Zod schema (422 + flattened issues on failure,
   //    telemetry already captured inside parseOr422)
-  let parsed: { data: CampaignEventInput };
+  let parsed: { data: CampaignEvent };
   try {
     parsed = await parseOr422(CampaignEventSchema, body);
   } catch (err) {
@@ -169,10 +125,7 @@ export async function POST(request: Request) {
 
   // 5. In-Memory Dedup Check (409 Conflict if duplicate)
   if (isDuplicateEvent(event.id)) {
-    return NextResponse.json(
-      { error: 'Duplicate event ID', id: event.id },
-      { status: 409 }
-    );
+    return NextResponse.json({ error: 'Duplicate event ID', id: event.id }, { status: 409 });
   }
 
   captureEvent({ kind: 'campaign_event', ...event });

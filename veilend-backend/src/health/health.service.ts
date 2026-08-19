@@ -48,7 +48,7 @@ export class HealthService {
   async probeSoroban(): Promise<SorobanComponentStatus> {
     const start = Date.now();
     try {
-      const result = await this.sorobanRpc.getClient().getLatestLedger();
+      const result = await this.sorobanRpc.getLatestLedger();
       return {
         status: 'up',
         ledgerSeq: result.sequence,
@@ -62,7 +62,7 @@ export class HealthService {
   async probeHorizon(): Promise<HorizonComponentStatus> {
     const start = Date.now();
     try {
-      const result = await this.horizon.getClient().root();
+      const result = (await this.horizon.getRoot()) as Record<string, unknown>;
       return {
         status: 'up',
         coreLatestLedger:

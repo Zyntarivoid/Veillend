@@ -23,6 +23,7 @@ describe('Admin Session Revocation Integration', () => {
   const mockConfigService = {
     auth: {
       jwtSecret: 'test-secret',
+      legacyAuthAllow: true,
     },
   };
 
