@@ -1962,3 +1962,198 @@ fn test_repay_and_withdraw_succeed_while_paused() {
     client.set_paused(&admin, &false);
     assert!(!client.is_paused());
 }
+
+#[test]
+fn test_healthy_position_liquidation_fails_not_liquidatable() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let usdc = Address::generate(&env);
+    let xlm = Address::generate(&env);
+    let borrower = Address::generate(&env);
+    let liquidator = Address::generate(&env);
+
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32)); // 150% min collateral
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    configure_asset(&env, &client, &admin, &usdc);
+    configure_asset(&env, &client, &admin, &xlm);
+    set_oracle_price(&env, &client, &admin, &usdc, &100);
+    set_oracle_price(&env, &client, &admin, &xlm, &100);
+
+    // Borrower deposits 300 XLM ($300) and borrows 100 USDC ($100) -> 300% collateral ratio (Healthy)
+    client.deposit(&borrower, &xlm, &300);
+    client.borrow(&borrower, &usdc, &xlm, &100);
+
+    // Liquidator tries to liquidate healthy position -> fails NotLiquidatable
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.liquidate(&liquidator, &borrower, &xlm, &usdc, &50);
+    }));
+    assert!(res.is_err(), "Healthy position cannot be liquidated");
+}
+
+#[test]
+fn test_liquidation_close_factor_bounds_and_seize_discount() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let usdc = Address::generate(&env);
+    let xlm = Address::generate(&env);
+    let borrower = Address::generate(&env);
+    let liquidator = Address::generate(&env);
+
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32)); // 150% min collateral
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    configure_asset(&env, &client, &admin, &usdc);
+    configure_asset(&env, &client, &admin, &xlm);
+    set_oracle_price(&env, &client, &admin, &usdc, &100);
+    set_oracle_price(&env, &client, &admin, &xlm, &100);
+
+    // Borrower deposits 200 XLM and borrows 100 USDC (initially 200% ratio)
+    client.deposit(&borrower, &xlm, &200);
+    client.borrow(&borrower, &usdc, &xlm, &100);
+
+    // XLM price drops to 60 -> Collateral value = 200 * 60 = 12,000; Debt value = 100 * 100 = 10,000
+    // Ratio = 12,000 / 10,000 = 120% < 150% (Underwater / Breach!)
+    set_oracle_price(&env, &client, &admin, &xlm, &60);
+
+    // Try liquidating 51 USDC (above 50% close factor of 100 debt) -> fails LiquidationTooLarge
+    let res_too_large = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.liquidate(&liquidator, &borrower, &xlm, &usdc, &51);
+    }));
+    assert!(res_too_large.is_err(), "Exceeding close factor must panic LiquidationTooLarge");
+
+    // Liquidate 49 USDC (within 50% close factor) -> Succeeds!
+    client.liquidate(&liquidator, &borrower, &xlm, &usdc, &49);
+
+    let borrower_debt_pos = client.get_position(&borrower, &usdc);
+    assert_eq!(borrower_debt_pos.borrowed, 51);
+
+    let liquidator_pos = client.get_position(&liquidator, &xlm);
+    assert!(liquidator_pos.deposited > 0, "Liquidator seized collateral");
+}
+
+#[test]
+fn test_liquidation_seize_math_with_price_divergence() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let usdc = Address::generate(&env);
+    let xlm = Address::generate(&env);
+    let borrower = Address::generate(&env);
+    let liquidator = Address::generate(&env);
+
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    configure_asset(&env, &client, &admin, &usdc);
+    configure_asset(&env, &client, &admin, &xlm);
+    // USDC = $1.00 (100 stroops), XLM = $1.00 (100 stroops)
+    set_oracle_price(&env, &client, &admin, &usdc, &100);
+    set_oracle_price(&env, &client, &admin, &xlm, &100);
+
+    // Borrower deposits 4000 XLM and borrows 2000 USDC
+    client.deposit(&borrower, &xlm, &4000);
+    client.borrow(&borrower, &usdc, &xlm, &2000);
+
+    // XLM price drops to $0.50 (50 stroops) -> Collateral value = 4000 * 50 = $2000, Debt value = 2000 * 100 = $2000 (100% ratio < 150%)
+    set_oracle_price(&env, &client, &admin, &xlm, &50);
+
+    // Repay 1000 USDC at $1.00, collateral XLM at $0.50, default discount 10500 bps (5% bonus)
+    // Seized XLM = (1000 * 100 * 10500) / (50 * 10000) = 1,050,000,000 / 500,000 = 2100 XLM
+    client.liquidate(&liquidator, &borrower, &xlm, &usdc, &1000);
+
+    let liquidator_pos = client.get_position(&liquidator, &xlm);
+    assert_eq!(liquidator_pos.deposited, 2100);
+
+    let borrower_xlm_pos = client.get_position(&borrower, &xlm);
+    assert_eq!(borrower_xlm_pos.deposited, 1900); // 4000 - 2100
+
+    let borrower_usdc_pos = client.get_position(&borrower, &usdc);
+    assert_eq!(borrower_usdc_pos.borrowed, 1000); // 2000 - 1000
+}
+
+#[test]
+fn test_bad_debt_writeoff_checks_collateral_and_updates_total_borrowed() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let usdc = Address::generate(&env);
+    let xlm = Address::generate(&env);
+    let borrower = Address::generate(&env);
+    let liquidator = Address::generate(&env);
+
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    configure_asset(&env, &client, &admin, &usdc);
+    configure_asset(&env, &client, &admin, &xlm);
+    set_oracle_price(&env, &client, &admin, &usdc, &100);
+    set_oracle_price(&env, &client, &admin, &xlm, &100);
+
+    // Borrower deposits 100 XLM and borrows 50 USDC
+    client.deposit(&borrower, &xlm, &100);
+    client.borrow(&borrower, &usdc, &xlm, &50);
+
+    // Admin tries to write off bad debt while borrower still has collateral -> fails CollateralRemaining
+    let res_collateral_remaining = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.writeoff_bad_debt(&admin, &borrower, &usdc);
+    }));
+    assert!(res_collateral_remaining.is_err(), "Bad debt writeoff must fail if collateral remains");
+
+    // XLM price drops to $0.20 -> 100 XLM is only worth $20 collateral vs $50 debt
+    set_oracle_price(&env, &client, &admin, &xlm, &20);
+
+    // Liquidator repays $20 of debt (close factor set to 100% and 1.0x discount)
+    // Seized XLM = (20 * 100 * 10000) / (20 * 10000) = 100 XLM (All borrower collateral seized!)
+    client.set_liquidation_params(&admin, &10_000, &10_000);
+    client.liquidate(&liquidator, &borrower, &xlm, &usdc, &20);
+
+    let borrower_xlm_pos = client.get_position(&borrower, &xlm);
+    assert_eq!(borrower_xlm_pos.deposited, 0, "Collateral completely exhausted");
+
+    let borrower_usdc_pos = client.get_position(&borrower, &usdc);
+    assert_eq!(borrower_usdc_pos.borrowed, 30, "30 USDC uncollateralized bad debt remains");
+
+    // After full liquidation, when collateral is 0, admin can write off remaining bad debt
+    client.writeoff_bad_debt(&admin, &borrower, &usdc);
+
+    let final_pos = client.get_position(&borrower, &usdc);
+    assert_eq!(final_pos.borrowed, 0, "Bad debt fully written off");
+}
+
+#[test]
+fn test_set_liquidation_params_bounds_validation() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    // Valid update: 60% close factor, 8% discount
+    client.set_liquidation_params(&admin, &6_000, &10_800);
+    let (close, discount) = client.get_liquidation_params();
+    assert_eq!(close, 6_000);
+    assert_eq!(discount, 10_800);
+
+    // Invalid close factor = 0 -> panics
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.set_liquidation_params(&admin, &0, &10_500);
+    })).is_err());
+
+    // Invalid close factor > 10_000 -> panics
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.set_liquidation_params(&admin, &10_001, &10_500);
+    })).is_err());
+
+    // Invalid discount < 10_000 -> panics
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.set_liquidation_params(&admin, &5_000, &9_999);
+    })).is_err());
+
+    // Invalid discount > 12_000 -> panics
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.set_liquidation_params(&admin, &5_000, &12_001);
+    })).is_err());
+}

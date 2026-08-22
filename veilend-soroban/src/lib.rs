@@ -91,6 +91,10 @@ pub enum DataKey {
     /// Admin-configured upper bound on single-call protocol fees, in bps.
     /// 0 (default / never set) means the bound is disabled.
     MaxProtocolFeeBps,
+    /// Liquidation close factor in basis points (default 5_000 bps = 50%, max 10_000)
+    LiquidationCloseFactorBps,
+    /// Liquidation seize bonus discount in basis points (default 10_500 bps = 5% bonus, range 10_000..=12_000)
+    LiquidationDiscountBps,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -139,6 +143,7 @@ pub enum ReserveUpdateKind {
     Withdraw,
     FeeAccrual,
     InterestAccrual,
+    Liquidation,
 }
 
 /// The class of privileged mutation a pending action will perform. Used to
@@ -246,6 +251,16 @@ pub enum VeilLendError {
     ProtocolFeeExceedsLimit = 29,
     /// Arithmetic overflow or underflow in interest accrual or index computation.
     ArithmeticOverflow = 30,
+    /// Position is not in breach of the minimum collateral ratio (health factor is healthy)
+    NotLiquidatable = 31,
+    /// Repay amount exceeds the maximum allowable liquidation close factor
+    LiquidationTooLarge = 32,
+    /// Seized collateral would exceed borrower's available deposited balance
+    SeizeExceedsCollateral = 33,
+    /// Liquidation parameter out of allowed range (close factor 1..=10_000, discount 10_000..=12_000)
+    InvalidLiquidationParams = 34,
+    /// Bad-debt writeoff failed because borrower still has remaining collateral that must be liquidated
+    CollateralRemaining = 35,
 }
 
 #[contractevent(topics = ["veillend", "asset_configured"])]
@@ -393,6 +408,29 @@ pub struct TimelockUpdated {
     #[topic]
     pub admin: Address,
     pub ledgers: u32,
+}
+
+#[contractevent(topics = ["veillend", "liquidation"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LiquidationEvent {
+    #[topic]
+    pub borrower: Address,
+    #[topic]
+    pub liquidator: Address,
+    pub collateral_asset: Address,
+    pub debt_asset: Address,
+    pub repaid_debt: i128,
+    pub seized_collateral: i128,
+}
+
+#[contractevent(topics = ["veillend", "bad_debt_written_off"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BadDebtWrittenOff {
+    #[topic]
+    pub user: Address,
+    #[topic]
+    pub asset: Address,
+    pub amount: i128,
 }
 
 #[contract]
@@ -1086,6 +1124,181 @@ impl VeilLendContract {
             &reserve,
             ReserveUpdateKind::Withdraw,
         );
+    }
+
+    /// Sets the liquidation close factor and seize bonus discount (admin only).
+    ///
+    /// - `close_factor_bps`: basis points of debt repayable in a single liquidation (1..=10_000, default 5_000 = 50%)
+    /// - `discount_bps`: basis points representing seize multiplier (10_000..=12_000, default 10_500 = 105% / 5% bonus)
+    pub fn set_liquidation_params(
+        env: Env,
+        admin: Address,
+        close_factor_bps: u32,
+        discount_bps: u32,
+    ) {
+        Self::require_not_paused(&env);
+        Self::require_admin(&env, &admin);
+        admin.require_auth();
+
+        if close_factor_bps == 0 || close_factor_bps > 10_000 {
+            panic_with_error!(&env, VeilLendError::InvalidLiquidationParams);
+        }
+        if discount_bps < 10_000 || discount_bps > 12_000 {
+            panic_with_error!(&env, VeilLendError::InvalidLiquidationParams);
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::LiquidationCloseFactorBps, &close_factor_bps);
+        env.storage()
+            .instance()
+            .set(&DataKey::LiquidationDiscountBps, &discount_bps);
+    }
+
+    /// Returns the current liquidation configuration `(close_factor_bps, discount_bps)`.
+    pub fn get_liquidation_params(env: Env) -> (u32, u32) {
+        let close_factor = env
+            .storage()
+            .instance()
+            .get(&DataKey::LiquidationCloseFactorBps)
+            .unwrap_or(5_000u32);
+        let discount = env
+            .storage()
+            .instance()
+            .get(&DataKey::LiquidationDiscountBps)
+            .unwrap_or(10_500u32);
+        (close_factor, discount)
+    }
+
+    /// Liquidates an underwater position by repaying debt and seizing collateral at a discount.
+    pub fn liquidate(
+        env: Env,
+        liquidator: Address,
+        borrower: Address,
+        collateral_asset: Address,
+        debt_asset: Address,
+        repay_amount: i128,
+    ) {
+        Self::require_not_paused(&env);
+        Self::require_supported_asset(&env, &collateral_asset);
+        Self::require_supported_asset(&env, &debt_asset);
+        Self::require_positive_amount(&env, repay_amount);
+        liquidator.require_auth();
+
+        let collateral_interest = Self::accrue_and_persist_interest(&env, &collateral_asset).state;
+        let debt_interest = Self::accrue_and_persist_interest(&env, &debt_asset).state;
+
+        let mut borrower_debt_pos = interest::compute_accrued_position(
+            &Self::read_position(&env, &borrower, &debt_asset),
+            &debt_interest,
+        );
+        let mut borrower_collateral_pos = interest::compute_accrued_position(
+            &Self::read_position(&env, &borrower, &collateral_asset),
+            &collateral_interest,
+        );
+        let mut liquidator_collateral_pos = interest::compute_accrued_position(
+            &Self::read_position(&env, &liquidator, &collateral_asset),
+            &collateral_interest,
+        );
+
+        if borrower_debt_pos.borrowed <= 0 {
+            panic_with_error!(&env, VeilLendError::NotLiquidatable);
+        }
+
+        let collateral_price = Self::read_oracle_price(&env, &collateral_asset);
+        let debt_price = Self::read_oracle_price(&env, &debt_asset);
+
+        let min_ratio_bps = Self::min_collateral_ratio_bps(env.clone()) as i128;
+        let collateral_value = borrower_collateral_pos.deposited * collateral_price;
+        let debt_value = borrower_debt_pos.borrowed * debt_price;
+
+        // Position must be below minimum collateral ratio to be eligible for liquidation
+        if collateral_value * 10_000 >= debt_value * min_ratio_bps {
+            panic_with_error!(&env, VeilLendError::NotLiquidatable);
+        }
+
+        // Close factor limits maximum debt repayable per liquidation call
+        let (close_factor_bps, discount_bps) = Self::get_liquidation_params(env.clone());
+        let max_repay = (borrower_debt_pos.borrowed * close_factor_bps as i128) / 10_000;
+        if repay_amount > max_repay {
+            panic_with_error!(&env, VeilLendError::LiquidationTooLarge);
+        }
+
+        // Calculate seized collateral with liquidation bonus
+        let seized_collateral = (repay_amount * debt_price * discount_bps as i128)
+            / (collateral_price * 10_000);
+
+        if seized_collateral > borrower_collateral_pos.deposited {
+            panic_with_error!(&env, VeilLendError::SeizeExceedsCollateral);
+        }
+
+        borrower_debt_pos.borrowed -= repay_amount;
+        borrower_collateral_pos.deposited -= seized_collateral;
+        liquidator_collateral_pos.deposited += seized_collateral;
+
+        let mut debt_reserve = Self::read_asset_reserve(&env, &debt_asset);
+        debt_reserve.total_balance += repay_amount;
+        Self::write_asset_reserve(&env, &debt_asset, &debt_reserve);
+
+        Self::write_position(&env, &borrower, &debt_asset, &borrower_debt_pos);
+        Self::write_position(&env, &borrower, &collateral_asset, &borrower_collateral_pos);
+        Self::write_position(&env, &liquidator, &collateral_asset, &liquidator_collateral_pos);
+
+        let total_borrowed = Self::get_total_borrowed(env.clone(), debt_asset.clone()) - repay_amount;
+        env.storage()
+            .persistent()
+            .set(&DataKey::TotalBorrowed(debt_asset.clone()), &total_borrowed);
+
+        LiquidationEvent {
+            borrower,
+            liquidator,
+            collateral_asset,
+            debt_asset: debt_asset.clone(),
+            repaid_debt: repay_amount,
+            seized_collateral,
+        }
+        .publish(&env);
+
+        Self::publish_asset_reserve_updated(
+            &env,
+            &debt_asset,
+            &debt_reserve,
+            ReserveUpdateKind::Liquidation,
+        );
+    }
+
+    /// Admin-only writeoff for irrecoverable bad debt when collateral has hit zero.
+    pub fn writeoff_bad_debt(env: Env, admin: Address, user: Address, debt_asset: Address) {
+        Self::require_not_paused(&env);
+        Self::require_admin(&env, &admin);
+        admin.require_auth();
+        Self::require_supported_asset(&env, &debt_asset);
+
+        let mut user_debt_pos = Self::read_position(&env, &user, &debt_asset);
+
+        if user_debt_pos.deposited > 0 {
+            panic_with_error!(&env, VeilLendError::CollateralRemaining);
+        }
+
+        if user_debt_pos.borrowed <= 0 {
+            return;
+        }
+
+        let written_off_amount = user_debt_pos.borrowed;
+        user_debt_pos.borrowed = 0;
+        Self::write_position(&env, &user, &debt_asset, &user_debt_pos);
+
+        let total_borrowed = Self::get_total_borrowed(env.clone(), debt_asset.clone()) - written_off_amount;
+        env.storage()
+            .persistent()
+            .set(&DataKey::TotalBorrowed(debt_asset.clone()), &total_borrowed.max(0));
+
+        BadDebtWrittenOff {
+            user,
+            asset: debt_asset,
+            amount: written_off_amount,
+        }
+        .publish(&env);
     }
 
     /// Returns a user's position with any interest accrued since their last
@@ -2083,6 +2296,11 @@ mod tests {
         assert_eq!(VeilLendError::CapBelowOutstanding as u32, 28);
         assert_eq!(VeilLendError::ProtocolFeeExceedsLimit as u32, 29);
         assert_eq!(VeilLendError::ArithmeticOverflow as u32, 30);
+        assert_eq!(VeilLendError::NotLiquidatable as u32, 31);
+        assert_eq!(VeilLendError::LiquidationTooLarge as u32, 32);
+        assert_eq!(VeilLendError::SeizeExceedsCollateral as u32, 33);
+        assert_eq!(VeilLendError::InvalidLiquidationParams as u32, 34);
+        assert_eq!(VeilLendError::CollateralRemaining as u32, 35);
     }
 
     #[test]
@@ -2127,6 +2345,11 @@ mod tests {
             VeilLendError::CapBelowOutstanding as u32,
             VeilLendError::ProtocolFeeExceedsLimit as u32,
             VeilLendError::ArithmeticOverflow as u32,
+            VeilLendError::NotLiquidatable as u32,
+            VeilLendError::LiquidationTooLarge as u32,
+            VeilLendError::SeizeExceedsCollateral as u32,
+            VeilLendError::InvalidLiquidationParams as u32,
+            VeilLendError::CollateralRemaining as u32,
         ];
         let mut sorted = codes.to_vec();
         sorted.sort();
