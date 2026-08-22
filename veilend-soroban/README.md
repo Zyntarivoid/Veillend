@@ -174,6 +174,20 @@ Schema `VLENDV3` uses these keys:
 
 The admin authority is a `Vec<Address>` (`AdminSet`): any one of N admins can act, and `add_admin`/`remove_admin` manage membership (with a last-admin lockout guard). Privileged mutations — `configure_asset`, `set_oracle_price`, `update_asset_caps`, `set_min_collateral_ratio`, pausing, and `record_protocol_fee` — follow a `propose_*` → `execute_*` (after the `TimelockLedgers` delay) → `cancel_*` flow, with `set_paused(false)` exempt so unpausing stays immediate.
 
+## Circuit Breaker & Incident Pause Matrix
+
+When the contract is paused via `set_paused`, entrypoints are strictly partitioned based on safety intent:
+
+| Entrypoint Category | Entrypoints | Paused Check | Intent / Rationale |
+| :--- | :--- | :---: | :--- |
+| **Capital Inflow** | `deposit` | **PAUSED** | Blocks new funds from entering the protocol during active incidents |
+| **Risk / Debt Outflow** | `borrow` | **PAUSED** | Prevents new loan creation and prevents draining liquid reserves |
+| **Debt Accrual Clock** | `accrue_interest` | **PAUSED** | Freezes the debt clock so borrower interest does not compound during pauses |
+| **Privileged Mutation** | `configure_asset`, `update_asset_caps`, `set_oracle_price`, `set_oracle_price_bounds`, `set_oracle_max_change_bps`, `set_max_oracle_age`, `set_min_collateral_ratio`, `record_protocol_fee`, `set_max_protocol_fee_bps`, `set_timelock_ledgers`, `add_admin`, `remove_admin` | **PAUSED** | Prevents parameter manipulation and privilege alteration while frozen |
+| **Emergency Recovery** | `set_paused(false)` | **UNPAUSED** | Allows authorized admins to immediately unpause and recover protocol |
+| **Proposal Safety** | `propose_set_paused`, `execute_set_paused`, `cancel_*` | **UNPAUSED** | Allows setting pause or cancelling pending actions |
+| **User Fund Exit** | `repay`, `withdraw` | **UNPAUSED (EXEMPT)** | Users must always retain the right to pay down debt and withdraw unencumbered collateral to safety |
+
 **Oracle Safety Rails:** The contract includes comprehensive oracle price safety mechanisms including staleness tracking (`OracleLastUpdated`), volatility limits (`OracleMaxChangeBps`, `OraclePrevPrice`), and absolute bounds (`OracleMinPrice`, `OracleMaxPrice`). These protect against stale prices, excessive volatility, and absurd values that could compromise the protocol.
 
 When changing the public interface, increment `CONTRACT_VERSION`. When changing a `DataKey` variant or any stored value shape, increment `STORAGE_SCHEMA_VERSION` and assign a new `STORAGE_SCHEMA_ID`. **Keep this table in sync with the implementation** — any drift will break migrations and off-chain readers.

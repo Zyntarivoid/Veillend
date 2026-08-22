@@ -213,8 +213,6 @@ pub enum VeilLendError {
     BorrowCapExceeded = 14,
     /// Invalid cap value (must be positive or -1 for unlimited)
     InvalidCap = 15,
-    /// Circuit breaker triggered - asset temporarily paused
-    CircuitBreakerTriggered = 16,
     /// Reserve balance is too low for the requested action
     InsufficientReserve = 17,
     /// Pending action's timelock window has not elapsed yet
@@ -446,6 +444,7 @@ impl VeilLendContract {
 
     /// Adds `new_admin` to the admin set. Callable only by a current admin.
     pub fn add_admin(env: Env, caller: Address, new_admin: Address) {
+        Self::require_not_paused(&env);
         Self::require_admin(&env, &caller);
         caller.require_auth();
 
@@ -465,6 +464,7 @@ impl VeilLendContract {
     /// Removes `to_remove` from the admin set. Callable only by a current
     /// admin. Panics if the set would drop to length 0 (prevents lockout).
     pub fn remove_admin(env: Env, caller: Address, to_remove: Address) {
+        Self::require_not_paused(&env);
         Self::require_admin(&env, &caller);
         caller.require_auth();
 
@@ -499,6 +499,7 @@ impl VeilLendContract {
     /// Sets the timelock delay (in ledgers) applied to privileged mutations.
     /// Admin-only. Bounded to `[MIN_TIMELOCK_LEDGERS, MAX_TIMELOCK_LEDGERS]`.
     pub fn set_timelock_ledgers(env: Env, admin: Address, ledgers: u32) {
+        Self::require_not_paused(&env);
         Self::require_admin(&env, &admin);
         admin.require_auth();
 
@@ -532,6 +533,7 @@ impl VeilLendContract {
         asset: Address,
         supported: bool,
     ) -> u64 {
+        Self::require_not_paused(&env);
         Self::require_admin(&env, &admin);
         admin.require_auth();
 
@@ -546,6 +548,7 @@ impl VeilLendContract {
     /// Executes a previously proposed configure_asset action, if its timelock
     /// has elapsed.
     pub fn execute_configure_asset(env: Env, admin: Address, action_id: u64) {
+        Self::require_not_paused(&env);
         Self::require_admin(&env, &admin);
         admin.require_auth();
 
@@ -562,6 +565,7 @@ impl VeilLendContract {
     /// Proposes setting the oracle price for an asset (timelocked). Returns
     /// the action id.
     pub fn propose_set_oracle_price(env: Env, admin: Address, asset: Address, price: i128) -> u64 {
+        Self::require_not_paused(&env);
         Self::require_admin(&env, &admin);
         admin.require_auth();
 
@@ -575,6 +579,7 @@ impl VeilLendContract {
 
     /// Executes a previously proposed set_oracle_price action.
     pub fn execute_set_oracle_price(env: Env, admin: Address, action_id: u64) {
+        Self::require_not_paused(&env);
         Self::require_admin(&env, &admin);
         admin.require_auth();
 
@@ -605,6 +610,7 @@ impl VeilLendContract {
     ///
     /// Validates price bounds and max change limits before updating.
     pub fn set_oracle_price(env: Env, admin: Address, asset: Address, price: i128) {
+        Self::require_not_paused(&env);
         Self::require_admin(&env, &admin);
         Self::require_supported_asset(&env, &asset);
         admin.require_auth();
@@ -632,6 +638,7 @@ impl VeilLendContract {
 
     /// Set the protocol-wide maximum oracle age (admin only)
     pub fn set_max_oracle_age(env: Env, admin: Address, seconds: u64) {
+        Self::require_not_paused(&env);
         Self::require_admin(&env, &admin);
         admin.require_auth();
         env.storage()
@@ -649,6 +656,7 @@ impl VeilLendContract {
 
     /// Set maximum allowed price change per update for an asset (admin only)
     pub fn set_oracle_max_change_bps(env: Env, admin: Address, asset: Address, max_bps: u32) {
+        Self::require_not_paused(&env);
         Self::require_admin(&env, &admin);
         Self::require_supported_asset(&env, &asset);
         admin.require_auth();
@@ -667,6 +675,7 @@ impl VeilLendContract {
 
     /// Set absolute price bounds for an asset (admin only)
     pub fn set_oracle_price_bounds(env: Env, admin: Address, asset: Address, min: i128, max: i128) {
+        Self::require_not_paused(&env);
         Self::require_admin(&env, &admin);
         Self::require_supported_asset(&env, &asset);
         admin.require_auth();
@@ -703,6 +712,7 @@ impl VeilLendContract {
         deposit_cap: i128,
         borrow_cap: i128,
     ) -> u64 {
+        Self::require_not_paused(&env);
         Self::require_admin(&env, &admin);
         admin.require_auth();
 
@@ -716,6 +726,7 @@ impl VeilLendContract {
 
     /// Executes a previously proposed update_asset_caps action.
     pub fn execute_update_asset_caps(env: Env, admin: Address, action_id: u64) {
+        Self::require_not_paused(&env);
         Self::require_admin(&env, &admin);
         admin.require_auth();
 
@@ -761,6 +772,7 @@ impl VeilLendContract {
         admin: Address,
         min_collateral_ratio_bps: u32,
     ) -> u64 {
+        Self::require_not_paused(&env);
         Self::require_admin(&env, &admin);
         admin.require_auth();
 
@@ -774,6 +786,7 @@ impl VeilLendContract {
 
     /// Executes a previously proposed set_min_collateral_ratio action.
     pub fn execute_set_min_collateral_ratio(env: Env, admin: Address, action_id: u64) {
+        Self::require_not_paused(&env);
         Self::require_admin(&env, &admin);
         admin.require_auth();
 
@@ -1101,6 +1114,7 @@ impl VeilLendContract {
     /// pure function of elapsed time and current state, not a privileged
     /// action.
     pub fn accrue_interest(env: Env, asset: Address) {
+        Self::require_not_paused(&env);
         Self::require_supported_asset(&env, &asset);
         let result = Self::accrue_and_persist_interest(&env, &asset);
 
@@ -1133,6 +1147,7 @@ impl VeilLendContract {
         asset: Address,
         amount: i128,
     ) -> u64 {
+        Self::require_not_paused(&env);
         Self::require_admin(&env, &admin);
         admin.require_auth();
 
@@ -1146,6 +1161,7 @@ impl VeilLendContract {
 
     /// Executes a previously proposed record_protocol_fee action.
     pub fn execute_record_protocol_fee(env: Env, admin: Address, action_id: u64) {
+        Self::require_not_paused(&env);
         Self::require_admin(&env, &admin);
         admin.require_auth();
 
@@ -1173,6 +1189,7 @@ impl VeilLendContract {
     /// This is an immediate (non-timelocked) admin-only setter, matching the
     /// same pattern as `set_timelock_ledgers`.
     pub fn set_max_protocol_fee_bps(env: Env, admin: Address, bps: u32) {
+        Self::require_not_paused(&env);
         Self::require_admin(&env, &admin);
         admin.require_auth();
 
@@ -1842,6 +1859,30 @@ impl VeilLendContract {
         }
     }
 
+    /// Asserts that the contract is not in a paused state.
+    ///
+    /// # Pause Matrix & Intent
+    ///
+    /// | Entrypoint | Paused Check | Rationale |
+    /// | :--- | :---: | :--- |
+    /// | `deposit` | YES | Prevents new capital from entering during an incident |
+    /// | `borrow` | YES | Prevents new debt creation and protocol risk exposure |
+    /// | `accrue_interest` | YES | Freezes the debt clock so interest does not advance while paused |
+    /// | `configure_asset` / `propose_` / `execute_` | YES | Prevents asset parameter manipulation |
+    /// | `update_asset_caps` / `propose_` / `execute_` | YES | Prevents cap modification while paused |
+    /// | `set_oracle_price` / `propose_` / `execute_` | YES | Prevents oracle tampering while frozen |
+    /// | `set_oracle_price_bounds` / `set_oracle_max_change_bps` | YES | Prevents safety rail modification |
+    /// | `set_max_oracle_age` | YES | Prevents oracle freshness relaxation |
+    /// | `set_min_collateral_ratio` / `propose_` / `execute_` | YES | Prevents collateral ratio changes |
+    /// | `record_protocol_fee` / `propose_` / `execute_` | YES | Prevents treasury fee drainage |
+    /// | `set_max_protocol_fee_bps` | YES | Prevents fee ceiling adjustments |
+    /// | `set_timelock_ledgers` | YES | Prevents timelock manipulation |
+    /// | `add_admin` / `remove_admin` | YES | Prevents privilege changes during incident |
+    /// | `set_paused(false)` (unpause) | NO | Must remain unpaused so admin can recover system |
+    /// | `propose_set_paused` / `execute_set_paused` | NO | Must remain operable to initiate pause |
+    /// | `cancel_*` | NO | Cancelling pending actions is always permitted |
+    /// | `repay` | NO (EXEMPT) | Users must always be able to pay down debt during an incident |
+    /// | `withdraw` | NO (EXEMPT) | Users must always be able to withdraw free collateral to safety |
     fn require_not_paused(env: &Env) {
         let paused: bool = env
             .storage()
@@ -2028,7 +2069,6 @@ mod tests {
         assert_eq!(VeilLendError::DepositCapExceeded as u32, 13);
         assert_eq!(VeilLendError::BorrowCapExceeded as u32, 14);
         assert_eq!(VeilLendError::InvalidCap as u32, 15);
-        assert_eq!(VeilLendError::CircuitBreakerTriggered as u32, 16);
         assert_eq!(VeilLendError::InsufficientReserve as u32, 17);
         assert_eq!(VeilLendError::TimelockNotReady as u32, 18);
         assert_eq!(VeilLendError::UnknownAction as u32, 19);
@@ -2073,7 +2113,6 @@ mod tests {
             VeilLendError::DepositCapExceeded as u32,
             VeilLendError::BorrowCapExceeded as u32,
             VeilLendError::InvalidCap as u32,
-            VeilLendError::CircuitBreakerTriggered as u32,
             VeilLendError::InsufficientReserve as u32,
             VeilLendError::TimelockNotReady as u32,
             VeilLendError::UnknownAction as u32,

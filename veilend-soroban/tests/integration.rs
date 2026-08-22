@@ -1816,6 +1816,149 @@ fn small_amounts_dust_accrual() {
     );
 }
 
-// The overflow test is in interest.rs as a unit test (zero_snapshot and
-// overflow tests work at the function level since they need to construct
-// extreme states directly).
+#[test]
+fn test_paused_contract_blocks_all_mutating_admin_and_accrual_entrypoints() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let asset = Address::generate(&env);
+    let user = Address::generate(&env);
+    let other_admin = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    // Initial setup before pause
+    configure_asset(&env, &client, &admin, &asset);
+    set_oracle_price(&env, &client, &admin, &asset, &100);
+
+    // Pause contract
+    pause(&env, &client, &admin);
+    assert!(client.is_paused());
+
+    // 1. add_admin must panic with ContractPaused
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.add_admin(&admin, &other_admin);
+    }))
+    .is_err());
+
+    // 2. remove_admin must panic
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.remove_admin(&admin, &other_admin);
+    }))
+    .is_err());
+
+    // 3. set_timelock_ledgers must panic
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.set_timelock_ledgers(&admin, &100);
+    }))
+    .is_err());
+
+    // 4. propose_configure_asset must panic
+    let new_asset = Address::generate(&env);
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.propose_configure_asset(&admin, &new_asset, &true);
+    }))
+    .is_err());
+
+    // 5. set_oracle_price must panic
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.set_oracle_price(&admin, &asset, &200);
+    }))
+    .is_err());
+
+    // 6. set_max_oracle_age must panic
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.set_max_oracle_age(&admin, &3600);
+    }))
+    .is_err());
+
+    // 7. set_oracle_max_change_bps must panic
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.set_oracle_max_change_bps(&admin, &asset, &500);
+    }))
+    .is_err());
+
+    // 8. set_oracle_price_bounds must panic
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.set_oracle_price_bounds(&admin, &asset, &10, &1000);
+    }))
+    .is_err());
+
+    // 9. propose_update_asset_caps must panic
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.propose_update_asset_caps(&admin, &asset, &1000, &500);
+    }))
+    .is_err());
+
+    // 10. propose_set_min_collateral_ratio must panic
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.propose_set_min_collateral_ratio(&admin, &20_000);
+    }))
+    .is_err());
+
+    // 11. accrue_interest must panic
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.accrue_interest(&asset);
+    }))
+    .is_err());
+
+    // 12. propose_record_protocol_fee must panic
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.propose_record_protocol_fee(&admin, &asset, &500);
+    }))
+    .is_err());
+
+    // 13. set_max_protocol_fee_bps must panic
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.set_max_protocol_fee_bps(&admin, &1000);
+    }))
+    .is_err());
+
+    // 14. deposit must panic
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.deposit(&user, &asset, &1000);
+    }))
+    .is_err());
+
+    // 15. borrow must panic
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.borrow(&user, &asset, &asset, &500);
+    }))
+    .is_err());
+}
+
+#[test]
+fn test_repay_and_withdraw_succeed_while_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let asset = Address::generate(&env);
+    let user = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    configure_asset(&env, &client, &admin, &asset);
+    set_oracle_price(&env, &client, &admin, &asset, &1);
+
+    // Initial deposit and borrow
+    client.deposit(&user, &asset, &1_000_000);
+    client.borrow(&user, &asset, &asset, &500_000);
+
+    // Pause contract during active incident
+    pause(&env, &client, &admin);
+    assert!(client.is_paused());
+
+    // Users MUST be able to repay debt while paused to avoid liquidation / de-risk
+    client.repay(&user, &asset, &500_000);
+    let pos_after_repay = client.get_position(&user, &asset);
+    assert_eq!(pos_after_repay.borrowed, 0);
+
+    // Users MUST be able to withdraw their deposited funds to safety while paused
+    client.withdraw(&user, &asset, &asset, &1_000_000);
+    let pos_after_withdraw = client.get_position(&user, &asset);
+    assert_eq!(pos_after_withdraw.deposited, 0);
+
+    // Admin can unpause immediately
+    client.set_paused(&admin, &false);
+    assert!(!client.is_paused());
+}
