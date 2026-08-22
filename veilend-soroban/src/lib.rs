@@ -95,6 +95,8 @@ pub enum DataKey {
     LiquidationCloseFactorBps,
     /// Liquidation seize bonus discount in basis points (default 10_500 bps = 5% bonus, range 10_000..=12_000)
     LiquidationDiscountBps,
+    /// Monotonically incrementing permit nonce per user
+    PermitNonce(Address),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -261,6 +263,12 @@ pub enum VeilLendError {
     InvalidLiquidationParams = 34,
     /// Bad-debt writeoff failed because borrower still has remaining collateral that must be liquidated
     CollateralRemaining = 35,
+    /// Permit signature deadline has passed
+    PermitExpired = 36,
+    /// Permit nonce does not match current expected user nonce
+    PermitNonceMismatch = 37,
+    /// Invalid cryptographic signature for permit message
+    InvalidSignature = 38,
 }
 
 #[contractevent(topics = ["veillend", "asset_configured"])]
@@ -447,6 +455,37 @@ pub struct BatchExecuted {
     pub user: Address,
     pub operation_kind: ReserveUpdateKind,
     pub total_operations: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PermitAction {
+    Deposit,
+    Withdraw,
+    Borrow,
+    Repay,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Permit {
+    pub user: Address,
+    pub action: PermitAction,
+    pub asset: Address,
+    pub amount: i128,
+    pub nonce: u64,
+    pub deadline: u64,
+}
+
+#[contractevent(topics = ["veillend", "permit_executed"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PermitExecuted {
+    #[topic]
+    pub user: Address,
+    pub action: PermitAction,
+    pub asset: Address,
+    pub amount: i128,
+    pub nonce: u64,
 }
 
 #[contract]
@@ -1568,6 +1607,253 @@ impl VeilLendContract {
             user,
             operation_kind: ReserveUpdateKind::Withdraw,
             total_operations: count,
+        }
+        .publish(&env);
+    }
+
+    /// Returns the current permit nonce for a user.
+    pub fn get_permit_nonce(env: Env, user: Address) -> u64 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::PermitNonce(user))
+            .unwrap_or(0)
+    }
+
+    fn verify_and_consume_permit(env: &Env, permit: &Permit) {
+        if env.ledger().timestamp() > permit.deadline {
+            panic_with_error!(env, VeilLendError::PermitExpired);
+        }
+
+        let current_nonce: u64 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::PermitNonce(permit.user.clone()))
+            .unwrap_or(0);
+
+        if permit.nonce != current_nonce {
+            panic_with_error!(env, VeilLendError::PermitNonceMismatch);
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::PermitNonce(permit.user.clone()), &(current_nonce + 1));
+    }
+
+    /// Meta-transaction permit deposit.
+    pub fn deposit_for(env: Env, permit: Permit) {
+        Self::require_not_paused(&env);
+        if permit.action != PermitAction::Deposit {
+            panic_with_error!(&env, VeilLendError::InvalidAmount);
+        }
+        Self::verify_and_consume_permit(&env, &permit);
+        Self::require_supported_asset(&env, &permit.asset);
+        Self::require_positive_amount(&env, permit.amount);
+
+        let interest_state = Self::accrue_and_persist_interest(&env, &permit.asset).state;
+        Self::check_deposit_cap(&env, &permit.asset, permit.amount);
+
+        let mut position = interest::compute_accrued_position(
+            &Self::read_position(&env, &permit.user, &permit.asset),
+            &interest_state,
+        );
+        let mut reserve = Self::read_asset_reserve(&env, &permit.asset);
+        position.deposited += permit.amount;
+        reserve.total_balance += permit.amount;
+        Self::write_position(&env, &permit.user, &permit.asset, &position);
+        Self::write_asset_reserve(&env, &permit.asset, &reserve);
+
+        let total = Self::get_total_deposited(env.clone(), permit.asset.clone()) + permit.amount;
+        env.storage()
+            .persistent()
+            .set(&DataKey::TotalDeposited(permit.asset.clone()), &total);
+
+        DepositEvent {
+            user: permit.user.clone(),
+            asset: permit.asset.clone(),
+            amount: permit.amount,
+        }
+        .publish(&env);
+        Self::publish_asset_reserve_updated(&env, &permit.asset, &reserve, ReserveUpdateKind::Deposit);
+
+        PermitExecuted {
+            user: permit.user,
+            action: permit.action,
+            asset: permit.asset,
+            amount: permit.amount,
+            nonce: permit.nonce,
+        }
+        .publish(&env);
+    }
+
+    /// Meta-transaction permit repayment.
+    pub fn repay_for(env: Env, permit: Permit) {
+        if permit.action != PermitAction::Repay {
+            panic_with_error!(&env, VeilLendError::InvalidAmount);
+        }
+        Self::verify_and_consume_permit(&env, &permit);
+        Self::require_supported_asset(&env, &permit.asset);
+        Self::require_positive_amount(&env, permit.amount);
+
+        let interest_state = Self::accrue_and_persist_interest(&env, &permit.asset).state;
+        let mut position = interest::compute_accrued_position(
+            &Self::read_position(&env, &permit.user, &permit.asset),
+            &interest_state,
+        );
+        let mut reserve = Self::read_asset_reserve(&env, &permit.asset);
+        if permit.amount > position.borrowed {
+            panic_with_error!(&env, VeilLendError::RepayTooLarge);
+        }
+
+        position.borrowed -= permit.amount;
+        reserve.total_balance += permit.amount;
+
+        let mut dust_delta = 0;
+        if position.borrowed > 0 && position.borrowed <= DUST_THRESHOLD {
+            dust_delta = position.borrowed;
+            position.borrowed = 0;
+        }
+
+        Self::write_position(&env, &permit.user, &permit.asset, &position);
+        Self::write_asset_reserve(&env, &permit.asset, &reserve);
+
+        let total = Self::get_total_borrowed(env.clone(), permit.asset.clone()) - permit.amount - dust_delta;
+        env.storage()
+            .persistent()
+            .set(&DataKey::TotalBorrowed(permit.asset.clone()), &total);
+
+        RepayEvent {
+            user: permit.user.clone(),
+            asset: permit.asset.clone(),
+            amount: permit.amount,
+        }
+        .publish(&env);
+        Self::publish_asset_reserve_updated(&env, &permit.asset, &reserve, ReserveUpdateKind::Repay);
+
+        PermitExecuted {
+            user: permit.user,
+            action: permit.action,
+            asset: permit.asset,
+            amount: permit.amount,
+            nonce: permit.nonce,
+        }
+        .publish(&env);
+    }
+
+    /// Meta-transaction permit borrow.
+    pub fn borrow_for(env: Env, permit: Permit, collateral_asset: Address) {
+        Self::require_not_paused(&env);
+        if permit.action != PermitAction::Borrow {
+            panic_with_error!(&env, VeilLendError::InvalidAmount);
+        }
+        Self::verify_and_consume_permit(&env, &permit);
+        Self::require_supported_asset(&env, &permit.asset);
+        Self::require_supported_asset(&env, &collateral_asset);
+        Self::require_positive_amount(&env, permit.amount);
+
+        let interest_state = Self::accrue_and_persist_interest(&env, &permit.asset).state;
+        Self::check_borrow_cap(&env, &permit.asset, permit.amount);
+
+        let mut position = interest::compute_accrued_position(
+            &Self::read_position(&env, &permit.user, &permit.asset),
+            &interest_state,
+        );
+        let mut reserve = Self::read_asset_reserve(&env, &permit.asset);
+        if permit.amount > reserve.total_balance {
+            panic_with_error!(&env, VeilLendError::InsufficientReserve);
+        }
+        position.borrowed += permit.amount;
+        reserve.total_balance -= permit.amount;
+
+        Self::write_position(&env, &permit.user, &permit.asset, &position);
+        Self::write_asset_reserve(&env, &permit.asset, &reserve);
+
+        let total = Self::get_total_borrowed(env.clone(), permit.asset.clone()) + permit.amount;
+        env.storage()
+            .persistent()
+            .set(&DataKey::TotalBorrowed(permit.asset.clone()), &total);
+
+        BorrowEvent {
+            user: permit.user.clone(),
+            asset: permit.asset.clone(),
+            amount: permit.amount,
+        }
+        .publish(&env);
+        Self::publish_asset_reserve_updated(&env, &permit.asset, &reserve, ReserveUpdateKind::Borrow);
+
+        Self::assert_collateralized(
+            &env,
+            &collateral_asset,
+            &permit.asset,
+            &permit.user,
+            CollateralAction::Borrow { amount: 0 },
+        );
+
+        PermitExecuted {
+            user: permit.user,
+            action: permit.action,
+            asset: permit.asset,
+            amount: permit.amount,
+            nonce: permit.nonce,
+        }
+        .publish(&env);
+    }
+
+    /// Meta-transaction permit withdrawal.
+    pub fn withdraw_for(env: Env, permit: Permit, debt_asset: Address) {
+        if permit.action != PermitAction::Withdraw {
+            panic_with_error!(&env, VeilLendError::InvalidAmount);
+        }
+        Self::verify_and_consume_permit(&env, &permit);
+        Self::require_supported_asset(&env, &permit.asset);
+        Self::require_supported_asset(&env, &debt_asset);
+        Self::require_positive_amount(&env, permit.amount);
+
+        let interest_state = Self::accrue_and_persist_interest(&env, &permit.asset).state;
+        let mut position = interest::compute_accrued_position(
+            &Self::read_position(&env, &permit.user, &permit.asset),
+            &interest_state,
+        );
+        let mut reserve = Self::read_asset_reserve(&env, &permit.asset);
+        if permit.amount > position.deposited {
+            panic_with_error!(&env, VeilLendError::InsufficientDeposit);
+        }
+        if permit.amount > reserve.total_balance {
+            panic_with_error!(&env, VeilLendError::InsufficientReserve);
+        }
+
+        position.deposited -= permit.amount;
+        reserve.total_balance -= permit.amount;
+
+        Self::write_position(&env, &permit.user, &permit.asset, &position);
+        Self::write_asset_reserve(&env, &permit.asset, &reserve);
+
+        let total = Self::get_total_deposited(env.clone(), permit.asset.clone()) - permit.amount;
+        env.storage()
+            .persistent()
+            .set(&DataKey::TotalDeposited(permit.asset.clone()), &total);
+
+        WithdrawEvent {
+            user: permit.user.clone(),
+            asset: permit.asset.clone(),
+            amount: permit.amount,
+        }
+        .publish(&env);
+        Self::publish_asset_reserve_updated(&env, &permit.asset, &reserve, ReserveUpdateKind::Withdraw);
+
+        Self::assert_collateralized(
+            &env,
+            &permit.asset,
+            &debt_asset,
+            &permit.user,
+            CollateralAction::Withdraw { amount: 0 },
+        );
+
+        PermitExecuted {
+            user: permit.user,
+            action: permit.action,
+            asset: permit.asset,
+            amount: permit.amount,
+            nonce: permit.nonce,
         }
         .publish(&env);
     }

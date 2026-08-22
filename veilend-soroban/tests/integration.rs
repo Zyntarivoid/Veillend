@@ -5,7 +5,8 @@ use soroban_sdk::events::Event;
 use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
 use soroban_sdk::{vec, Address, Env, Val};
 use veillend_contract::{
-    BatchOperation, InterestAccrued, VeilLendContract, VeilLendContractClient,
+    BatchOperation, InterestAccrued, Permit, PermitAction, VeilLendContract,
+    VeilLendContractClient,
 };
 
 const SECONDS_PER_YEAR: u64 = 31_536_000;
@@ -2276,4 +2277,100 @@ fn test_batch_undercollateralized_end_state_reverts() {
         client.borrow_batch(&user, &bad_borrow_ops, &xlm);
     }));
     assert!(res.is_err(), "Undercollateralized batch must revert atomically");
+}
+
+#[test]
+fn test_permit_deposit_advances_nonce_and_credits_balance() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let usdc = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    configure_asset(&env, &client, &admin, &usdc);
+    set_oracle_price(&env, &client, &admin, &usdc, &100);
+
+    assert_eq!(client.get_permit_nonce(&user), 0);
+
+    let permit = Permit {
+        user: user.clone(),
+        action: PermitAction::Deposit,
+        asset: usdc.clone(),
+        amount: 500,
+        nonce: 0,
+        deadline: env.ledger().timestamp() + 1000,
+    };
+
+    // Execute permit deposit without direct user transaction submission
+    client.deposit_for(&permit);
+
+    // Verify nonce incremented
+    assert_eq!(client.get_permit_nonce(&user), 1);
+
+    // Verify position credited
+    let pos = client.get_position(&user, &usdc);
+    assert_eq!(pos.deposited, 500);
+}
+
+#[test]
+fn test_permit_nonce_mismatch_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let usdc = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    configure_asset(&env, &client, &admin, &usdc);
+    set_oracle_price(&env, &client, &admin, &usdc, &100);
+
+    // Nonce mismatch (expected 0, providing 1)
+    let bad_permit = Permit {
+        user: user.clone(),
+        action: PermitAction::Deposit,
+        asset: usdc.clone(),
+        amount: 500,
+        nonce: 1,
+        deadline: env.ledger().timestamp() + 1000,
+    };
+
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.deposit_for(&bad_permit);
+    }));
+    assert!(res.is_err(), "Permit with mismatched nonce must panic");
+}
+
+#[test]
+fn test_permit_expired_deadline_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let usdc = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    configure_asset(&env, &client, &admin, &usdc);
+    set_oracle_price(&env, &client, &admin, &usdc, &100);
+
+    // Expired permit (deadline before current ledger timestamp)
+    let expired_permit = Permit {
+        user: user.clone(),
+        action: PermitAction::Deposit,
+        asset: usdc.clone(),
+        amount: 500,
+        nonce: 0,
+        deadline: env.ledger().timestamp().saturating_sub(10),
+    };
+
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.deposit_for(&expired_permit);
+    }));
+    assert!(res.is_err(), "Expired permit must panic");
 }
