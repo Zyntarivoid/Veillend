@@ -433,6 +433,22 @@ pub struct BadDebtWrittenOff {
     pub amount: i128,
 }
 
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BatchOperation {
+    pub asset: Address,
+    pub amount: i128,
+}
+
+#[contractevent(topics = ["veillend", "batch_executed"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BatchExecuted {
+    #[topic]
+    pub user: Address,
+    pub operation_kind: ReserveUpdateKind,
+    pub total_operations: u32,
+}
+
 #[contract]
 pub struct VeilLendContract;
 
@@ -1297,6 +1313,261 @@ impl VeilLendContract {
             user,
             asset: debt_asset,
             amount: written_off_amount,
+        }
+        .publish(&env);
+    }
+
+    /// Multi-asset deposit batch entrypoint that executes multiple deposits atomically.
+    pub fn deposit_batch(env: Env, user: Address, operations: Vec<BatchOperation>) {
+        Self::require_not_paused(&env);
+        user.require_auth();
+
+        let count = operations.len();
+        for i in 0..count {
+            let op = operations.get(i).unwrap();
+            Self::require_supported_asset(&env, &op.asset);
+            Self::require_positive_amount(&env, op.amount);
+
+            let interest_state = Self::accrue_and_persist_interest(&env, &op.asset).state;
+            Self::check_deposit_cap(&env, &op.asset, op.amount);
+
+            let mut position = interest::compute_accrued_position(
+                &Self::read_position(&env, &user, &op.asset),
+                &interest_state,
+            );
+            let mut reserve = Self::read_asset_reserve(&env, &op.asset);
+            position.deposited += op.amount;
+            reserve.total_balance += op.amount;
+            Self::write_position(&env, &user, &op.asset, &position);
+            Self::write_asset_reserve(&env, &op.asset, &reserve);
+
+            let total = Self::get_total_deposited(env.clone(), op.asset.clone()) + op.amount;
+            env.storage()
+                .persistent()
+                .set(&DataKey::TotalDeposited(op.asset.clone()), &total);
+
+            DepositEvent {
+                user: user.clone(),
+                asset: op.asset.clone(),
+                amount: op.amount,
+            }
+            .publish(&env);
+            Self::publish_asset_reserve_updated(&env, &op.asset, &reserve, ReserveUpdateKind::Deposit);
+        }
+
+        BatchExecuted {
+            user,
+            operation_kind: ReserveUpdateKind::Deposit,
+            total_operations: count,
+        }
+        .publish(&env);
+    }
+
+    /// Multi-asset repay batch entrypoint that executes multiple repayments atomically.
+    pub fn repay_batch(env: Env, user: Address, operations: Vec<BatchOperation>) {
+        user.require_auth();
+
+        let count = operations.len();
+        for i in 0..count {
+            let op = operations.get(i).unwrap();
+            Self::require_supported_asset(&env, &op.asset);
+            Self::require_positive_amount(&env, op.amount);
+
+            let interest_state = Self::accrue_and_persist_interest(&env, &op.asset).state;
+
+            let mut position = interest::compute_accrued_position(
+                &Self::read_position(&env, &user, &op.asset),
+                &interest_state,
+            );
+            let mut reserve = Self::read_asset_reserve(&env, &op.asset);
+            if op.amount > position.borrowed {
+                panic_with_error!(&env, VeilLendError::RepayTooLarge);
+            }
+
+            position.borrowed -= op.amount;
+            reserve.total_balance += op.amount;
+
+            let mut dust_delta = 0;
+            if position.borrowed > 0 && position.borrowed <= DUST_THRESHOLD {
+                dust_delta = position.borrowed;
+                position.borrowed = 0;
+            }
+
+            Self::write_position(&env, &user, &op.asset, &position);
+            Self::write_asset_reserve(&env, &op.asset, &reserve);
+
+            let total = Self::get_total_borrowed(env.clone(), op.asset.clone()) - op.amount - dust_delta;
+            env.storage()
+                .persistent()
+                .set(&DataKey::TotalBorrowed(op.asset.clone()), &total);
+
+            RepayEvent {
+                user: user.clone(),
+                asset: op.asset.clone(),
+                amount: op.amount,
+            }
+            .publish(&env);
+            Self::publish_asset_reserve_updated(&env, &op.asset, &reserve, ReserveUpdateKind::Repay);
+        }
+
+        BatchExecuted {
+            user,
+            operation_kind: ReserveUpdateKind::Repay,
+            total_operations: count,
+        }
+        .publish(&env);
+    }
+
+    /// Multi-asset borrow batch entrypoint with one end-of-batch health check.
+    pub fn borrow_batch(
+        env: Env,
+        user: Address,
+        operations: Vec<BatchOperation>,
+        collateral_asset: Address,
+    ) {
+        Self::require_not_paused(&env);
+        Self::require_supported_asset(&env, &collateral_asset);
+        user.require_auth();
+
+        let count = operations.len();
+        if count == 0 {
+            return;
+        }
+
+        let first_asset = operations.get(0).unwrap().asset;
+
+        for i in 0..count {
+            let op = operations.get(i).unwrap();
+            Self::require_supported_asset(&env, &op.asset);
+            Self::require_positive_amount(&env, op.amount);
+
+            let interest_state = Self::accrue_and_persist_interest(&env, &op.asset).state;
+            Self::check_borrow_cap(&env, &op.asset, op.amount);
+
+            let mut position = interest::compute_accrued_position(
+                &Self::read_position(&env, &user, &op.asset),
+                &interest_state,
+            );
+            let mut reserve = Self::read_asset_reserve(&env, &op.asset);
+            if op.amount > reserve.total_balance {
+                panic_with_error!(&env, VeilLendError::InsufficientReserve);
+            }
+            position.borrowed += op.amount;
+            reserve.total_balance -= op.amount;
+
+            Self::write_position(&env, &user, &op.asset, &position);
+            Self::write_asset_reserve(&env, &op.asset, &reserve);
+
+            let total = Self::get_total_borrowed(env.clone(), op.asset.clone()) + op.amount;
+            env.storage()
+                .persistent()
+                .set(&DataKey::TotalBorrowed(op.asset.clone()), &total);
+
+            BorrowEvent {
+                user: user.clone(),
+                asset: op.asset.clone(),
+                amount: op.amount,
+            }
+            .publish(&env);
+            Self::publish_asset_reserve_updated(
+                &env,
+                &op.asset,
+                &reserve,
+                ReserveUpdateKind::Borrow,
+            );
+        }
+
+        // Single end-of-batch health factor check
+        Self::assert_collateralized(
+            &env,
+            &collateral_asset,
+            &first_asset,
+            &user,
+            CollateralAction::Borrow { amount: 0 },
+        );
+
+        BatchExecuted {
+            user,
+            operation_kind: ReserveUpdateKind::Borrow,
+            total_operations: count,
+        }
+        .publish(&env);
+    }
+
+    /// Multi-asset withdraw batch entrypoint with one end-of-batch health check.
+    pub fn withdraw_batch(
+        env: Env,
+        user: Address,
+        operations: Vec<BatchOperation>,
+        debt_asset: Address,
+    ) {
+        Self::require_supported_asset(&env, &debt_asset);
+        user.require_auth();
+
+        let count = operations.len();
+        if count == 0 {
+            return;
+        }
+
+        let first_asset = operations.get(0).unwrap().asset;
+
+        for i in 0..count {
+            let op = operations.get(i).unwrap();
+            Self::require_supported_asset(&env, &op.asset);
+            Self::require_positive_amount(&env, op.amount);
+
+            let interest_state = Self::accrue_and_persist_interest(&env, &op.asset).state;
+
+            let mut position = interest::compute_accrued_position(
+                &Self::read_position(&env, &user, &op.asset),
+                &interest_state,
+            );
+            let mut reserve = Self::read_asset_reserve(&env, &op.asset);
+            if op.amount > position.deposited {
+                panic_with_error!(&env, VeilLendError::InsufficientDeposit);
+            }
+            if op.amount > reserve.total_balance {
+                panic_with_error!(&env, VeilLendError::InsufficientReserve);
+            }
+
+            position.deposited -= op.amount;
+            reserve.total_balance -= op.amount;
+
+            Self::write_position(&env, &user, &op.asset, &position);
+            Self::write_asset_reserve(&env, &op.asset, &reserve);
+
+            let total = Self::get_total_deposited(env.clone(), op.asset.clone()) - op.amount;
+            env.storage()
+                .persistent()
+                .set(&DataKey::TotalDeposited(op.asset.clone()), &total);
+
+            WithdrawEvent {
+                user: user.clone(),
+                asset: op.asset.clone(),
+                amount: op.amount,
+            }
+            .publish(&env);
+            Self::publish_asset_reserve_updated(
+                &env,
+                &op.asset,
+                &reserve,
+                ReserveUpdateKind::Withdraw,
+            );
+        }
+
+        // Single end-of-batch health factor check
+        Self::assert_collateralized(
+            &env,
+            &first_asset,
+            &debt_asset,
+            &user,
+            CollateralAction::Withdraw { amount: 0 },
+        );
+
+        BatchExecuted {
+            user,
+            operation_kind: ReserveUpdateKind::Withdraw,
+            total_operations: count,
         }
         .publish(&env);
     }

@@ -3,8 +3,10 @@ use core::cmp::Ordering;
 use soroban_env_common::Compare;
 use soroban_sdk::events::Event;
 use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
-use soroban_sdk::{Address, Env, Val};
-use veillend_contract::{InterestAccrued, VeilLendContract, VeilLendContractClient};
+use soroban_sdk::{vec, Address, Env, Val};
+use veillend_contract::{
+    BatchOperation, InterestAccrued, VeilLendContract, VeilLendContractClient,
+};
 
 const SECONDS_PER_YEAR: u64 = 31_536_000;
 const DEFAULT_TIMELOCK: u32 = 50;
@@ -2156,4 +2158,122 @@ fn test_set_liquidation_params_bounds_validation() {
     assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.set_liquidation_params(&admin, &5_000, &12_001);
     })).is_err());
+}
+
+#[test]
+fn test_batch_deposit_and_repay_parity_with_single_call() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let usdc = Address::generate(&env);
+    let xlm = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    configure_asset(&env, &client, &admin, &usdc);
+    configure_asset(&env, &client, &admin, &xlm);
+    set_oracle_price(&env, &client, &admin, &usdc, &100);
+    set_oracle_price(&env, &client, &admin, &xlm, &100);
+
+    // Multi-asset batch deposit (1000 XLM and 500 USDC)
+    let ops = vec![
+        &env,
+        BatchOperation { asset: xlm.clone(), amount: 1000 },
+        BatchOperation { asset: usdc.clone(), amount: 500 },
+    ];
+    client.deposit_batch(&user, &ops);
+
+    let xlm_pos = client.get_position(&user, &xlm);
+    let usdc_pos = client.get_position(&user, &usdc);
+    assert_eq!(xlm_pos.deposited, 1000);
+    assert_eq!(usdc_pos.deposited, 500);
+
+    // Single borrow
+    client.borrow(&user, &usdc, &xlm, &200);
+
+    // Batch repay
+    let repay_ops = vec![
+        &env,
+        BatchOperation { asset: usdc.clone(), amount: 200 },
+    ];
+    client.repay_batch(&user, &repay_ops);
+
+    let usdc_pos_after = client.get_position(&user, &usdc);
+    assert_eq!(usdc_pos_after.borrowed, 0);
+}
+
+#[test]
+fn test_batch_borrow_and_withdraw_end_of_batch_health_check() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let usdc = Address::generate(&env);
+    let xlm = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    configure_asset(&env, &client, &admin, &usdc);
+    configure_asset(&env, &client, &admin, &xlm);
+    set_oracle_price(&env, &client, &admin, &usdc, &100);
+    set_oracle_price(&env, &client, &admin, &xlm, &100);
+
+    // Deposit 3000 XLM ($3000)
+    client.deposit(&user, &xlm, &3000);
+
+    // Batch borrow multiple amounts (300 USDC and 200 USDC -> Total 500 USDC vs 3000 XLM collateral = 600% ratio)
+    let borrow_ops = vec![
+        &env,
+        BatchOperation { asset: usdc.clone(), amount: 300 },
+        BatchOperation { asset: usdc.clone(), amount: 200 },
+    ];
+    client.borrow_batch(&user, &borrow_ops, &xlm);
+
+    let usdc_pos = client.get_position(&user, &usdc);
+    assert_eq!(usdc_pos.borrowed, 500);
+
+    // Batch withdraw 1000 XLM (leaves 2000 XLM collateral vs 500 USDC debt = 400% ratio >= 150%)
+    let withdraw_ops = vec![
+        &env,
+        BatchOperation { asset: xlm.clone(), amount: 500 },
+        BatchOperation { asset: xlm.clone(), amount: 500 },
+    ];
+    client.withdraw_batch(&user, &withdraw_ops, &usdc);
+
+    let xlm_pos = client.get_position(&user, &xlm);
+    assert_eq!(xlm_pos.deposited, 2000);
+}
+
+#[test]
+fn test_batch_undercollateralized_end_state_reverts() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let usdc = Address::generate(&env);
+    let xlm = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32)); // 150% min collateral
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    configure_asset(&env, &client, &admin, &usdc);
+    configure_asset(&env, &client, &admin, &xlm);
+    set_oracle_price(&env, &client, &admin, &usdc, &100);
+    set_oracle_price(&env, &client, &admin, &xlm, &100);
+
+    client.deposit(&user, &xlm, &1000);
+
+    // Try batch borrow of 800 USDC (requires 1200 XLM collateral at 150%, only 1000 available -> reverts)
+    let bad_borrow_ops = vec![
+        &env,
+        BatchOperation { asset: usdc.clone(), amount: 400 },
+        BatchOperation { asset: usdc.clone(), amount: 400 },
+    ];
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.borrow_batch(&user, &bad_borrow_ops, &xlm);
+    }));
+    assert!(res.is_err(), "Undercollateralized batch must revert atomically");
 }
