@@ -29,7 +29,7 @@ pub use flash_loan::{
 };
 
 /// Increment this only when a contract interface change requires consumers to adapt.
-pub const CONTRACT_VERSION: u32 = 6;
+pub const CONTRACT_VERSION: u32 = 7;
 
 /// Increment this only when the serialized `DataKey` or stored value layout changes.
 pub const STORAGE_SCHEMA_VERSION: u32 = 5;
@@ -301,8 +301,10 @@ pub enum VeilLendError {
     BorrowCapExceeded = 14,
     /// Invalid cap value (must be positive or -1 for unlimited)
     InvalidCap = 15,
-    /// Circuit breaker triggered - asset temporarily paused
-    CircuitBreakerTriggered = 16,
+    // 16 is retired (formerly CircuitBreakerTriggered, dead code — pause
+    // semantics are fully covered by ContractPaused). Left unassigned
+    // rather than reused so no stale off-chain error-code mapping silently
+    // starts describing a different failure.
     /// Reserve balance is too low for the requested action
     InsufficientReserve = 17,
     /// Pending action's timelock window has not elapsed yet
@@ -742,6 +744,7 @@ impl VeilLendContract {
     pub fn execute_configure_asset(env: Env, admin: Address, action_id: u64) {
         Self::require_admin(&env, &admin);
         admin.require_auth();
+        Self::require_not_paused(&env);
 
         Self::execute_action(&env, &admin, action_id, ActionKind::ConfigureAsset);
     }
@@ -771,6 +774,7 @@ impl VeilLendContract {
     pub fn execute_set_oracle_price(env: Env, admin: Address, action_id: u64) {
         Self::require_admin(&env, &admin);
         admin.require_auth();
+        Self::require_not_paused(&env);
 
         Self::execute_action(&env, &admin, action_id, ActionKind::SetOraclePrice);
     }
@@ -802,6 +806,7 @@ impl VeilLendContract {
         Self::require_admin(&env, &admin);
         Self::require_supported_asset(&env, &asset);
         admin.require_auth();
+        Self::require_not_paused(&env);
 
         Self::apply_set_oracle_price(&env, &asset, price);
     }
@@ -828,6 +833,7 @@ impl VeilLendContract {
     pub fn set_max_oracle_age(env: Env, admin: Address, seconds: u64) {
         Self::require_admin(&env, &admin);
         admin.require_auth();
+        Self::require_not_paused(&env);
         env.storage()
             .instance()
             .set(&DataKey::MaxOracleAge, &seconds);
@@ -846,6 +852,7 @@ impl VeilLendContract {
         Self::require_admin(&env, &admin);
         Self::require_supported_asset(&env, &asset);
         admin.require_auth();
+        Self::require_not_paused(&env);
         env.storage()
             .persistent()
             .set(&DataKey::OracleMaxChangeBps(asset.clone()), &max_bps);
@@ -864,6 +871,7 @@ impl VeilLendContract {
         Self::require_admin(&env, &admin);
         Self::require_supported_asset(&env, &asset);
         admin.require_auth();
+        Self::require_not_paused(&env);
 
         env.storage()
             .persistent()
@@ -912,6 +920,7 @@ impl VeilLendContract {
     pub fn execute_update_asset_caps(env: Env, admin: Address, action_id: u64) {
         Self::require_admin(&env, &admin);
         admin.require_auth();
+        Self::require_not_paused(&env);
 
         Self::execute_action(&env, &admin, action_id, ActionKind::UpdateAssetCaps);
     }
@@ -970,6 +979,7 @@ impl VeilLendContract {
     pub fn execute_set_min_collateral_ratio(env: Env, admin: Address, action_id: u64) {
         Self::require_admin(&env, &admin);
         admin.require_auth();
+        Self::require_not_paused(&env);
 
         Self::execute_action(&env, &admin, action_id, ActionKind::SetMinCollateralRatio);
     }
@@ -1297,6 +1307,7 @@ impl VeilLendContract {
     /// pure function of elapsed time and current state, not a privileged
     /// action.
     pub fn accrue_interest(env: Env, asset: Address) {
+        Self::require_not_paused(&env);
         Self::require_supported_asset(&env, &asset);
         let result = Self::accrue_and_persist_interest(&env, &asset);
 
@@ -1344,6 +1355,7 @@ impl VeilLendContract {
     pub fn execute_record_protocol_fee(env: Env, admin: Address, action_id: u64) {
         Self::require_admin(&env, &admin);
         admin.require_auth();
+        Self::require_not_paused(&env);
 
         Self::execute_action(&env, &admin, action_id, ActionKind::RecordProtocolFee);
     }
@@ -1371,6 +1383,7 @@ impl VeilLendContract {
     pub fn set_max_protocol_fee_bps(env: Env, admin: Address, bps: u32) {
         Self::require_admin(&env, &admin);
         admin.require_auth();
+        Self::require_not_paused(&env);
 
         // 5000 bps = 50%; anything higher is treated as misconfiguration.
         // InvalidCap is reused here (rather than a new error code) because this
@@ -1432,6 +1445,7 @@ impl VeilLendContract {
     pub fn execute_withdraw_reserves(env: Env, admin: Address, action_id: u64) {
         Self::require_admin(&env, &admin);
         admin.require_auth();
+        Self::require_not_paused(&env);
 
         Self::execute_action(&env, &admin, action_id, ActionKind::WithdrawReserves);
     }
@@ -1458,6 +1472,7 @@ impl VeilLendContract {
         Self::require_admin(&env, &admin);
         Self::require_supported_asset(&env, &asset);
         admin.require_auth();
+        Self::require_not_paused(&env);
 
         if cap < 0 {
             panic_with_error!(&env, VeilLendError::InvalidCap);
@@ -1476,6 +1491,7 @@ impl VeilLendContract {
         Self::require_admin(&env, &admin);
         Self::require_supported_asset(&env, &asset);
         admin.require_auth();
+        Self::require_not_paused(&env);
 
         if cap < 0 {
             panic_with_error!(&env, VeilLendError::InvalidCap);
@@ -1510,6 +1526,7 @@ impl VeilLendContract {
     pub fn set_close_factor(env: Env, admin: Address, bps: u32) {
         Self::require_admin(&env, &admin);
         admin.require_auth();
+        Self::require_not_paused(&env);
 
         if !(1_000..=10_000).contains(&bps) {
             panic_with_error!(&env, VeilLendError::InvalidCap);
@@ -1682,6 +1699,7 @@ impl VeilLendContract {
         Self::require_admin(&env, &admin);
         Self::require_supported_asset(&env, &asset);
         admin.require_auth();
+        Self::require_not_paused(&env);
 
         // Validate kink utilization bound.
         if params.kink_util_bps < 1_000 || params.kink_util_bps > 9_500 {
@@ -3216,6 +3234,33 @@ impl VeilLendContract {
         }
     }
 
+    /// Panics with `ContractPaused` if the global pause flag is set.
+    ///
+    /// Called at the top of every entrypoint (after `require_auth`, so an
+    /// unauthenticated caller still gets `Unauthorized` rather than learning
+    /// pause state) that either moves value or advances protocol-wide state
+    /// an admin key alone could otherwise abuse during an incident:
+    /// `deposit`, `borrow` (and their batch/permit variants), `flash_loan`,
+    /// `accrue_interest`, `set_oracle_price`/`execute_set_oracle_price`,
+    /// `execute_configure_asset`, `execute_update_asset_caps`,
+    /// `execute_set_min_collateral_ratio`, `execute_record_protocol_fee`,
+    /// `execute_withdraw_reserves`, `set_max_oracle_age`,
+    /// `set_oracle_max_change_bps`, `set_oracle_price_bounds`,
+    /// `set_max_protocol_fee_bps`, `set_supply_cap`, `set_borrow_cap`,
+    /// `set_close_factor`, `set_interest_params`, and `configure_flash_loan`.
+    ///
+    /// Deliberately NOT called (see the README pause table for the full
+    /// rationale) by:
+    /// - `repay`/`withdraw` (+ batch/permit variants) — a paused protocol
+    ///   must still let users exit and reduce risk.
+    /// - `liquidate` — blocking liquidations while paused would let bad debt
+    ///   accumulate exactly when the protocol is most exposed.
+    /// - `set_paused`, `propose_set_paused`/`execute_set_paused`/
+    ///   `cancel_set_paused` — the pause switch itself must stay reachable.
+    /// - `add_admin`/`remove_admin`/`set_timelock_ledgers`, and every
+    ///   `propose_*`/`cancel_*` — governance/incident-response actions admins
+    ///   need in order to recover (e.g. removing a compromised admin, or
+    ///   cancelling a malicious pending action) must not be paused shut too.
     fn require_not_paused(env: &Env) {
         let paused: bool = env
             .storage()
@@ -3635,7 +3680,6 @@ mod tests {
         assert_eq!(VeilLendError::DepositCapExceeded as u32, 13);
         assert_eq!(VeilLendError::BorrowCapExceeded as u32, 14);
         assert_eq!(VeilLendError::InvalidCap as u32, 15);
-        assert_eq!(VeilLendError::CircuitBreakerTriggered as u32, 16);
         assert_eq!(VeilLendError::InsufficientReserve as u32, 17);
         assert_eq!(VeilLendError::TimelockNotReady as u32, 18);
         assert_eq!(VeilLendError::UnknownAction as u32, 19);
@@ -3658,7 +3702,7 @@ mod tests {
     fn test_contract_metadata_identifies_current_storage_shape() {
         let metadata = VeilLendContract::contract_metadata(Env::default());
 
-        assert_eq!(metadata.contract_version, 6);
+        assert_eq!(metadata.contract_version, 7);
         assert_eq!(metadata.storage_schema_version, 5);
         assert_eq!(metadata.storage_schema_id, symbol_short!("VLENDV5"));
     }
@@ -3682,7 +3726,6 @@ mod tests {
             VeilLendError::DepositCapExceeded as u32,
             VeilLendError::BorrowCapExceeded as u32,
             VeilLendError::InvalidCap as u32,
-            VeilLendError::CircuitBreakerTriggered as u32,
             VeilLendError::InsufficientReserve as u32,
             VeilLendError::TimelockNotReady as u32,
             VeilLendError::UnknownAction as u32,

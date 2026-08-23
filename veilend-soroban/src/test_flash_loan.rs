@@ -310,6 +310,28 @@ fn test_flash_loan_paused_blocks() {
 }
 
 #[test]
+#[should_panic(expected = "Contract, #12")]
+fn test_configure_flash_loan_paused_blocks() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let asset = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    configure_asset(&env, &client, &admin, &asset);
+
+    let action_id = client.propose_set_paused(&admin);
+    advance_ledgers(&env, DEFAULT_TIMELOCK);
+    client.execute_set_paused(&admin, &action_id);
+    assert!(client.is_paused());
+
+    // Admin config mutators must not be usable to funnel value while the
+    // protocol claims to be frozen (issue #298).
+    client.configure_flash_loan(&admin, &asset, &true, &9, &10_000);
+}
+
+#[test]
 fn test_flash_loan_events_emitted() {
     let env = Env::default();
     env.mock_all_auths();

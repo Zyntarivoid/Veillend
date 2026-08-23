@@ -114,6 +114,7 @@ impl VeilLendContract {
     /// * If `asset` is not supported
     /// * If `premium_bps` is outside [MIN_FLASH_LOAN_PREMIUM_BPS, MAX_FLASH_LOAN_PREMIUM_BPS]
     /// * If `max_bps` is outside [1, 10_000]
+    /// * If contract is paused
     pub fn configure_flash_loan(
         env: Env,
         admin: Address,
@@ -125,6 +126,7 @@ impl VeilLendContract {
         Self::require_admin(&env, &admin);
         Self::require_supported_asset(&env, &asset);
         admin.require_auth();
+        Self::require_not_paused(&env);
 
         if !(MIN_FLASH_LOAN_PREMIUM_BPS..=MAX_FLASH_LOAN_PREMIUM_BPS).contains(&premium_bps) {
             panic_with_error!(&env, VeilLendError::InvalidFlashLoanPremium);

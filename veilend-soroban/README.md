@@ -142,11 +142,11 @@ Call `contract_metadata()` on a deployed contract before writing a migration or 
 
 | Metadata field | Current value | Meaning |
 | :--- | :--- | :--- |
-| `contract_version` | `4` | The public contract interface version. |
-| `storage_schema_version` | `3` | The version of serialized storage keys and values. |
-| `storage_schema_id` | `VLENDV3` | A compact, stable identifier for this storage layout. |
+| `contract_version` | `7` | The public contract interface version. |
+| `storage_schema_version` | `5` | The version of serialized storage keys and values. |
+| `storage_schema_id` | `VLENDV5` | A compact, stable identifier for this storage layout. |
 
-Schema `VLENDV3` uses these keys:
+Schema `VLENDV5` uses these keys:
 
 | Durability | Key | Value |
 | :--- | :--- | :--- |
@@ -175,6 +175,38 @@ Schema `VLENDV3` uses these keys:
 The admin authority is a `Vec<Address>` (`AdminSet`): any one of N admins can act, and `add_admin`/`remove_admin` manage membership (with a last-admin lockout guard). Privileged mutations — `configure_asset`, `set_oracle_price`, `update_asset_caps`, `set_min_collateral_ratio`, pausing, and `record_protocol_fee` — follow a `propose_*` → `execute_*` (after the `TimelockLedgers` delay) → `cancel_*` flow, with `set_paused(false)` exempt so unpausing stays immediate.
 
 **Oracle Safety Rails:** The contract includes comprehensive oracle price safety mechanisms including staleness tracking (`OracleLastUpdated`), volatility limits (`OracleMaxChangeBps`, `OraclePrevPrice`), and absolute bounds (`OracleMinPrice`, `OracleMaxPrice`). These protect against stale prices, excessive volatility, and absurd values that could compromise the protocol.
+
+## Global Pause
+
+`Paused` is a single protocol-wide flag. Pausing is timelocked (`propose_set_paused` → `execute_set_paused`); unpausing via `set_paused(admin, false)` is immediate, so incident response is never itself blocked by the timelock. Every mutating entrypoint either checks `require_not_paused` or is deliberately exempt — the table below is authoritative; treat any entrypoint missing from it as a bug, not an oversight.
+
+**Checked (blocked while paused):**
+
+| Entrypoint | Why it's gated |
+| :--- | :--- |
+| `deposit`, `borrow` (+ `deposit_batch`/`borrow_batch`, `deposit_for`/`borrow_for`) | Core value-moving user actions. |
+| `flash_loan` | Moves value; a compromised admin could `configure_flash_loan` + drain via a self-repaying loop otherwise. |
+| `accrue_interest` | Permissionless; advancing the debt clock during a freeze contradicts the freeze. |
+| `set_oracle_price`, `execute_set_oracle_price` | A malicious oracle write can misprice collateral to enable theft-by-liquidation or bad debt. |
+| `set_max_oracle_age`, `set_oracle_max_change_bps`, `set_oracle_price_bounds` | Weakening these bounds first is how an attacker would set up an out-of-range `set_oracle_price` write. |
+| `execute_configure_asset` | Enabling/disabling an asset changes what can be deposited/borrowed. |
+| `execute_update_asset_caps`, `set_supply_cap`, `set_borrow_cap` | Cap changes gate how much value can move once unpaused. |
+| `execute_set_min_collateral_ratio`, `set_close_factor`, `set_interest_params` | Risk parameters that directly control solvency and liquidation behavior. |
+| `execute_record_protocol_fee`, `set_max_protocol_fee_bps` | `record_protocol_fee` credits the protocol treasury from user-reserve funds — exactly the "funnel value while paused" vector this issue closes. |
+| `execute_withdraw_reserves` | Directly moves protocol treasury funds out of the contract. |
+| `configure_flash_loan` | Admin config for `flash_loan`; must not be reconfigurable to set up value extraction while paused. |
+
+**Not checked (intentionally still callable while paused):**
+
+| Entrypoint | Why it stays open |
+| :--- | :--- |
+| `repay`, `withdraw` (+ batch/permit variants) | Users must always be able to reduce debt or exit collateral, especially during an incident. |
+| `liquidate` | Blocking liquidations while paused would let bad debt accumulate exactly when the protocol is most exposed. |
+| `set_paused`, `propose_set_paused`/`execute_set_paused`/`cancel_set_paused` | The pause switch itself must stay reachable in both directions. |
+| `add_admin`, `remove_admin`, `set_timelock_ledgers` | Incident response (e.g. removing a compromised admin) must not be paused shut. |
+| Every `propose_*` and `cancel_*` (for any action kind) | Proposing has no effect until the corresponding `execute_*` runs (which *is* gated), and cancelling a pending — possibly malicious — action must remain possible mid-incident. |
+
+`CircuitBreakerTriggered` (error code 16) was removed: it was defined and tested but never thrown, and `ContractPaused` (12) already fully covers pause semantics. Code 16 is retired, not reassigned.
 
 When changing the public interface, increment `CONTRACT_VERSION`. When changing a `DataKey` variant or any stored value shape, increment `STORAGE_SCHEMA_VERSION` and assign a new `STORAGE_SCHEMA_ID`. **Keep this table in sync with the implementation** — any drift will break migrations and off-chain readers.
 

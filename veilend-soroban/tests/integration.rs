@@ -2943,3 +2943,268 @@ fn test_batch_events_emitted() {
 
     assert_eq!(deposit_events, 1);
 }
+
+// ─── Issue #298: require_not_paused on admin/accrual entrypoints ───────────
+//
+// Every admin/accrual mutator that can change protocol parameters or move
+// value must be blocked while paused, exactly like `deposit`/`borrow`
+// already are — otherwise a compromised admin key can keep "funneling
+// value" (or the debt clock can keep advancing via `accrue_interest`) while
+// the pause banner claims the system is frozen. `repay`/`withdraw` are the
+// deliberate exception (users must always be able to exit); see
+// `test_circuit_breaker_pause` above, which already asserts both succeed
+// while paused.
+
+#[test]
+#[should_panic(expected = "Contract, #12")]
+fn test_execute_configure_asset_blocked_while_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let asset = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    let action_id = client.propose_configure_asset(&admin, &asset, &true);
+
+    pause(&env, &client, &admin);
+    assert!(client.is_paused());
+
+    client.execute_configure_asset(&admin, &action_id);
+}
+
+#[test]
+#[should_panic(expected = "Contract, #12")]
+fn test_set_oracle_price_blocked_while_paused() {
+    let env = Env::default();
+    let (client, admin, asset) = setup_with_asset(&env);
+
+    pause(&env, &client, &admin);
+    assert!(client.is_paused());
+
+    client.set_oracle_price(&admin, &asset, &2_000_000);
+}
+
+#[test]
+#[should_panic(expected = "Contract, #12")]
+fn test_execute_set_oracle_price_blocked_while_paused() {
+    let env = Env::default();
+    let (client, admin, asset) = setup_with_asset(&env);
+
+    let action_id = client.propose_set_oracle_price(&admin, &asset, &2_000_000);
+
+    pause(&env, &client, &admin);
+    assert!(client.is_paused());
+
+    client.execute_set_oracle_price(&admin, &action_id);
+}
+
+#[test]
+#[should_panic(expected = "Contract, #12")]
+fn test_set_max_oracle_age_blocked_while_paused() {
+    let env = Env::default();
+    let (client, admin, _asset) = setup_with_asset(&env);
+
+    pause(&env, &client, &admin);
+    assert!(client.is_paused());
+
+    client.set_max_oracle_age(&admin, &3600u64);
+}
+
+#[test]
+#[should_panic(expected = "Contract, #12")]
+fn test_set_oracle_max_change_bps_blocked_while_paused() {
+    let env = Env::default();
+    let (client, admin, asset) = setup_with_asset(&env);
+
+    pause(&env, &client, &admin);
+    assert!(client.is_paused());
+
+    client.set_oracle_max_change_bps(&admin, &asset, &1_000u32);
+}
+
+#[test]
+#[should_panic(expected = "Contract, #12")]
+fn test_set_oracle_price_bounds_blocked_while_paused() {
+    let env = Env::default();
+    let (client, admin, asset) = setup_with_asset(&env);
+
+    pause(&env, &client, &admin);
+    assert!(client.is_paused());
+
+    client.set_oracle_price_bounds(&admin, &asset, &1i128, &10_000_000i128);
+}
+
+#[test]
+#[should_panic(expected = "Contract, #12")]
+fn test_execute_update_asset_caps_blocked_while_paused() {
+    let env = Env::default();
+    let (client, admin, asset) = setup_with_asset(&env);
+
+    let action_id = client.propose_update_asset_caps(&admin, &asset, &1_000i128, &500i128);
+
+    pause(&env, &client, &admin);
+    assert!(client.is_paused());
+
+    client.execute_update_asset_caps(&admin, &action_id);
+}
+
+#[test]
+#[should_panic(expected = "Contract, #12")]
+fn test_execute_set_min_collateral_ratio_blocked_while_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    let action_id = client.propose_set_min_collateral_ratio(&admin, &20_000u32);
+
+    pause(&env, &client, &admin);
+    assert!(client.is_paused());
+
+    client.execute_set_min_collateral_ratio(&admin, &action_id);
+}
+
+#[test]
+#[should_panic(expected = "Contract, #12")]
+fn test_accrue_interest_blocked_while_paused() {
+    let env = Env::default();
+    let (client, admin, asset) = setup_with_asset(&env);
+
+    pause(&env, &client, &admin);
+    assert!(client.is_paused());
+
+    client.accrue_interest(&asset);
+}
+
+#[test]
+#[should_panic(expected = "Contract, #12")]
+fn test_execute_record_protocol_fee_blocked_while_paused() {
+    let env = Env::default();
+    let (client, admin, asset) = setup_with_asset(&env);
+
+    let action_id = client.propose_record_protocol_fee(&admin, &asset, &100i128);
+
+    pause(&env, &client, &admin);
+    assert!(client.is_paused());
+
+    client.execute_record_protocol_fee(&admin, &action_id);
+}
+
+#[test]
+#[should_panic(expected = "Contract, #12")]
+fn test_set_max_protocol_fee_bps_blocked_while_paused() {
+    let env = Env::default();
+    let (client, admin, _asset) = setup_with_asset(&env);
+
+    pause(&env, &client, &admin);
+    assert!(client.is_paused());
+
+    client.set_max_protocol_fee_bps(&admin, &1_000u32);
+}
+
+#[test]
+#[should_panic(expected = "Contract, #12")]
+fn test_execute_withdraw_reserves_blocked_while_paused() {
+    let env = Env::default();
+    let (client, admin, asset) = setup_with_asset(&env);
+    let to = Address::generate(&env);
+
+    // Fund a withdrawable reserve so `propose_withdraw_reserves` itself
+    // doesn't reject the amount before pause is even relevant.
+    let fee_action_id = client.propose_record_protocol_fee(&admin, &asset, &100i128);
+    advance_ledgers(&env, DEFAULT_TIMELOCK);
+    client.execute_record_protocol_fee(&admin, &fee_action_id);
+
+    let action_id = client.propose_withdraw_reserves(&admin, &asset, &to, &1i128);
+
+    pause(&env, &client, &admin);
+    assert!(client.is_paused());
+
+    client.execute_withdraw_reserves(&admin, &action_id);
+}
+
+#[test]
+#[should_panic(expected = "Contract, #12")]
+fn test_set_supply_cap_blocked_while_paused() {
+    let env = Env::default();
+    let (client, admin, asset) = setup_with_asset(&env);
+
+    pause(&env, &client, &admin);
+    assert!(client.is_paused());
+
+    client.set_supply_cap(&admin, &asset, &1_000i128);
+}
+
+#[test]
+#[should_panic(expected = "Contract, #12")]
+fn test_set_borrow_cap_blocked_while_paused() {
+    let env = Env::default();
+    let (client, admin, asset) = setup_with_asset(&env);
+
+    pause(&env, &client, &admin);
+    assert!(client.is_paused());
+
+    client.set_borrow_cap(&admin, &asset, &1_000i128);
+}
+
+#[test]
+#[should_panic(expected = "Contract, #12")]
+fn test_set_close_factor_blocked_while_paused() {
+    let env = Env::default();
+    let (client, admin, _asset) = setup_with_asset(&env);
+
+    pause(&env, &client, &admin);
+    assert!(client.is_paused());
+
+    client.set_close_factor(&admin, &5_000u32);
+}
+
+#[test]
+#[should_panic(expected = "Contract, #12")]
+fn test_set_interest_params_blocked_while_paused() {
+    use veillend_contract::InterestParams;
+
+    let env = Env::default();
+    let (client, admin, asset) = setup_with_asset(&env);
+
+    pause(&env, &client, &admin);
+    assert!(client.is_paused());
+
+    client.set_interest_params(
+        &admin,
+        &asset,
+        &InterestParams {
+            base_rate_bps: 200,
+            kink_util_bps: 9_500,
+            slope1_bps: 2_000,
+            slope2_bps: 0,
+            reserve_factor_bps: 0,
+        },
+    );
+}
+
+/// Explicit companion to `test_circuit_breaker_pause`'s repay/withdraw
+/// assertions: repay and withdraw are the intentional exception to the
+/// pause gate (users must always be able to exit), spelled out here as its
+/// own test so it can't be missed as "just another paused entrypoint" when
+/// this file is skimmed.
+#[test]
+fn test_repay_and_withdraw_succeed_while_paused() {
+    let env = Env::default();
+    let (client, admin, asset) = setup_with_asset(&env);
+    let user = Address::generate(&env);
+
+    client.deposit(&user, &asset, &1_000);
+    client.borrow(&user, &asset, &asset, &200);
+
+    pause(&env, &client, &admin);
+    assert!(client.is_paused());
+
+    client.repay(&user, &asset, &200);
+    assert_eq!(client.get_total_borrowed(&asset), 0);
+
+    client.withdraw(&user, &asset, &asset, &1_000);
+    assert_eq!(client.get_total_deposited(&asset), 0);
+}
