@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SorobanRpcService } from '../stellar/soroban-rpc.service';
 import { HorizonService } from '../stellar/horizon.service';
 import { IndexerService } from '../indexer/indexer.service';
+import { ProtocolService } from '../protocol/protocol.service';
 
 export interface ComponentStatus {
   status: 'up' | 'down' | 'degraded';
@@ -44,6 +45,7 @@ export class HealthService {
     private readonly prisma: PrismaService,
     private readonly sorobanRpc: SorobanRpcService,
     private readonly horizon: HorizonService,
+    private readonly protocolService?: ProtocolService,
     @Optional() private readonly indexerService?: IndexerService,
   ) {}
 
@@ -171,5 +173,9 @@ export class HealthService {
   async isPrismaReady(): Promise<boolean> {
     const result = await this.probePrisma();
     return result.status === 'up';
+  }
+
+  protocolConfigReachability(): 'ok' | 'stale' | 'unavailable' {
+    return this.protocolService?.getReachability() ?? 'unavailable';
   }
 }

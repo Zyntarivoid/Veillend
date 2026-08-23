@@ -9,6 +9,8 @@ import { AppConfigService } from '../config/app-config.service';
 import { SorobanRpcService } from '../stellar/soroban-rpc.service';
 import { IndexerService } from '../indexer/indexer.service';
 import { AdminActionRepository } from './admin-action.repository';
+import { ProtocolService } from '../protocol/protocol.service';
+import { AssetsService } from '../assets/assets.service';
 
 /**
  * Watches Soroban RPC for admin action intents that have been reported as
@@ -30,6 +32,8 @@ export class AdminActionWatcherService
     private readonly rpcService: SorobanRpcService,
     private readonly repository: AdminActionRepository,
     private readonly indexerService: IndexerService,
+    private readonly protocolService: ProtocolService,
+    private readonly assetsService: AssetsService,
   ) {}
 
   onApplicationBootstrap() {
@@ -74,6 +78,9 @@ export class AdminActionWatcherService
 
           if (result.status === rpc.Api.GetTransactionStatus.SUCCESS) {
             await this.repository.markConfirmed(action.id);
+            // Only executed actions affect the live contract configuration.
+            this.protocolService.invalidateCache();
+            this.assetsService.invalidateCache();
             this.logger.log(
               `Admin action ${action.id} confirmed on-chain (tx ${action.txHash})`,
             );

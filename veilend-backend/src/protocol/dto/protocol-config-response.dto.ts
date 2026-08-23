@@ -18,6 +18,22 @@ export class AssetRiskConfigDto {
 
   @Expose()
   isSupported: boolean;
+
+  @Expose()
+  supplyCap?: string;
+
+  @Expose()
+  borrowCap?: string;
+
+  @Expose()
+  oracle?: {
+    price: string | null;
+    ageSeconds: number | null;
+    isStale: boolean;
+    minBound: string | null;
+    maxBound: string | null;
+    maxChangeBps: number | null;
+  };
 }
 
 /**
@@ -64,6 +80,23 @@ export class RiskParametersDto {
  * Full protocol configuration returned by GET /protocol/config.
  */
 export class ProtocolConfigResponseDto {
+  @Expose()
+  source: 'chain' | 'fallback';
+
+  @Expose()
+  contractVersion?: number;
+
+  @Expose()
+  storageSchemaVersion?: number;
+
+  @Expose()
+  paused?: boolean;
+
+  @Expose()
+  timelockLedgers?: number;
+
+  @Expose()
+  staleAsOf?: string;
   @Expose()
   network: NetworkConfigDto;
 

@@ -8,6 +8,8 @@ import {
   AssetRiskConfigDto,
 } from './dto/protocol-config-response.dto';
 import { plainToInstance } from 'class-transformer';
+import { ProtocolChainReader } from './protocol-chain-reader';
+import { bpsToConservativeDecimal } from './bps.util';
 
 /**
  * Simple in-memory cache with TTL for protocol config.
@@ -37,10 +39,12 @@ export class ProtocolService {
   private readonly CACHE_TTL_MS = 120_000;
 
   private configCache: CacheEntry<ProtocolConfigResponseDto> | null = null;
+  private lastKnownGood: { data: ProtocolConfigResponseDto; cachedAt: number } | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly appConfig: AppConfigService,
+    private readonly chainReader: ProtocolChainReader,
   ) {}
 
   /**
@@ -58,24 +62,18 @@ export class ProtocolService {
 
     this.logger.debug('Cache miss – building protocol config');
 
-    const network = this.buildNetworkConfig();
-    const riskParameters = DEFAULT_RISK_PARAMETERS;
-    const assets = await this.buildAssetRiskConfigs();
-
-    const response = plainToInstance(ProtocolConfigResponseDto, {
-      network,
-      riskParameters,
-      assets,
-      supportedAssetCount: assets.filter((a) => a.isSupported).length,
-      cachedAt: new Date().toISOString(),
-    });
-
-    this.configCache = {
-      data: response,
-      expiresAt: now + this.CACHE_TTL_MS,
-    };
-
-    return response;
+    try {
+      const response = await this.buildChainConfig();
+      this.configCache = { data: response, expiresAt: now + this.CACHE_TTL_MS };
+      this.lastKnownGood = { data: response, cachedAt: now };
+      return response;
+    } catch (error) {
+      if (this.lastKnownGood && now - this.lastKnownGood.cachedAt <= 600_000) {
+        return plainToInstance(ProtocolConfigResponseDto, { ...this.lastKnownGood.data, staleAsOf: new Date(this.lastKnownGood.cachedAt).toISOString() });
+      }
+      this.logger.warn(`Protocol chain read failed; serving fallback: ${error instanceof Error ? error.message : String(error)}`);
+      return this.buildFallbackConfig();
+    }
   }
 
   /**
@@ -93,6 +91,27 @@ export class ProtocolService {
    */
   getMinCollateralRatioBps(): number {
     return Math.round(DEFAULT_RISK_PARAMETERS.minCollateralRatio * 10_000);
+  }
+
+  getReachability(): 'ok' | 'stale' | 'unavailable' {
+    if (this.configCache) return 'ok';
+    return this.lastKnownGood ? 'stale' : 'unavailable';
+  }
+
+  private async buildChainConfig(): Promise<ProtocolConfigResponseDto> {
+    const dbAssets = await this.prisma.asset.findMany({ orderBy: [{ isSupported: 'desc' }, { code: 'asc' }] });
+    const chain = await this.chainReader.read(this.appConfig.indexer.contractId, dbAssets);
+    const assets = dbAssets.map((asset) => {
+      const live = asset.contractId ? chain.assets.get(asset.contractId) : undefined;
+      return plainToInstance(AssetRiskConfigDto, { code: asset.code, symbol: asset.symbol, collateralFactor: asset.isNative ? .6 : asset.code === 'USDC' ? .75 : .7, liquidationThreshold: asset.isNative ? .7 : asset.code === 'USDC' ? .8 : .78, isSupported: live?.isSupported ?? false, supplyCap: live?.supplyCap, borrowCap: live?.borrowCap, oracle: live?.oracle });
+    });
+    const metadata = chain.metadata;
+    return plainToInstance(ProtocolConfigResponseDto, { source: 'chain', network: this.buildNetworkConfig(), riskParameters: { ...DEFAULT_RISK_PARAMETERS, minCollateralRatio: bpsToConservativeDecimal(chain.minCollateralRatioBps), closeFactor: bpsToConservativeDecimal(chain.closeFactorBps) }, assets, supportedAssetCount: assets.filter((a) => a.isSupported).length, cachedAt: new Date().toISOString(), paused: chain.paused, timelockLedgers: chain.timelockLedgers, contractVersion: Number(metadata.contract_version), storageSchemaVersion: Number(metadata.storage_schema_version) });
+  }
+
+  private async buildFallbackConfig(): Promise<ProtocolConfigResponseDto> {
+    const assets = await this.buildAssetRiskConfigs();
+    return plainToInstance(ProtocolConfigResponseDto, { source: 'fallback', network: this.buildNetworkConfig(), riskParameters: DEFAULT_RISK_PARAMETERS, assets, supportedAssetCount: assets.filter((a) => a.isSupported).length, cachedAt: new Date().toISOString() });
   }
 
   private buildNetworkConfig(): NetworkConfigDto {

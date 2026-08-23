@@ -8,9 +8,11 @@ import { AuthModule } from '../auth/auth.module';
 import { StellarModule } from '../stellar/stellar.module';
 import { IndexerModule } from '../indexer/indexer.module';
 import { ConfigModule } from '../config/config.module';
+import { ProtocolModule } from '../protocol/protocol.module';
+import { AssetsModule } from '../assets/assets.module';
 
 @Module({
-  imports: [ConfigModule, AuthModule, StellarModule, IndexerModule],
+  imports: [ConfigModule, AuthModule, StellarModule, IndexerModule, ProtocolModule, AssetsModule],
   controllers: [AdminController],
   providers: [
     AdminService,
