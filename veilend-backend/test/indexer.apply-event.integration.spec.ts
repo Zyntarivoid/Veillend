@@ -23,6 +23,9 @@ import { PrismaService } from '../src/prisma/prisma.service';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 
+// Schema sync + first connections can be slow on cold starts.
+jest.setTimeout(180_000);
+
 // Skip (rather than fail) when no database is configured, so this file never
 // breaks the default unit-test run that has no Postgres available.
 const describeIfDb = DATABASE_URL ? describe : describe.skip;
@@ -63,11 +66,16 @@ describeIfDb('IndexerRepository.applyEvent (Postgres integration)', () => {
   };
 
   beforeAll(async () => {
-    // Sync the schema to the target database (idempotent).
-    execSync('npx prisma db push --skip-generate', {
-      cwd: path.join(__dirname, '..'),
-      stdio: 'inherit',
-    });
+    // Sync the schema to the target database (idempotent). The workspace
+    // prisma binary is used directly — npx resolution trips hook timeouts.
+    execSync(
+      'node node_modules/prisma/build/index.js db push --skip-generate',
+      {
+        cwd: path.join(__dirname, '..'),
+        stdio: 'inherit',
+        env: process.env,
+      },
+    );
 
     prisma = new PrismaClient({
       datasources: { db: { url: DATABASE_URL } },

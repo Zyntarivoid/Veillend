@@ -7,6 +7,7 @@ import {
   Body,
   Logger,
   UseGuards,
+  Optional,
   Req,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -20,6 +21,7 @@ import { AddressParamDto } from './dto/address-param.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AdminGuard } from '../auth/admin.guard';
 import { PrismaService } from '../prisma/prisma.service';
+import { PositionRiskScannerService } from '../risk/position-risk-scanner.service';
 import { sanitizeAddressForLog } from '../common/logging/sanitize-address.util';
 
 interface AuthenticatedUser {
@@ -45,6 +47,7 @@ export class IndexerController {
     private readonly repository: IndexerRepository,
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
+    @Optional() private readonly scanner?: PositionRiskScannerService,
   ) {}
 
   @Get('status')
@@ -76,6 +79,7 @@ export class IndexerController {
       insertedCounter: stats.insertedCounter,
       lastError: stats.lastError,
       replay: stats.replay,
+      scanner: this.scanner ? this.scanner.getStatus() : null,
     };
   }
 

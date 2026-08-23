@@ -12,6 +12,7 @@ import {
   IndexerTransaction,
   IndexerPosition,
   IndexerParsedEvent,
+  LiquidationEventPayload,
   extractEventIndex,
 } from './indexer.repository';
 
@@ -416,6 +417,8 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
 
   /**
    * Fetches events for a ledger chunk from Soroban RPC and parses them.
+   * `liquidation_clipped` markers emitted in the same fetch window as their
+   * `liquidate` event are folded into the matching liquidation payload.
    */
   private async fetchAndParseEvents(
     startLedger: number,
@@ -465,7 +468,7 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
       }
     }
 
-    return parsedItems;
+    return attachClipMarkers(parsedItems);
   }
 
   /**
@@ -490,6 +493,90 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
       }
 
       const topic1 = this.topicToString(parsedTopics[1]);
+
+      if (topic1 === 'liquidation_clipped') {
+        // Marker-only event: liquidator + borrower in topics, by_bps in the
+        // data. Paired with its `liquidate` event by attachClipMarkers().
+        const data = this.dataToObject(event.value);
+        return {
+          tx: {
+            id: event.id,
+            userAddress: this.topicToString(parsedTopics[3]),
+            type: 'liquidation',
+            assetAddress: '',
+            amount: '0',
+            ledger: event.ledger,
+            txHash: event.txHash || '',
+            timestamp: event.ledgerClosedAt || new Date().toISOString(),
+          },
+          depositedDelta: 0n,
+          borrowedDelta: 0n,
+          liquidation: {
+            liquidatorAddress: this.topicToString(parsedTopics[2]),
+            borrowerAddress: this.topicToString(parsedTopics[3]),
+            collateralAsset: '',
+            debtAsset: '',
+            repaidRaw: 0n,
+            seizedRaw: 0n,
+            clipped: false,
+            clippedByBps: Number(data['by_bps'] ?? 0),
+          },
+        };
+      }
+
+      if (topic1 === 'liquidate') {
+        // Topics: [veillend, liquidate, LIQUIDATOR, BORROWER].
+        // Data struct: {collateral_asset, debt_asset, repaid, seized}.
+        const liquidator = this.topicToString(parsedTopics[2]);
+        const borrower = this.topicToString(parsedTopics[3]);
+        const data = this.dataToObject(event.value);
+
+        const collateralAsset = this.topicToString(data['collateral_asset']);
+        const debtAsset = this.topicToString(data['debt_asset']);
+        const repaid = this.parseAmount(data['repaid']);
+        const seized = this.parseAmount(data['seized']);
+
+        if (!liquidator || !borrower || !collateralAsset || !debtAsset) {
+          this.logger.warn(
+            `Ignoring malformed liquidate event ${event.id}: missing participants or assets`,
+          );
+          return null;
+        }
+
+        const tx: IndexerTransaction = {
+          id: event.id,
+          // The borrower is the primary subject; the debt asset + repaid
+          // amount populate the standard single-asset transaction fields
+          // (the borrower's TransactionHistory copy uses these).
+          userAddress: borrower,
+          type: 'liquidation',
+          assetAddress: debtAsset,
+          amount: repaid.toString(),
+          ledger: event.ledger,
+          txHash: event.txHash || '',
+          eventIndex: extractEventIndex(event.id),
+          timestamp: event.ledgerClosedAt || new Date().toISOString(),
+        };
+
+        const payload: LiquidationEventPayload = {
+          liquidatorAddress: liquidator,
+          borrowerAddress: borrower,
+          collateralAsset,
+          debtAsset,
+          repaidRaw: repaid,
+          seizedRaw: seized,
+          clipped: false,
+          clippedByBps: null,
+        };
+
+        return {
+          tx,
+          depositedDelta: 0n,
+          borrowedDelta: 0n,
+          liquidation: payload,
+        };
+      }
+
       const userAddress = this.topicToString(parsedTopics[2]);
       const assetAddress = this.topicToString(parsedTopics[3]);
 
@@ -551,6 +638,23 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
     }
   }
 
+  /**
+   * Converts the event data ScVal into a plain record. Struct events arrive
+   * as a Soroban map keyed by symbols, which scValToNative turns into a
+   * JS object; anything else is returned empty.
+   */
+  private dataToObject(value: unknown): Record<string, unknown> {
+    try {
+      const native = scValToNative(value as xdr.ScVal) as unknown;
+      if (native && typeof native === 'object' && !Buffer.isBuffer(native)) {
+        return native as Record<string, unknown>;
+      }
+    } catch {
+      // fall through
+    }
+    return {};
+  }
+
   private topicToString(topic: unknown): string {
     if (!topic) return '';
     if (typeof topic === 'string') return topic;
@@ -590,7 +694,6 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
     }
     return 0n;
   }
-
   // Exposed getter helpers for query APIs
   async getTransactions(userAddress: string): Promise<IndexerTransaction[]> {
     return this.repository.getTransactions(userAddress);
@@ -660,4 +763,47 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
   getReplayState(): ReplayState {
     return { ...this.replayState };
   }
+}
+
+/**
+ * Folds `liquidation_clipped` marker payloads into the `liquidate` event they
+ * belong to (matched on txHash + liquidator + borrower within the same fetch
+ * window) and drops the markers so only real liquidations reach persistence.
+ */
+export function attachClipMarkers(
+  items: IndexerParsedEvent[],
+): IndexerParsedEvent[] {
+  const markers = new Map<string, { clippedByBps: number }>();
+  const keep: IndexerParsedEvent[] = [];
+
+  for (const item of items) {
+    if (
+      item.tx.type === 'liquidation' &&
+      item.liquidation &&
+      item.liquidation.clippedByBps != null &&
+      !item.liquidation.collateralAsset
+    ) {
+      const key = `${item.tx.txHash}:${item.liquidation.liquidatorAddress}:${item.liquidation.borrowerAddress}`;
+      // A position can be clipped once per liquidate call; last marker wins.
+      markers.set(key, { clippedByBps: item.liquidation.clippedByBps });
+    } else {
+      keep.push(item);
+    }
+  }
+
+  if (markers.size === 0) {
+    return keep;
+  }
+
+  for (const item of keep) {
+    if (item.tx.type !== 'liquidation' || !item.liquidation) continue;
+    const key = `${item.tx.txHash}:${item.liquidation.liquidatorAddress}:${item.liquidation.borrowerAddress}`;
+    const marker = markers.get(key);
+    if (marker) {
+      item.liquidation.clipped = true;
+      item.liquidation.clippedByBps = marker.clippedByBps;
+    }
+  }
+
+  return keep;
 }

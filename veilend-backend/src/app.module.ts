@@ -18,6 +18,7 @@ import { AuthModule } from './auth/auth.module';
 import { ProtocolModule } from './protocol/protocol.module';
 import { UsersModule } from './users/users.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { RiskModule } from './risk/risk.module';
 import { DepositsModule } from './deposits/deposits.module';
 import { WithdrawalsModule } from './withdrawals/withdrawals.module';
 import { ConfigModule } from './config/config.module';
@@ -66,6 +67,7 @@ import {
     ProtocolModule,
     UsersModule,
     NotificationsModule,
+    RiskModule,
     DepositsModule,
     WithdrawalsModule,
   ],
