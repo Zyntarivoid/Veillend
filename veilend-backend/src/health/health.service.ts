@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SorobanRpcService } from '../stellar/soroban-rpc.service';
 import { HorizonService } from '../stellar/horizon.service';
 import { IndexerService } from '../indexer/indexer.service';
+import { PositionRiskScannerService } from '../risk/position-risk-scanner.service';
 
 export interface ComponentStatus {
   status: 'up' | 'down' | 'degraded';
@@ -26,6 +27,15 @@ export interface IndexerComponentStatus extends ComponentStatus {
   lastError: string | null;
 }
 
+export interface ScannerComponentStatus extends ComponentStatus {
+  enabled: boolean;
+  running: boolean;
+  intervalMs: number;
+  lastScanAt: Date | null;
+  scannedUsers: number;
+  lastError: string | null;
+}
+
 export interface HealthResult {
   status: 'ok' | 'degraded';
   components: {
@@ -33,6 +43,7 @@ export interface HealthResult {
     sorobanRpc: SorobanComponentStatus;
     horizon: HorizonComponentStatus;
     indexer: IndexerComponentStatus;
+    scanner: ScannerComponentStatus | null;
   };
   timestamp: string;
   uptimeSecs: number;
@@ -45,6 +56,7 @@ export class HealthService {
     private readonly sorobanRpc: SorobanRpcService,
     private readonly horizon: HorizonService,
     @Optional() private readonly indexerService?: IndexerService,
+    @Optional() private readonly scanner?: PositionRiskScannerService,
   ) {}
 
   async probePrisma(): Promise<ComponentStatus> {
@@ -143,6 +155,47 @@ export class HealthService {
     }
   }
 
+  /**
+   * Scanner health for the readiness gate: unhealthy when the scanner is
+   * enabled but hasn't completed a scan recently (beyond a startup warmup
+   * window) or is stuck reporting errors.
+   */
+  probeScanner(): ScannerComponentStatus | null {
+    const start = Date.now();
+    if (!this.scanner) return null;
+    try {
+      const status = this.scanner.getStatus();
+      const { healthy, reason } = this.scanner.isHealthy();
+      return {
+        status: healthy ? 'up' : 'degraded',
+        latencyMs: Date.now() - start,
+        enabled: status.enabled,
+        running: status.running,
+        intervalMs: status.intervalMs,
+        lastScanAt: status.lastCompletedScanAt,
+        scannedUsers: status.scannedUsers,
+        lastError: reason ?? status.lastError ?? null,
+      };
+    } catch (error) {
+      return {
+        status: 'down',
+        latencyMs: Date.now() - start,
+        enabled: true,
+        running: false,
+        intervalMs: 0,
+        lastScanAt: null,
+        scannedUsers: 0,
+        lastError: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  /** Readiness gate used by /health/ready. */
+  isScannerReady(): boolean {
+    if (!this.scanner) return true;
+    return this.scanner.isHealthy().healthy;
+  }
+
   async check(): Promise<HealthResult> {
     const [prisma, sorobanRpc, horizon] = await Promise.all([
       this.probePrisma(),
@@ -151,6 +204,7 @@ export class HealthService {
     ]);
 
     const indexer = await this.probeIndexer(sorobanRpc.ledgerSeq);
+    const scanner = this.probeScanner();
 
     const anyDownOrDegraded =
       prisma.status === 'down' ||
@@ -158,11 +212,12 @@ export class HealthService {
       horizon.status === 'down' ||
       indexer.status === 'down' ||
       indexer.status === 'degraded' ||
-      indexer.lag > 1000;
+      indexer.lag > 1000 ||
+      (scanner !== null && scanner.status !== 'up');
 
     return {
       status: anyDownOrDegraded ? 'degraded' : 'ok',
-      components: { prisma, sorobanRpc, horizon, indexer },
+      components: { prisma, sorobanRpc, horizon, indexer, scanner },
       timestamp: new Date().toISOString(),
       uptimeSecs: Math.floor(process.uptime()),
     };

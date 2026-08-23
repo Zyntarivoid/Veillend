@@ -1,16 +1,24 @@
 import { randomUUID } from 'crypto';
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
-import { Prisma, TransactionStatus, TransactionType } from '@prisma/client';
+import {
+  Prisma,
+  TransactionPartyRole,
+  TransactionStatus,
+  TransactionType,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface IndexerCheckpoint {
   lastIndexedLedger: number;
 }
 
+export type IndexerTransactionType =
+  'deposit' | 'borrow' | 'repay' | 'withdraw' | 'liquidation';
+
 export interface IndexerTransaction {
   id: string;
   userAddress: string;
-  type: 'deposit' | 'borrow' | 'repay' | 'withdraw';
+  type: IndexerTransactionType;
   assetAddress: string;
   amount: string; // i128 values represented as strings to preserve precision
   ledger: number;
@@ -19,10 +27,26 @@ export interface IndexerTransaction {
   timestamp: string;
 }
 
+/**
+ * Parsed `liquidate` contract-event payload. `tx.assetAddress`/`amount` carry
+ * the COLLATERAL side (seized); debt-side fields live here.
+ */
+export interface LiquidationEventPayload {
+  liquidatorAddress: string;
+  borrowerAddress: string;
+  collateralAsset: string;
+  debtAsset: string;
+  repaidRaw: bigint;
+  seizedRaw: bigint;
+  clipped: boolean;
+  clippedByBps?: number | null;
+}
+
 export interface IndexerParsedEvent {
   tx: IndexerTransaction;
   depositedDelta: bigint;
   borrowedDelta: bigint;
+  liquidation?: LiquidationEventPayload;
 }
 
 export interface GetTransactionsOptions {
@@ -49,21 +73,21 @@ export interface IndexerAsset {
   updatedAt: string;
 }
 
-const TX_TYPE_MAP: Record<IndexerTransaction['type'], TransactionType> = {
+const TX_TYPE_MAP: Record<IndexerTransactionType, TransactionType> = {
   deposit: TransactionType.DEPOSIT,
   borrow: TransactionType.BORROW,
   repay: TransactionType.REPAY,
   withdraw: TransactionType.WITHDRAW,
+  liquidation: TransactionType.LIQUIDATION,
 };
 
-const TX_TYPE_REVERSE_MAP: Record<TransactionType, IndexerTransaction['type']> =
-  {
-    DEPOSIT: 'deposit',
-    BORROW: 'borrow',
-    REPAY: 'repay',
-    WITHDRAW: 'withdraw',
-    LIQUIDATION: 'withdraw', // indexer never produces this today; kept exhaustive for the enum
-  };
+const TX_TYPE_REVERSE_MAP: Record<TransactionType, IndexerTransactionType> = {
+  DEPOSIT: 'deposit',
+  BORROW: 'borrow',
+  REPAY: 'repay',
+  WITHDRAW: 'withdraw',
+  LIQUIDATION: 'liquidation',
+};
 
 /**
  * True when an error is a Prisma unique-constraint violation (P2002).
@@ -357,8 +381,9 @@ export class IndexerRepository {
    * Atomically and idempotently processes a single indexed event:
    * 1. Checks lookaside table and DB for duplicate events before writing.
    * 2. Resolves User and Asset FKs.
-   * 3. Creates the TransactionHistory row.
-   * 4. Updates Position balance under a row-level lock (FOR UPDATE).
+   * 3. Creates the TransactionHistory row(s) — liquidations produce one copy
+   *    per party (borrower + liquidator) plus a LiquidationEvent row.
+   * 4. Updates Position balances under a row-level lock (FOR UPDATE).
    * 5. Records event in the IndexerEventDedup lookaside table.
    *
    * Returns `{ isNew: true }` if newly indexed; `{ isNew: false }` if skipped duplicate.
@@ -368,10 +393,11 @@ export class IndexerRepository {
       tx: IndexerTransaction;
       depositedDelta: bigint;
       borrowedDelta: bigint;
+      liquidation?: LiquidationEventPayload;
     },
     db?: Prisma.TransactionClient,
   ): Promise<{ isNew: boolean }> {
-    const { tx, depositedDelta, borrowedDelta } = params;
+    const { tx } = params;
     const timestamp = new Date(tx.timestamp);
     const eventIndex = tx.eventIndex ?? extractEventIndex(tx.id);
 
@@ -387,35 +413,45 @@ export class IndexerRepository {
         return { isNew: false };
       }
 
-      const user = await this.resolveUser(client, tx.userAddress);
-      const asset = await this.resolveAsset(client, tx.assetAddress);
-
       try {
-        await client.transactionHistory.create({
-          data: {
-            userId: user.id,
-            assetId: asset.id,
-            type: TX_TYPE_MAP[tx.type],
-            status: TransactionStatus.CONFIRMED,
-            amountRaw: BigInt(tx.amount),
-            amountUsd: 0,
-            txHash: tx.txHash || null,
+        if (tx.type === 'liquidation' && params.liquidation) {
+          await this.applyLiquidationEvent(
+            client,
+            params.liquidation,
+            tx,
+            timestamp,
             eventIndex,
-            ledgerSequence: tx.ledger,
-            contractId: this.normalize(tx.assetAddress),
-            sorobanEventId: tx.id,
-            createdAt: timestamp,
-            confirmedAt: timestamp,
-          },
-        });
+          );
+        } else {
+          const user = await this.resolveUser(client, tx.userAddress);
+          const asset = await this.resolveAsset(client, tx.assetAddress);
 
-        await this.applyPositionDelta(
-          client,
-          user.id,
-          asset.id,
-          depositedDelta,
-          borrowedDelta,
-        );
+          await client.transactionHistory.create({
+            data: {
+              userId: user.id,
+              assetId: asset.id,
+              type: TX_TYPE_MAP[tx.type],
+              status: TransactionStatus.CONFIRMED,
+              amountRaw: BigInt(tx.amount),
+              amountUsd: 0,
+              txHash: tx.txHash || null,
+              eventIndex,
+              ledgerSequence: tx.ledger,
+              contractId: this.normalize(tx.assetAddress),
+              sorobanEventId: tx.id,
+              createdAt: timestamp,
+              confirmedAt: timestamp,
+            },
+          });
+
+          await this.applyPositionDelta(
+            client,
+            user.id,
+            asset.id,
+            params.depositedDelta,
+            params.borrowedDelta,
+          );
+        }
 
         // Record in lookaside table for fast subsequent dedup
         await this.recordEventDedup(
@@ -440,7 +476,218 @@ export class IndexerRepository {
       return execute(db);
     }
 
+    // Standalone path relies on row-level FOR UPDATE locking for correctness
+    // (default isolation). Batch ingestion wraps many events in one outer
+    // transaction instead, so it passes `db` and skips this.
     return this.prisma.$transaction(execute);
+  }
+
+  /**
+   * Persists an indexed `liquidate` contract event:
+   * - One LiquidationEvent read-model row (shared by both parties).
+   * - Two TransactionHistory rows — partyRole BORROWER (amount = debt repaid)
+   *   and partyRole LIQUIDATOR (amount = collateral seized) — so both sides
+   *   see the liquidation in their history.
+   * - Borrower position updates on BOTH affected assets under row locks:
+   *   debt −repaid on the debt asset, collateral −seized on the collateral
+   *   asset.
+   * - Flags badDebt when the seizure exhausted the collateral balance while
+   *   outstanding debt remained.
+   *
+   * Callers must run this inside the standard dedup guard (sorobanEventId /
+   * IndexerEventDedup); idempotency of the LiquidationEvent row itself is
+   * enforced by its unique sorobanEventId.
+   */
+  private async applyLiquidationEvent(
+    db: Prisma.TransactionClient,
+    payload: LiquidationEventPayload,
+    tx: IndexerTransaction,
+    timestamp: Date,
+    eventIndex: number,
+  ): Promise<void> {
+    const borrower = await this.resolveUser(db, payload.borrowerAddress);
+    const liquidator = await this.resolveUser(db, payload.liquidatorAddress);
+    const debtAsset = await this.resolveAsset(db, payload.debtAsset);
+    const collateralAsset = await this.resolveAsset(
+      db,
+      payload.collateralAsset,
+    );
+
+    // Lock both borrower position rows (creating them if absent) so the
+    // balance math serializes against concurrent deposits/borrows/withdraws.
+    const debtBefore = await this.readPositionForUpdate(
+      db,
+      borrower.id,
+      debtAsset.id,
+    );
+    const collateralBefore = await this.readPositionForUpdate(
+      db,
+      borrower.id,
+      collateralAsset.id,
+    );
+
+    // tx.amount carries the repaid (debt-side) amount set by the parser.
+    const repaidRaw = BigInt(tx.amount);
+    const seizedRaw = payload.seizedRaw;
+
+    const nextBorrowed = clampNonNegative(debtBefore.borrowedRaw - repaidRaw);
+    const nextCollateral = clampNonNegative(
+      collateralBefore.depositedRaw - seizedRaw,
+    );
+
+    // Collateral fully consumed while outstanding debt remains → the position
+    // was underwater past the point where seizing could restore coverage.
+    const badDebt =
+      collateralBefore.depositedRaw > 0n &&
+      nextCollateral === 0n &&
+      nextBorrowed > 0n;
+
+    await db.liquidationEvent.create({
+      data: {
+        sorobanEventId: tx.id,
+        txHash: tx.txHash || null,
+        ledger: tx.ledger,
+        liquidatorAddress: this.normalize(payload.liquidatorAddress),
+        borrowerAddress: this.normalize(payload.borrowerAddress),
+        debtAssetId: debtAsset.id,
+        collateralAssetId: collateralAsset.id,
+        repaidRaw,
+        seizedRaw,
+        clipped: payload.clipped,
+        clippedByBps: payload.clippedByBps ?? null,
+        badDebt,
+        createdAt: timestamp,
+      },
+    });
+
+    // Borrower copy: their DEBT was reduced by the repayment...
+    await db.transactionHistory.create({
+      data: {
+        userId: borrower.id,
+        assetId: debtAsset.id,
+        type: TransactionType.LIQUIDATION,
+        status: TransactionStatus.CONFIRMED,
+        partyRole: TransactionPartyRole.BORROWER,
+        amountRaw: repaidRaw,
+        amountUsd: 0,
+        txHash: tx.txHash || null,
+        eventIndex,
+        ledgerSequence: tx.ledger,
+        contractId: this.normalize(payload.debtAsset),
+        sorobanEventId: tx.id,
+        createdAt: timestamp,
+        confirmedAt: timestamp,
+      },
+    });
+
+    // ...liquidator copy: they received the SEIZED collateral.
+    await db.transactionHistory.create({
+      data: {
+        userId: liquidator.id,
+        assetId: collateralAsset.id,
+        type: TransactionType.LIQUIDATION,
+        status: TransactionStatus.CONFIRMED,
+        partyRole: TransactionPartyRole.LIQUIDATOR,
+        amountRaw: seizedRaw,
+        amountUsd: 0,
+        txHash: tx.txHash || null,
+        eventIndex,
+        ledgerSequence: tx.ledger,
+        contractId: this.normalize(payload.collateralAsset),
+        sorobanEventId: `${tx.id}:liq`,
+        createdAt: timestamp,
+        confirmedAt: timestamp,
+      },
+    });
+
+    await this.writePositionBalances(db, borrower.id, debtAsset.id, {
+      borrowedRaw: nextBorrowed,
+    });
+    await this.writePositionBalances(db, borrower.id, collateralAsset.id, {
+      depositedRaw: nextCollateral,
+    });
+  }
+
+  /** Ensures the Position row exists and returns its balances row-locked. */
+  private async readPositionForUpdate(
+    db: Prisma.TransactionClient,
+    userId: string,
+    assetId: string,
+  ): Promise<{ depositedRaw: bigint; borrowedRaw: bigint }> {
+    await this.ensurePositionRow(db, userId, assetId);
+
+    const rows = await db.$queryRaw<
+      Array<{ depositedRaw: bigint; borrowedRaw: bigint }>
+    >(Prisma.sql`
+      SELECT "depositedRaw", "borrowedRaw"
+      FROM "Position"
+      WHERE "userId" = ${userId} AND "assetId" = ${assetId}
+      FOR UPDATE
+    `);
+
+    return {
+      depositedRaw: BigInt(rows[0]?.depositedRaw ?? 0n),
+      borrowedRaw: BigInt(rows[0]?.borrowedRaw ?? 0n),
+    };
+  }
+
+  private async ensurePositionRow(
+    db: Prisma.TransactionClient,
+    userId: string,
+    assetId: string,
+  ): Promise<void> {
+    await db.$executeRaw(Prisma.sql`
+      INSERT INTO "Position" ("id", "userId", "assetId", "updatedAt")
+      VALUES (${randomUUID()}, ${userId}, ${assetId}, CURRENT_TIMESTAMP)
+      ON CONFLICT ("userId", "assetId") DO NOTHING
+    `);
+  }
+
+  /**
+   * Writes absolute balances after a row lock and refreshes sync metadata.
+   * The Position row must already exist — callers go through
+   * readPositionForUpdate first, which creates it under the same lock.
+   */
+  private async writePositionBalances(
+    db: Prisma.TransactionClient,
+    userId: string,
+    assetId: string,
+    balances: { depositedRaw?: bigint; borrowedRaw?: bigint },
+  ): Promise<void> {
+    await db.$executeRaw(Prisma.sql`
+      UPDATE "Position"
+      SET
+        "depositedRaw" = COALESCE(${balances.depositedRaw ?? null}, "depositedRaw"),
+        "borrowedRaw" = COALESCE(${balances.borrowedRaw ?? null}, "borrowedRaw"),
+        "isStale" = false,
+        "lastSyncAt" = CURRENT_TIMESTAMP
+      WHERE "userId" = ${userId} AND "assetId" = ${assetId}
+    `);
+  }
+
+  /**
+   * Applies deltas to a user's position for one asset under a row-level lock,
+   * clamping balances to a minimum of 0.
+   */
+  private async applyPositionDelta(
+    db: Prisma.TransactionClient,
+    userId: string,
+    assetId: string,
+    depositedDelta: bigint,
+    borrowedDelta: bigint,
+  ): Promise<void> {
+    const current = await this.readPositionForUpdate(db, userId, assetId);
+
+    let nextDeposited = current.depositedRaw + depositedDelta;
+    let nextBorrowed = current.borrowedRaw + borrowedDelta;
+
+    if (nextDeposited < 0n) nextDeposited = 0n;
+    if (nextBorrowed < 0n) nextBorrowed = 0n;
+
+    await this.writePositionBalances(db, userId, assetId, {
+      depositedRaw: nextDeposited,
+      borrowedRaw: nextBorrowed,
+    });
   }
 
   /**
@@ -489,51 +736,6 @@ export class IndexerRepository {
     return result.isNew;
   }
 
-  /**
-   * Applies deltas to a user's position for one asset under a row-level lock,
-   * clamping balances to a minimum of 0.
-   */
-  private async applyPositionDelta(
-    db: Prisma.TransactionClient,
-    userId: string,
-    assetId: string,
-    depositedDelta: bigint,
-    borrowedDelta: bigint,
-  ): Promise<void> {
-    await db.$executeRaw(Prisma.sql`
-      INSERT INTO "Position" ("id", "userId", "assetId", "updatedAt")
-      VALUES (${randomUUID()}, ${userId}, ${assetId}, CURRENT_TIMESTAMP)
-      ON CONFLICT ("userId", "assetId") DO NOTHING
-    `);
-
-    const rows = await db.$queryRaw<
-      Array<{ depositedRaw: bigint; borrowedRaw: bigint }>
-    >(Prisma.sql`
-      SELECT "depositedRaw", "borrowedRaw"
-      FROM "Position"
-      WHERE "userId" = ${userId} AND "assetId" = ${assetId}
-      FOR UPDATE
-    `);
-
-    const currentDeposited = BigInt(rows[0]?.depositedRaw ?? 0n);
-    const currentBorrowed = BigInt(rows[0]?.borrowedRaw ?? 0n);
-
-    let nextDeposited = currentDeposited + depositedDelta;
-    let nextBorrowed = currentBorrowed + borrowedDelta;
-
-    if (nextDeposited < 0n) nextDeposited = 0n;
-    if (nextBorrowed < 0n) nextBorrowed = 0n;
-
-    await db.$executeRaw(Prisma.sql`
-      UPDATE "Position"
-      SET "depositedRaw" = ${nextDeposited},
-          "borrowedRaw" = ${nextBorrowed},
-          "isStale" = false,
-          "lastSyncAt" = CURRENT_TIMESTAMP
-      WHERE "userId" = ${userId} AND "assetId" = ${assetId}
-    `);
-  }
-
   async getPositions(userAddress: string): Promise<IndexerPosition[]> {
     const normalized = this.normalize(userAddress);
     const rows = await this.prisma.position.findMany({
@@ -579,8 +781,10 @@ export class IndexerRepository {
   }
 
   /**
-   * Clears indexer-owned read models (positions, indexed transactions, checkpoints,
-   * and dedup lookaside rows) so a replay can rebuild them from scratch.
+   * Clears indexer-owned read models (positions, indexed transactions,
+   * liquidation events, checkpoints, and dedup lookaside rows) so a replay
+   * can rebuild them from scratch. UserRiskState is scanner-owned and left in
+   * place — the next risk scan refreshes it.
    */
   async resetDatabase(): Promise<void> {
     this.logger.log('Resetting indexer database read models (for replay)...');
@@ -588,6 +792,7 @@ export class IndexerRepository {
       this.prisma.transactionHistory.deleteMany({
         where: { sorobanEventId: { not: null } },
       }),
+      this.prisma.liquidationEvent.deleteMany({}),
       this.prisma.position.deleteMany({}),
       this.prisma.indexerCheckpoint.deleteMany({
         where: { id: CHECKPOINT_ID },
@@ -595,4 +800,11 @@ export class IndexerRepository {
       this.prisma.indexerEventDedup.deleteMany({}),
     ]);
   }
+}
+
+/**
+ * Clamps a raw balance to a minimum of 0 (bigint).
+ */
+function clampNonNegative(value: bigint): bigint {
+  return value < 0n ? 0n : value;
 }

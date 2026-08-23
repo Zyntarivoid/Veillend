@@ -30,6 +30,10 @@ describe('IndexerRepository', () => {
       create: jest.Mock;
       deleteMany: jest.Mock;
     };
+    liquidationEvent: {
+      create: jest.Mock;
+      deleteMany: jest.Mock;
+    };
     position: {
       findUnique: jest.Mock;
       findMany: jest.Mock;
@@ -60,6 +64,10 @@ describe('IndexerRepository', () => {
         findUnique: jest.fn(),
         findFirst: jest.fn(),
         findMany: jest.fn(),
+        create: jest.fn(),
+        deleteMany: jest.fn(),
+      },
+      liquidationEvent: {
         create: jest.fn(),
         deleteMany: jest.fn(),
       },
@@ -364,12 +372,196 @@ describe('IndexerRepository', () => {
       expect(prisma.transactionHistory.deleteMany).toHaveBeenCalledWith({
         where: { sorobanEventId: { not: null } },
       });
+      expect(prisma.liquidationEvent.deleteMany).toHaveBeenCalledWith({});
       expect(prisma.position.deleteMany).toHaveBeenCalledWith({});
       expect(prisma.indexerCheckpoint.deleteMany).toHaveBeenCalledWith({
         where: { id: 'global' },
       });
       expect(prisma.indexerEventDedup.deleteMany).toHaveBeenCalled();
       expect(prisma.user.upsert).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('liquidation event processing', () => {
+    const liquidationTx: IndexerTransaction = {
+      id: '0000000007-0000000003',
+      userAddress: 'GBORROWER',
+      type: 'liquidation',
+      assetAddress: 'DEBTCONTRACT',
+      amount: '3000',
+      ledger: 9,
+      txHash: 'liqhash',
+      timestamp: '2026-01-02T00:00:00.000Z',
+    };
+
+    const liquidationPayload = {
+      liquidatorAddress: 'GLIQUIDATOR',
+      borrowerAddress: 'GBORROWER',
+      debtAsset: 'DEBTCONTRACT',
+      collateralAsset: 'COLLCONTRACT',
+      repaidRaw: 3000n,
+      seizedRaw: 2500n,
+      clipped: false,
+      clippedByBps: null,
+    };
+
+    const mockResolvedParties = () => {
+      prisma.indexerEventDedup.findUnique.mockResolvedValue(null);
+      prisma.transactionHistory.findFirst.mockResolvedValue(null);
+      prisma.user.upsert.mockImplementation(
+        ({ where }: { where: { walletAddress: string } }) =>
+          Promise.resolve(
+            where.walletAddress === 'gborrower'
+              ? { id: 'borrower-1' }
+              : { id: 'liquidator-1' },
+          ),
+      );
+      prisma.asset.upsert.mockImplementation(
+        ({ where }: { where: { contractId: string } }) =>
+          Promise.resolve(
+            where.contractId === 'debtcontract'
+              ? { id: 'asset-debt' }
+              : { id: 'asset-coll' },
+          ),
+      );
+      prisma.transactionHistory.create.mockResolvedValue({});
+      prisma.liquidationEvent.create.mockResolvedValue({});
+      prisma.indexerEventDedup.upsert.mockResolvedValue({});
+    };
+
+    it('writes a LiquidationEvent row, both parties history rows, and adjusts the borrower position on both assets', async () => {
+      mockResolvedParties();
+      // Locked reads: debt position first, then collateral position.
+      prisma.$queryRaw
+        .mockResolvedValueOnce([{ depositedRaw: 0n, borrowedRaw: 5000n }])
+        .mockResolvedValueOnce([{ depositedRaw: 3000n, borrowedRaw: 0n }]);
+
+      const result = await repository.processEventSafe({
+        tx: liquidationTx,
+        depositedDelta: 0n,
+        borrowedDelta: 0n,
+        liquidation: liquidationPayload,
+      });
+
+      expect(result.isNew).toBe(true);
+
+      // Shared read-model row.
+      expect(prisma.liquidationEvent.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          sorobanEventId: liquidationTx.id,
+          txHash: 'liqhash',
+          ledger: 9,
+          liquidatorAddress: 'gliquidator',
+          borrowerAddress: 'gborrower',
+          debtAssetId: 'asset-debt',
+          collateralAssetId: 'asset-coll',
+          repaidRaw: 3000n,
+          seizedRaw: 2500n,
+          badDebt: false,
+          clipped: false,
+          clippedByBps: null,
+        }),
+      });
+
+      // Both parties get a TransactionHistory row.
+      const historyCalls = prisma.transactionHistory.create.mock
+        .calls as unknown as Array<[{ data: Record<string, unknown> }]>;
+      expect(historyCalls.length).toBe(2);
+      expect(historyCalls[0][0].data).toMatchObject({
+        userId: 'borrower-1',
+        assetId: 'asset-debt',
+        partyRole: 'BORROWER',
+        amountRaw: 3000n,
+        sorobanEventId: liquidationTx.id,
+      });
+      expect(historyCalls[1][0].data).toMatchObject({
+        userId: 'liquidator-1',
+        assetId: 'asset-coll',
+        partyRole: 'LIQUIDATOR',
+        amountRaw: 2500n,
+        sorobanEventId: `${liquidationTx.id}:liq`,
+      });
+
+      // Position updates: debt −repaid (5000→2000), collateral −seized
+      // (3000−2500 → 500).
+      const execCalls = prisma.$executeRaw.mock.calls as unknown as Array<
+        unknown[]
+      >;
+      // 2 ensure-row INSERTs + 2 balance UPDATEs
+      expect(execCalls.length).toBe(4);
+      const updateValues = (callIndex: number): unknown[] =>
+        (execCalls[callIndex][0] as { values: unknown[] }).values;
+      // calls[0] and [1] are the two ensure-row INSERTs; [2] and [3] are
+      // the balance UPDATEs (debt asset first, then collateral asset).
+      expect(updateValues(2)).toEqual([
+        null,
+        2000n,
+        'borrower-1',
+        'asset-debt',
+      ]);
+      expect(updateValues(3)).toEqual([500n, null, 'borrower-1', 'asset-coll']);
+    });
+
+    it('flags badDebt when seizure exhausts collateral while debt remains', async () => {
+      mockResolvedParties();
+      prisma.$queryRaw
+        .mockResolvedValueOnce([{ depositedRaw: 100n, borrowedRaw: 500n }])
+        .mockResolvedValueOnce([{ depositedRaw: 800n, borrowedRaw: 0n }]);
+
+      await repository.processEventSafe({
+        tx: { ...liquidationTx, amount: '400' },
+        depositedDelta: 0n,
+        borrowedDelta: 0n,
+        liquidation: { ...liquidationPayload, repaidRaw: 400n },
+      });
+
+      expect(prisma.liquidationEvent.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ badDebt: true }),
+      });
+    });
+
+    it('propagates the close-factor clip marker onto the stored row', async () => {
+      mockResolvedParties();
+      prisma.$queryRaw
+        .mockResolvedValue([{ depositedRaw: 0n, borrowedRaw: 10_000n }])
+        .mockResolvedValue([{ depositedRaw: 5_000n, borrowedRaw: 0n }]);
+
+      await repository.processEventSafe({
+        tx: liquidationTx,
+        depositedDelta: 0n,
+        borrowedDelta: 0n,
+        liquidation: {
+          ...liquidationPayload,
+          clipped: true,
+          clippedByBps: 5000,
+        },
+      });
+
+      expect(prisma.liquidationEvent.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          clipped: true,
+          clippedByBps: 5000,
+        }),
+      });
+    });
+
+    it('is idempotent: a replayed liquidation writes nothing new', async () => {
+      prisma.indexerEventDedup.findUnique.mockResolvedValue({
+        eventId: liquidationTx.id,
+        expiresAt: new Date(Date.now() + 60000),
+      });
+
+      const result = await repository.processEventSafe({
+        tx: liquidationTx,
+        depositedDelta: 0n,
+        borrowedDelta: 0n,
+        liquidation: liquidationPayload,
+      });
+
+      expect(result.isNew).toBe(false);
+      expect(prisma.liquidationEvent.create).not.toHaveBeenCalled();
+      expect(prisma.transactionHistory.create).not.toHaveBeenCalled();
+      expect(prisma.$executeRaw).not.toHaveBeenCalled();
     });
   });
 });

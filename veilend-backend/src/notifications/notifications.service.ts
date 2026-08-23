@@ -98,14 +98,21 @@ export class NotificationsService {
   }
 
   /**
-   * Integration point for the (future, separately-tracked) liquidation
-   * watchlist engine: it computes health factor itself and calls this once
-   * it decides a user is at risk. This service does not poll or compute
-   * health factor on its own.
+   * Integration point for the position-risk scanner: it computes health
+   * factor itself and calls this once it decides a user is at risk. This
+   * service does not poll or compute health factor on its own. Extra risk
+   * context is optional so other callers keep working unchanged.
    */
   async notifyLiquidationRisk(
     userId: string,
-    params: { healthFactor: number; shortfallUsd: number },
+    params: {
+      healthFactor: number;
+      shortfallUsd: number;
+      band?: string;
+      debtAssetCode?: string | null;
+      debtValueUsd?: number;
+      collateralValueUsd?: number;
+    },
   ): Promise<void> {
     await this.notifyUser(userId, NotificationKind.LIQUIDATION_RISK, {
       title: 'Liquidation risk alert',
@@ -113,6 +120,16 @@ export class NotificationsService {
       data: {
         healthFactor: params.healthFactor,
         shortfallUsd: params.shortfallUsd,
+        ...(params.band ? { band: params.band } : {}),
+        ...(params.debtAssetCode
+          ? { debtAssetCode: params.debtAssetCode }
+          : {}),
+        ...(params.debtValueUsd !== undefined
+          ? { debtValueUsd: params.debtValueUsd }
+          : {}),
+        ...(params.collateralValueUsd !== undefined
+          ? { collateralValueUsd: params.collateralValueUsd }
+          : {}),
       },
     });
   }

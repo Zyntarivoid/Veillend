@@ -16,6 +16,7 @@ model User {
 
   positions            Position[]
   transactions         TransactionHistory[]
+  riskState            UserRiskState?
   sessions             Session[]
   refreshTokens        RefreshToken[]
   jtiRegistrations     JtiRegistry[]
@@ -131,6 +132,8 @@ model Asset {
   deposits             UserDeposit[]
   withdrawals          WithdrawalRequest[]
   withdrawalConfig     AssetWithdrawalConfig?
+  liquidationsAsDebt   LiquidationEvent[]     @relation("LiquidationDebtAsset")
+  liquidationsAsCollateral LiquidationEvent[] @relation("LiquidationCollateralAsset")
 
   @@unique([code, issuer])
   @@index([contractId])
@@ -192,6 +195,16 @@ enum TransactionStatus {
   FAILED
 }
 
+// Distinguishes the two TransactionHistory copies an on-chain liquidation
+// produces (one for the borrower being liquidated, one for the liquidator
+// executing it). Ordinary self-initiated rows stay PRIMARY. Part of the
+// (txHash, eventIndex) uniqueness so both parties can share one event.
+enum TransactionPartyRole {
+  PRIMARY
+  BORROWER
+  LIQUIDATOR
+}
+
 model TransactionHistory {
   id      String @id @default(uuid())
   userId  String
@@ -201,6 +214,10 @@ model TransactionHistory {
 
   type   TransactionType
   status TransactionStatus @default(PENDING)
+
+  // For LIQUIDATION rows: which side of the liquidation this copy is for.
+  // PRIMARY for every non-liquidation row.
+  partyRole TransactionPartyRole @default(PRIMARY)
 
   amountRaw BigInt // in asset native precision
   amountUsd Decimal @db.Decimal(28, 7)
@@ -219,12 +236,115 @@ model TransactionHistory {
   createdAt   DateTime  @default(now())
   confirmedAt DateTime?
 
-  @@unique([txHash, eventIndex])
+  // partyRole participates so the borrower and liquidator copies of one
+  // liquidation event can share txHash + eventIndex without colliding.
+  @@unique([txHash, eventIndex, partyRole])
   @@index([userId, createdAt])
   @@index([assetId])
   @@index([txHash])
   @@index([ledgerSequence])
   @@index([sorobanEventId])
+}
+
+// ─── Liquidation Events (indexer read model) ────────────────────────────────
+
+// One row per on-chain `liquidate` event. Both the borrower and the
+// liquidator see the liquidation in their history via TransactionHistory
+// rows with partyRole BORROWER / LIQUIDATOR pointing at the same event.
+model LiquidationEvent {
+  id                String   @id @default(uuid())
+  sorobanEventId    String   @unique
+  txHash            String?
+  ledger            Int
+
+  liquidatorAddress String
+  borrowerAddress   String
+
+  debtAssetId       String
+  debtAsset         Asset    @relation("LiquidationDebtAsset", fields: [debtAssetId], references: [id])
+  collateralAssetId String
+  collateralAsset   Asset    @relation("LiquidationCollateralAsset", fields: [collateralAssetId], references: [id])
+
+  repaidRaw         BigInt // debt asset raw units repaid by the liquidator
+  seizedRaw         BigInt // collateral asset raw units seized from the borrower
+
+  // Implied liquidation bonus in bps ((seizedValue / repaidValue) - 1) when
+  // oracle prices for both assets were available at index time; null otherwise.
+  bonusBps          Int?
+
+  // True when the repay amount was clipped by close_factor_bps.
+  clipped           Boolean  @default(false)
+  clippedByBps      Int?
+
+  // True when the seizure consumed the borrower's entire collateral balance
+  // for the collateral asset while outstanding debt remained — i.e. the
+  // position was underwater beyond full recovery.
+  badDebt           Boolean  @default(false)
+
+  createdAt         DateTime @default(now())
+
+  @@index([borrowerAddress, createdAt])
+  @@index([liquidatorAddress, createdAt])
+  @@index([ledger])
+}
+
+// ─── Risk Scanner State ──────────────────────────────────────────────────────
+
+// Per-user aggregate risk snapshot maintained by PositionRiskScannerService.
+// Health factor is portfolio-level (the contract values collateral across all
+// of a user's positions), so this is keyed by user, not by position.
+model UserRiskState {
+  userId                   String    @id
+  user                     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  healthFactor             Float? // null when unpriced or no debt
+  band                     String    @default("healthy") // healthy | warn | urgent | liquidatable | unpriced
+  riskStatus               String    @default("priced") // priced | unpriced
+
+  // HF headroom above liquidation (healthFactor - 1) and the fractional
+  // decline in collateral value that would push HF to exactly 1.0.
+  distanceToLiquidation    Float?
+  priceMoveToLiquidation   Float?
+
+  debtValueUsd             Float     @default(0)
+  collateralValueUsd       Float     @default(0)
+  maxRepayableUsd          Float     @default(0) // debt × close_factor_bps
+  estSeizableUsd           Float     @default(0) // maxRepayableUsd × liquidation incentive
+
+  // Largest debt / collateral contributions backing the queue rows.
+  primaryDebtAssetId       String?
+  primaryCollateralAssetId String?
+
+  // Per-asset price snapshot used at evaluation time (price, ageSeconds, stale).
+  oracleFreshness          Json?
+
+  // Band-transition bookkeeping (see PositionRiskScannerService): the last
+  // evaluated band and the last band a notification actually fired for.
+  lastEvaluatedBand        String?
+  lastNotifiedBand         String?
+
+  lastEvaluatedAt          DateTime?
+  updatedAt                DateTime  @updatedAt
+
+  @@index([band, estSeizableUsd(sort: Desc)])
+}
+
+// Singleton row (fixed id "global") doubling as the risk scanner's
+// replica-safety lease (leaseOwner + leaseUntil) and its published metrics
+// (surfaced on GET /health/ready and GET /indexer/status).
+model RiskScanState {
+  id                 String    @id @default("global")
+  leaseOwner         String?
+  leaseUntil         DateTime?
+  lastScanStartedAt  DateTime?
+  lastScanAt         DateTime? // last SUCCESSFUL scan completion
+  lastDurationMs     Int?
+  usersEvaluated     Int       @default(0)
+  positionsEvaluated Int       @default(0)
+  notificationsSent  Int       @default(0)
+  unpricedCount      Int       @default(0)
+  lastError          String?
+  updatedAt          DateTime  @updatedAt
 }
 
 // ─── Sync Checkpoints ────────────────────────────────────────────────────────

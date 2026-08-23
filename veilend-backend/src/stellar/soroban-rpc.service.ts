@@ -12,6 +12,7 @@ import {
   TransactionBuilder,
   BASE_FEE,
   scValToNative,
+  xdr,
 } from '@stellar/stellar-sdk';
 
 export interface SacValidationResult {
@@ -90,6 +91,53 @@ export class SorobanRpcService implements OnModuleInit {
       (client) => client.getTransaction(hash),
       { mode: 'read' },
     );
+  }
+
+  /**
+   * Simulates a single read-only contract invocation and returns its native
+   * (scValToNative) result, or null when the simulation fails / returns no
+   * result. Used for on-chain state reads (oracle prices, risk parameters)
+   * that back the position-risk scanner; a null return signals "unavailable"
+   * rather than an error so callers can degrade gracefully.
+   */
+  async simulateContractCall<T = unknown>(
+    contractId: string,
+    method: string,
+    args: xdr.ScVal[] = [],
+  ): Promise<T | null> {
+    const dummyAccount = new Account(
+      'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+      '0',
+    );
+
+    try {
+      const tx = new TransactionBuilder(dummyAccount, {
+        fee: BASE_FEE,
+        networkPassphrase: this.networkPassphrase,
+      })
+        .addOperation(new Contract(contractId).call(method, ...args))
+        .setTimeout(0)
+        .build();
+
+      const sim = await this.circuitBreaker.execute(
+        `simulate:${method}`,
+        (client) => client.simulateTransaction(tx),
+        { mode: 'read' },
+      );
+
+      if (rpc.Api.isSimulationError(sim) || !sim.result) {
+        return null;
+      }
+
+      return scValToNative(sim.result.retval) as T;
+    } catch (error) {
+      this.logger.debug(
+        `Read-only contract call ${method} on ${contractId} failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return null;
+    }
   }
 
   async sendTransaction(

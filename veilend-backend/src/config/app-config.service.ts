@@ -120,6 +120,24 @@ export class AppConfigService {
     };
   }
 
+  get riskScan(): {
+    intervalMs: number;
+    batchSize: number;
+    leaseTtlMs: number;
+  } {
+    return {
+      intervalMs: this.configService.get<number>(
+        'RISK_SCAN_INTERVAL_MS',
+        60_000,
+      ),
+      batchSize: this.configService.get<number>('RISK_SCAN_BATCH_SIZE', 500),
+      leaseTtlMs: this.configService.get<number>(
+        'RISK_SCAN_LEASE_TTL_MS',
+        180_000,
+      ),
+    };
+  }
+
   get deposits(): {
     watcherPollIntervalMs: number;
     defaultMinConfirmations: number;

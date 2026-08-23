@@ -6,6 +6,7 @@ import { IndexerConfig } from './indexer.config';
 import { AuthConfig } from './auth.config';
 import { AdminConfig } from './admin.config';
 import { NotificationsConfig } from './notifications.config';
+import { RiskConfig } from './risk.config';
 import { AppConfigService } from './app-config.service';
 import { Logger } from '@nestjs/common';
 
@@ -56,6 +57,7 @@ export function validateProductionJwtConfig(): void {
           config,
           NotificationsConfig,
         );
+        const validatedRiskConfig = validateConfig(config, RiskConfig);
 
         const mergedConfig = {
           ...validatedAppConfig,
@@ -63,6 +65,7 @@ export function validateProductionJwtConfig(): void {
           ...validatedAuthConfig,
           ...validatedAdminConfig,
           ...validatedNotificationsConfig,
+          ...validatedRiskConfig,
         };
 
         validateProductionJwtConfig();

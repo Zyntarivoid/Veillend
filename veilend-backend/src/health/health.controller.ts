@@ -26,10 +26,20 @@ export class HealthController {
 
   @Get('ready')
   async getReady() {
-    const ready = await this.healthService.isPrismaReady();
-    if (!ready) {
+    const prismaReady = await this.healthService.isPrismaReady();
+    const scannerReady = this.healthService.isScannerReady();
+    if (!prismaReady) {
       throw new HttpException(
         { status: 'not ready', reason: 'database unavailable' },
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+    if (!scannerReady) {
+      throw new HttpException(
+        {
+          status: 'not ready',
+          reason: 'position risk scanner is stale or failing',
+        },
         HttpStatus.SERVICE_UNAVAILABLE,
       );
     }
