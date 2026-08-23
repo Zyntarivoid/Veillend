@@ -20,7 +20,12 @@ describe('ProtocolChainReader', () => {
     is_asset_supported: true,
   };
 
-  beforeEach(() => call.mockImplementation((_id, method) => Promise.resolve(values[method])));
+  beforeEach(() =>
+    call.mockImplementation(
+      (_id: string, method: string): Promise<unknown> =>
+        Promise.resolve(values[method]),
+    ),
+  );
 
   it('maps all protocol and per-asset live state', async () => {
     const reader = new ProtocolChainReader({ simulateContractCall: call } as unknown as SorobanRpcService);
