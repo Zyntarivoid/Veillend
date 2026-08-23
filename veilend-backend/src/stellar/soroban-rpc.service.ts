@@ -9,6 +9,7 @@ import {
   MemoType,
   Operation,
   Contract,
+  Address,
   TransactionBuilder,
   BASE_FEE,
   scValToNative,
@@ -90,6 +91,37 @@ export class SorobanRpcService implements OnModuleInit {
       (client) => client.getTransaction(hash),
       { mode: 'read' },
     );
+  }
+
+  /** Executes a read-only contract invocation through RPC simulation. */
+  async simulateContractCall(
+    contractId: string,
+    method: string,
+    args: ReturnType<Address['toScVal']>[] = [],
+  ): Promise<unknown> {
+    const account = new Account(
+      'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+      '0',
+    );
+    const operation = new Contract(contractId).call(method, ...args);
+    const simulation = await this.circuitBreaker.execute(
+      'simulateTransaction',
+      (client) =>
+        client.simulateTransaction(
+          new TransactionBuilder(account, {
+            fee: BASE_FEE,
+            networkPassphrase: this.networkPassphrase,
+          })
+            .addOperation(operation)
+            .setTimeout(0)
+            .build(),
+        ),
+      { mode: 'read' },
+    );
+    if (rpc.Api.isSimulationError(simulation) || !simulation.result) {
+      throw new Error(`Simulation failed for ${method}`);
+    }
+    return scValToNative(simulation.result.retval);
   }
 
   async sendTransaction(

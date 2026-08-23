@@ -5,6 +5,8 @@ import { AppConfigService } from '../config/app-config.service';
 import { SorobanRpcService } from '../stellar/soroban-rpc.service';
 import { IndexerService } from '../indexer/indexer.service';
 import { AdminActionRepository } from './admin-action.repository';
+import { ProtocolService } from '../protocol/protocol.service';
+import { AssetsService } from '../assets/assets.service';
 
 describe('AdminActionWatcherService', () => {
   let service: AdminActionWatcherService;
@@ -27,6 +29,8 @@ describe('AdminActionWatcherService', () => {
   const mockIndexerService = {
     runIndexer: jest.fn(),
   };
+  const mockProtocolService = { invalidateCache: jest.fn() };
+  const mockAssetsService = { invalidateCache: jest.fn() };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -51,6 +55,8 @@ describe('AdminActionWatcherService', () => {
           provide: IndexerService,
           useValue: mockIndexerService,
         },
+        { provide: ProtocolService, useValue: mockProtocolService },
+        { provide: AssetsService, useValue: mockAssetsService },
       ],
     }).compile();
 
@@ -72,6 +78,8 @@ describe('AdminActionWatcherService', () => {
 
     expect(mockRepository.markConfirmed).toHaveBeenCalledWith('a1');
     expect(mockRepository.markFailed).not.toHaveBeenCalled();
+    expect(mockProtocolService.invalidateCache).toHaveBeenCalledTimes(1);
+    expect(mockAssetsService.invalidateCache).toHaveBeenCalledTimes(1);
   });
 
   it('should flip a SENT action to FAILED with an error message on a FAILED result', async () => {
