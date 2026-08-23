@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SorobanRpcService } from '../stellar/soroban-rpc.service';
 import { HorizonService } from '../stellar/horizon.service';
 import { IndexerService } from '../indexer/indexer.service';
+import { ProtocolService } from '../protocol/protocol.service';
 
 // ── Typed response body ───────────────────────────────────────────────────────
 
@@ -87,6 +88,10 @@ async function createApp(
       { provide: PrismaService, useValue: makePrismaStub(prismaUp) },
       { provide: SorobanRpcService, useValue: makeSorobanStub(sorobanUp) },
       { provide: HorizonService, useValue: makeHorizonStub(horizonUp) },
+      {
+        provide: ProtocolService,
+        useValue: { getReachability: jest.fn().mockReturnValue('ok') },
+      },
       {
         provide: IndexerService,
         useValue: makeIndexerStub(
