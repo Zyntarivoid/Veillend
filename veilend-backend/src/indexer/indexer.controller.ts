@@ -75,6 +75,7 @@ export class IndexerController {
       dedupCounter: stats.dedupCounter,
       insertedCounter: stats.insertedCounter,
       lastError: stats.lastError,
+      unhandledEventTopics: stats.unhandledEventTopics,
       replay: stats.replay,
     };
   }

@@ -16,6 +16,7 @@ import { TransactionsModule } from './transactions/transactions.module';
 import { AdminModule } from './admin/admin.module';
 import { AuthModule } from './auth/auth.module';
 import { ProtocolModule } from './protocol/protocol.module';
+import { MarketsModule } from './markets/markets.module';
 import { UsersModule } from './users/users.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { DepositsModule } from './deposits/deposits.module';
@@ -64,6 +65,7 @@ import {
     AdminModule,
     AuthModule,
     ProtocolModule,
+    MarketsModule,
     UsersModule,
     NotificationsModule,
     DepositsModule,

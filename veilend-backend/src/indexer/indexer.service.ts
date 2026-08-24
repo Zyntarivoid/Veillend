@@ -64,6 +64,7 @@ export interface SyncStats {
   lastError: string | null;
   isProcessing: boolean;
   replay: ReplayState;
+  unhandledEventTopics: Record<string, number>;
 }
 
 const DEFAULT_CHUNK_SIZE = 100;
@@ -78,6 +79,8 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
   private lastError: string | null = null;
   private dedupCounter = 0;
   private insertedCounter = 0;
+  private unhandledEventTopics: Record<string, number> = {};
+  private loggedUnhandledTopics = new Set<string>();
 
   private replayState: ReplayState = {
     status: 'idle',
@@ -541,15 +544,114 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
           borrowedDelta,
         };
       }
+      
+      if (topic1 === 'interest_accrued') {
+        const borrowIndex = this.topicToString(parsedTopics[2]);
+        const supplyIndex = this.topicToString(parsedTopics[3]);
+        const accruedAmountStr = this.topicToString(scValToNative(event.value as xdr.ScVal)); // Note: Depending on Soroban packing, this might be a struct or vector. We'll assume event.value is an array [accrued, reserve_share].
+        
+        let accruedAmount = '0';
+        let reserveShare = '0';
+        try {
+          const vals = scValToNative(event.value as xdr.ScVal) as unknown[];
+          if (Array.isArray(vals)) {
+            accruedAmount = vals[0]?.toString() || '0';
+            reserveShare = vals[1]?.toString() || '0';
+          }
+        } catch {
+          // fallback
+        }
+
+        return {
+          kind: 'interest_accrued',
+          assetAddress,
+          borrowIndex,
+          supplyIndex,
+          accruedAmount,
+          reserveShare,
+          ledger,
+          timestamp,
+          eventId: id,
+          txHash,
+          eventIndex,
+        };
+      }
+
+      if (topic1 === 'asset_reserve_updated') {
+        let totalBalance = '0';
+        let protocolFees = '0';
+        let updateKind = '';
+        try {
+          const vals = scValToNative(event.value as xdr.ScVal) as unknown[];
+          if (Array.isArray(vals)) {
+            totalBalance = vals[0]?.toString() || '0';
+            protocolFees = vals[1]?.toString() || '0';
+            updateKind = vals[2]?.toString() || '';
+          }
+        } catch {}
+
+        return {
+          kind: 'asset_reserve_updated',
+          assetAddress,
+          totalBalance,
+          protocolFees,
+          updateKind,
+          ledger,
+          timestamp,
+          eventId: id,
+          txHash,
+          eventIndex,
+        };
+      }
+
+      if (topic1 === 'interest_params_updated') {
+        let baseRateBps = 0;
+        let kinkUtilBps = 0;
+        let slope1Bps = 0;
+        let slope2Bps = 0;
+        let reserveFactorBps = 0;
+        try {
+          const vals = scValToNative(event.value as xdr.ScVal) as unknown[];
+          if (Array.isArray(vals)) {
+            baseRateBps = Number(vals[0]) || 0;
+            kinkUtilBps = Number(vals[1]) || 0;
+            slope1Bps = Number(vals[2]) || 0;
+            slope2Bps = Number(vals[3]) || 0;
+            reserveFactorBps = Number(vals[4]) || 0;
+          }
+        } catch {}
+
+        return {
+          kind: 'interest_params_updated',
+          assetAddress,
+          baseRateBps,
+          kinkUtilBps,
+          slope1Bps,
+          slope2Bps,
+          reserveFactorBps,
+          ledger,
+          timestamp,
+          eventId: id,
+          txHash,
+          eventIndex,
+        };
+      }
 
       if (['contract_upgraded', 'storage_migrated'].includes(topic1)) {
-        // Governance/migration events: no position deltas to apply. Logged for
-        // observability; consumers can subscribe to these topics directly to
-        // track upgrades and storage-schema migrations.
         this.logger.log(
           `Governance event [${topic1}] at ledger ${ledger} (tx ${txHash})`,
         );
         return null;
+      }
+
+      // Track unhandled topics
+      if (!this.unhandledEventTopics[topic1]) {
+        this.unhandledEventTopics[topic1] = 0;
+      }
+      this.unhandledEventTopics[topic1]++;
+      if (!this.loggedUnhandledTopics.has(topic1)) {
+        this.loggedUnhandledTopics.add(topic1);
+        this.logger.warn(`Unhandled contract event topic: ${topic1} (logged once)`);
       }
 
       return null;
@@ -664,6 +766,7 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
       lastError: this.lastError,
       isProcessing: this.isProcessing,
       replay: { ...this.replayState },
+      unhandledEventTopics: { ...this.unhandledEventTopics },
     };
   }
 
