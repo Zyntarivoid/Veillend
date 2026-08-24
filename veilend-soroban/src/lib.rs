@@ -3877,9 +3877,8 @@ impl VeilLendContract {
         // Compute total debt value.
         let debt_position = Self::read_accrued_position(env, user, debt_asset);
         let mut debt_borrowed = debt_position.borrowed;
-        match action_delta {
-            CollateralAction::Borrow { amount } => debt_borrowed += amount,
-            _ => {}
+        if let CollateralAction::Borrow { amount } = action_delta {
+            debt_borrowed += amount;
         }
         if debt_borrowed == 0 {
             return;
@@ -3960,7 +3959,7 @@ impl VeilLendContract {
         if ratio == 0 {
             return 10_000;
         }
-        (10_000_u32 * 10_000_u32 + ratio - 1) / ratio
+        (10_000_u32 * 10_000_u32).div_ceil(ratio)
     }
 
     /// Returns the effective `liquidation_bonus_bps` for `asset`.
