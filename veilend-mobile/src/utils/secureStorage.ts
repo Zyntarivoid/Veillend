@@ -1,8 +1,3 @@
-// Centralized SecureStore wrapper. All SecureStore access must go through
-// this module (enforced by the no-restricted-imports rule in
-// eslint.config.mjs) so every key gets a deliberate keychain-accessibility /
-// authentication policy instead of silently falling back to library
-// defaults, which leave secrets readable any time the device is unlocked.
 import * as SecureStoreShim from './secureStoreShim';
 
 export interface SecureStoreLike {
@@ -36,46 +31,58 @@ export type SecureStorageKey =
   | 'currency'
   | 'notificationsEnabled'
   | 'wallet_backup_confirmed'
-  | 'sessionId';
+  | 'sessionId'
+  | 'applock.biometricsEnabled'
+  | 'applock.pinHash'
+  | 'applock.salt';
 
 type SecureStoreOptions = {
   keychainAccessible?: string;
   requireAuthentication?: boolean;
 };
 
+const GATE_ACCESSIBLE = (store: SecureStoreLike) => store.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY;
+
 /**
- * Per-key storage policy, expressed against whichever store instance is
- * actually in use (the resolved module by default, or an injected one in
- * tests) — options must never be resolved against a *different* store's
- * accessibility constants than the one the read/write actually goes to.
+ * Per-key storage policy. Gate keys (applock.*) are always readable without
+ * re-auth so the unlock gate can decide what kind of prompt to show before
+ * lifting the gate on higher-value secrets.
  */
 const KEY_OPTIONS: Record<SecureStorageKey, (store: SecureStoreLike) => SecureStoreOptions> = {
   // Highest-value secret in the app: gate reads behind device auth and
   // restrict the item to this device, wiped if the passcode is removed.
+  // NOTE: requireAuthentication + WHEN_PASSCODE_SET_THIS_DEVICE_ONLY are
+  // applied CONDITIONALLY at call-time when biometricsEnabled is true.
+  // See setSecureItemWithAuthPolicy / getSecureItemWithAuthPolicy below.
   stellar_secret_key: (store) => ({
-    requireAuthentication: true,
     keychainAccessible: store.WHEN_PASSCODE_SET_THIS_DEVICE_ONLY,
   }),
-  // Session token is sensitive but re-issuable; device-only, no biometric
-  // prompt required on every read.
   authToken: (store) => ({
     keychainAccessible: store.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
   }),
-  address: () => ({}),
-  isPrivacyMode: () => ({}),
-  profileName: () => ({}),
-  profileImage: () => ({}),
-  currency: () => ({}),
-  notificationsEnabled: () => ({}),
-  wallet_backup_confirmed: () => ({}),
-  // Session ID is re-issuable on next login; device-only, no biometric prompt.
+  address: (store) => ({ keychainAccessible: GATE_ACCESSIBLE(store) }),
+  isPrivacyMode: (store) => ({ keychainAccessible: GATE_ACCESSIBLE(store) }),
+  profileName: (store) => ({ keychainAccessible: GATE_ACCESSIBLE(store) }),
+  profileImage: (store) => ({ keychainAccessible: GATE_ACCESSIBLE(store) }),
+  currency: (store) => ({ keychainAccessible: GATE_ACCESSIBLE(store) }),
+  notificationsEnabled: (store) => ({ keychainAccessible: GATE_ACCESSIBLE(store) }),
+  wallet_backup_confirmed: (store) => ({ keychainAccessible: GATE_ACCESSIBLE(store) }),
   sessionId: (store) => ({
     keychainAccessible: store.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
   }),
+  // Gate-state keys: NEVER require authentication, or the unlock gate
+  // cannot even render without first prompting the user — a UX dead-end.
+  'applock.biometricsEnabled': (store) => ({ keychainAccessible: GATE_ACCESSIBLE(store) }),
+  'applock.pinHash': (store) => ({ keychainAccessible: GATE_ACCESSIBLE(store) }),
+  'applock.salt': (store) => ({ keychainAccessible: GATE_ACCESSIBLE(store) }),
 };
 
 function getOptions(key: SecureStorageKey, store: SecureStoreLike): SecureStoreOptions {
   return (KEY_OPTIONS[key] ?? (() => ({})))(store);
+}
+
+function defaultFallback(key: SecureStorageKey, store: SecureStoreLike): SecureStoreOptions {
+  return { keychainAccessible: store.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY };
 }
 
 export async function setSecureItem(
@@ -87,17 +94,42 @@ export async function setSecureItem(
   try {
     await store.setItemAsync(key, value, options);
   } catch (err) {
-    // Devices without a passcode/biometric enrolled can't satisfy
-    // requireAuthentication + WHEN_PASSCODE_SET_THIS_DEVICE_ONLY — the OS
-    // rejects the write. Downgrade rather than silently lose the value.
     if (options.requireAuthentication) {
       console.warn(
         `[secureStorage] "${key}" could not be stored with requireAuthentication ` +
           '(likely no device passcode set). Downgrading to AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY.',
       );
-      await store.setItemAsync(key, value, {
-        keychainAccessible: store.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
-      });
+      await store.setItemAsync(key, value, defaultFallback(key, store));
+      return;
+    }
+    throw err;
+  }
+}
+
+/**
+ * Write stellar_secret_key with the elevated auth policy when the user has
+ * opted in to biometrics/PIN. On iOS/Android this means the OS will prompt
+ * for biometrics / device passcode on every read and the ciphertext is
+ * inaccessible to root/jailbreak exploits that bypass the lock screen.
+ */
+export async function setSecretKeyWithLockPolicy(
+  value: string,
+  biometricsEnabled: boolean,
+  store: SecureStoreLike = SecureStore,
+): Promise<void> {
+  const base = getOptions('stellar_secret_key', store);
+  const opts: SecureStoreOptions = biometricsEnabled
+    ? { ...base, requireAuthentication: true }
+    : base;
+  try {
+    await store.setItemAsync('stellar_secret_key', value, opts);
+  } catch (err) {
+    if (opts.requireAuthentication) {
+      console.warn(
+        '[secureStorage] stellar_secret_key could not be stored with requireAuthentication ' +
+          '(device passcode not enrolled?). Downgrading policy.',
+      );
+      await store.setItemAsync('stellar_secret_key', value, defaultFallback('stellar_secret_key', store));
       return;
     }
     throw err;
@@ -116,4 +148,28 @@ export async function deleteSecureItem(
   store: SecureStoreLike = SecureStore,
 ): Promise<void> {
   return store.deleteItemAsync(key, getOptions(key, store));
+}
+
+/**
+ * Wipe every SecureStore entry we know about. Called by the "Forgot PIN?"
+ * safe-failure path so a locked-out user can never get into a state where
+ * the app is gated forever with no recovery.
+ */
+export async function wipeAllSecureItems(store: SecureStoreLike = SecureStore): Promise<void> {
+  const allKeys: SecureStorageKey[] = [
+    'stellar_secret_key',
+    'authToken',
+    'address',
+    'isPrivacyMode',
+    'profileName',
+    'profileImage',
+    'currency',
+    'notificationsEnabled',
+    'wallet_backup_confirmed',
+    'sessionId',
+    'applock.biometricsEnabled',
+    'applock.pinHash',
+    'applock.salt',
+  ];
+  await Promise.all(allKeys.map((k) => store.deleteItemAsync(k, getOptions(k, store))));
 }

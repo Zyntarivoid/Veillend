@@ -15,7 +15,10 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.cedarich.veillend.mobileapp",
-      "buildNumber": "1"
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "Use Face ID to unlock your Veillend wallet."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -23,13 +26,29 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "package": "cedarich.veillend.mobileapp"
+      "package": "cedarich.veillend.mobileapp",
+      "permissions": [
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-secure-store"
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": "Allow Veillend to access Face ID to unlock your wallet."
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Allow Veillend to use Face ID to unlock your wallet.",
+          "touchIDPermission": "Allow Veillend to use Touch ID / Biometrics to unlock your wallet."
+        }
+      ]
     ],
     "extra": {
       "eas": {

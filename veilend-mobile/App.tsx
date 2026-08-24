@@ -8,11 +8,35 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import NetworkProvider from './src/components/NetworkProvider';
 import { setupCrashInstrumentation } from './src/utils/errorReporting';
+import { AppLockProvider, useAppLockContext } from './src/providers/AppLockProvider';
+import UnlockGate from './src/screens/UnlockGate';
 
 // Install global crash handlers once on module load
 setupCrashInstrumentation();
 
-export default function App() {
+function LockGateOverlay() {
+  const { state } = useAppLockContext();
+  if (state.loading) return null;
+  if (!state.anyLockEnabled) return null;
+  if (!state.isLocked) return null;
+  return (
+    <View
+      style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 100000,
+      }}
+      pointerEvents="auto"
+    >
+      <UnlockGate />
+    </View>
+  );
+}
+
+function AppInner() {
   const authLoading = useStore((s) => s.authLoading);
   const lendingLoading = useStore((s) => s.lendingLoading);
   const shieldedLoading = useStore((s) => s.shieldedLoading);
@@ -25,27 +49,43 @@ export default function App() {
   }, [anyLoading]);
 
   return (
+    <>
+      <RootNavigator />
+      <StatusBar style="light" />
+
+      {anyLoading && (
+        <View
+          style={styles.loadingOverlay}
+          pointerEvents="none"
+          accessibilityViewIsModal={true}
+          accessibilityLabel="Loading, please wait"
+          accessibilityRole="progressbar"
+        >
+          <ActivityIndicator size="large" color="#fff" />
+        </View>
+      )}
+
+      <Toast />
+
+      {/* App unlock gate: renders ABOVE the nav + loading + toast so the user
+          cannot interact with the app until they authenticate. Only present
+          while state.isLocked — unmounts entirely once unlocked so its state
+          (e.g. PIN digits entered) is cleared between locks. */}
+      <LockGateOverlay />
+    </>
+  );
+}
+
+export default function App() {
+  return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ErrorBoundary component="App">
         <NetworkProvider>
-          <View style={styles.container}>
-            <RootNavigator />
-            <StatusBar style="light" />
-
-            {anyLoading && (
-              <View
-                style={styles.loadingOverlay}
-                pointerEvents="none"
-                accessibilityViewIsModal={true}
-                accessibilityLabel="Loading, please wait"
-                accessibilityRole="progressbar"
-              >
-                <ActivityIndicator size="large" color="#fff" />
-              </View>
-            )}
-
-            <Toast />
-          </View>
+          <AppLockProvider>
+            <View style={styles.container}>
+              <AppInner />
+            </View>
+          </AppLockProvider>
         </NetworkProvider>
       </ErrorBoundary>
     </GestureHandlerRootView>

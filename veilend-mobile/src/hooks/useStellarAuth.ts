@@ -1,9 +1,18 @@
 import { useState } from 'react';
 import { Keypair } from '@stellar/stellar-base';
 import { useStore } from '../store/store';
-import { setSecureItem } from '../utils/secureStorage';
+import { getSecureItem, setSecretKeyWithLockPolicy } from '../utils/secureStorage';
 
 const SECRET_KEY_STORE = 'stellar_secret_key' as const;
+
+async function isBiometricsEnabled(): Promise<boolean> {
+  try {
+    const raw = await getSecureItem('applock.biometricsEnabled');
+    return raw === 'true';
+  } catch {
+    return false;
+  }
+}
 
 export function useStellarAuth() {
   const [loading, setLoading] = useState(false);
@@ -29,7 +38,8 @@ export function useStellarAuth() {
     try {
       const keypair = Keypair.random();
       const secret = keypair.secret();
-      await setSecureItem(SECRET_KEY_STORE, secret);
+      const bio = await isBiometricsEnabled();
+      await setSecretKeyWithLockPolicy(secret, bio);
       setGeneratedSecretKey(secret);
       await authenticate(keypair);
     } catch (e: any) {
@@ -45,7 +55,8 @@ export function useStellarAuth() {
     setGeneratedSecretKey(null);
     try {
       const keypair = Keypair.fromSecret(secretKey.trim());
-      await setSecureItem(SECRET_KEY_STORE, keypair.secret());
+      const bio = await isBiometricsEnabled();
+      await setSecretKeyWithLockPolicy(keypair.secret(), bio);
       await authenticate(keypair);
       return true;
     } catch (e: any) {
