@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { Clipboard } from 'react-native';
 import api, { fetchWithRetry } from '../utils/api';
-import { getSecureItem, setSecureItem, deleteSecureItem } from '../utils/secureStorage';
+import { getSecureItem, setSecureItem, deleteSecureItem, wipeAllSecureItems, setSecretKeyWithLockPolicy } from '../utils/secureStorage';
 import { TX_BUILDERS } from '../lib/soroban/transactions';
 import { signTransaction, UserRejectedError } from '../lib/soroban/signer';
 import { sendTransaction, pollTransaction } from '../lib/soroban/rpc';
@@ -83,7 +83,20 @@ type AuthState = {
   requestNonce: (walletAddress: string) => Promise<string>;
   verify: (payload: { walletAddress: string; nonce: string; signature: string }) => Promise<string>;
   authLoading: boolean;
+  /** True once the gate-state-only load has finished. */
   sessionRestored: boolean;
+  /** Called by UnlockGate after a successful biometrics/PIN pass.
+   *  Loads the high-value secrets (authToken, address, profile, etc.)
+   *  from SecureStore which are NOT read before the gate lifts. */
+  triggerHydrationAfterUnlock: () => Promise<void>;
+  /** Safe failure mode: wipe all SecureStore entries, route to ConnectWallet. */
+  wipeAllLocalState: () => Promise<void>;
+  /** Internal flag — true if the full secret-set hydration has been done at
+   *  least once since launch or since the last wipe/auto-lock. */
+  hydrationCompleted: boolean;
+  /** Persist or re-write the stellar_secret_key under the elevated OS-auth
+   *  keychain policy whenever biometricsEnabled toggles on. */
+  applySecretKeyLockPolicy: (biometricsEnabled: boolean) => Promise<void>;
 };
 
 type UiState = {
@@ -406,6 +419,7 @@ export const useStore = create<StoreState>(
     sessionId: null,
     authLoading: false,
     sessionRestored: false,
+    hydrationCompleted: false,
     setAddress: (address: string | null) => {
       set({ address });
       try {
@@ -594,6 +608,106 @@ export const useStore = create<StoreState>(
           throw new Error('Challenge expired. Please request a new one.');
         }
         throw err;
+      }
+    },
+
+    /**
+     * Load every high-value secret from SecureStore. Called ONLY after the
+     * unlock gate has passed (biometrics/PIN verified), or immediately on
+     * launch if NO lock is enabled. Ensures authToken + stellar_secret_key
+     * are never loaded into memory while the gate is still active.
+     */
+    triggerHydrationAfterUnlock: async () => {
+      try {
+        const [token, address, privacyMode, profileName, profileImage, currency, notificationsEnabled, sessionId] =
+          await Promise.all([
+            getSecureItem(PERSIST_KEYS.authToken),
+            getSecureItem(PERSIST_KEYS.address),
+            getSecureItem(PERSIST_KEYS.isPrivacyMode),
+            getSecureItem(PERSIST_KEYS.profileName),
+            getSecureItem(PERSIST_KEYS.profileImage),
+            getSecureItem(PERSIST_KEYS.currency),
+            getSecureItem(PERSIST_KEYS.notificationsEnabled),
+            getSecureItem(PERSIST_KEYS.sessionId),
+          ]);
+
+        const patch: Partial<AuthState & UiState> = {};
+        if (token) (patch as any).authToken = token;
+        if (address) (patch as any).address = address;
+        if (sessionId) (patch as any).sessionId = sessionId;
+        if (privacyMode === 'true') (patch as any).isPrivacyMode = true;
+        if (profileName) (patch as any).profileName = profileName;
+        if (profileImage) (patch as any).profileImage = profileImage;
+        if (currency) (patch as any).currency = currency;
+        if (notificationsEnabled !== null) (patch as any).notificationsEnabled = notificationsEnabled === 'true';
+
+        set({ ...patch, sessionRestored: true, hydrationCompleted: true } as any);
+      } catch (e) {
+        // Even on failure, mark session as restored so the app doesn't hang
+        // on the splash screen forever; ConnectWallet will be shown.
+        set({ sessionRestored: true, hydrationCompleted: true });
+      }
+    },
+
+    /**
+     * Wipe EVERY SecureStore entry AND clear all in-memory hot state. Safe
+     * failure mode invoked by the "Forgot PIN?" path so users can never be
+     * gated forever without recovery.
+     */
+    wipeAllLocalState: async () => {
+      get().cancelPendingRequests();
+      // Clear SecureStore first (wipes secrets + gate state together).
+      await wipeAllSecureItems();
+      // Clear the hot in-memory state so nothing survives to the next render.
+      set({
+        address: null,
+        authToken: null,
+        sessionId: null,
+        isPrivacyMode: false,
+        profileName: null,
+        profileImage: null,
+        currency: 'USD',
+        notificationsEnabled: true,
+        sessionRestored: true,
+        hydrationCompleted: true,
+        authLoading: false,
+        lendingLoading: false,
+        shieldedLoading: false,
+        balance: 0,
+        collateralValue: 0,
+        borrowedValue: 0,
+        availableToBorrow: 0,
+        healthFactor: 0,
+        assetBalances: [],
+        transactions: [],
+        positions: [],
+        supportedAssets: [],
+        pendingTransactions: [],
+        portfolioLoading: false,
+        transactionsLoading: false,
+        dashboardLoading: false,
+        dashboardError: null,
+        backendSlow: false,
+      });
+      try {
+        Clipboard.setString('');
+      } catch (e) {}
+    },
+
+    /**
+     * Re-writes the stellar_secret_key with the elevated keychain policy
+     * (requireAuthentication) whenever the user enables biometrics. If the
+     * in-memory copy isn't available, re-reads once from SecureStore first.
+     */
+    applySecretKeyLockPolicy: async (biometricsEnabled: boolean) => {
+      try {
+        // Read via the canonical secureStorage wrapper (respects current policy)
+        const current = await getSecureItem('stellar_secret_key');
+        if (!current) return;
+        await setSecretKeyWithLockPolicy(current, biometricsEnabled);
+      } catch (e) {
+        // Best effort; if no passcode is set the downgrade path inside
+        // setSecretKeyWithLockPolicy will still preserve the value.
       }
     },
 
@@ -844,36 +958,42 @@ const optimisticDelta = (kind: LendingKind, amount: number): number => {
 };
 
 // ──────────────────────────────────────────────
-// Session restore: hydrate Zustand from SecureStore on app launch.
-// Uses `sessionRestored` flag so the UI can show a splash until ready.
+// Two-phase launch hydration:
+//
+//  Phase 1 (gate-state only, runs immediately):
+//    Read only the applock.* keys from SecureStore (never OS-auth protected)
+//    so useAppLock (mounted below in AppLockProvider) can render the gate.
+//
+//  Phase 2 (full secrets, gated on unlock):
+//    If NO lock is enabled → immediately proceed to full secret hydration right now.
+//    If a lock IS enabled → defer; full hydration happens later inside
+//    UnlockGate calling triggerHydrationAfterUnlock() AFTER the user passes
+//    biometrics or a correct PIN.
 // ──────────────────────────────────────────────
 (async () => {
   try {
-    const [token, address, privacyMode, profileName, profileImage, currency, notificationsEnabled, sessionId] =
-      await Promise.all([
-        getSecureItem(PERSIST_KEYS.authToken),
-        getSecureItem(PERSIST_KEYS.address),
-        getSecureItem(PERSIST_KEYS.isPrivacyMode),
-        getSecureItem(PERSIST_KEYS.profileName),
-        getSecureItem(PERSIST_KEYS.profileImage),
-        getSecureItem(PERSIST_KEYS.currency),
-        getSecureItem(PERSIST_KEYS.notificationsEnabled),
-        getSecureItem(PERSIST_KEYS.sessionId),
-      ]);
+    const [bioRaw, pinHashRaw] = await Promise.all([
+      getSecureItem('applock.biometricsEnabled'),
+      getSecureItem('applock.pinHash'),
+    ]);
+    const biometricsEnabled = bioRaw === 'true';
+    const pinEnabled = !!pinHashRaw;
+    const anyLockEnabled = biometricsEnabled || pinEnabled;
 
-    const patch: Partial<AuthState & UiState> = { sessionRestored: true };
-    if (token) patch.authToken = token;
-    if (address) patch.address = address;
-    if (sessionId) (patch as any).sessionId = sessionId;
-    if (privacyMode === 'true') patch.isPrivacyMode = true;
-    if (profileName) patch.profileName = profileName;
-    if (profileImage) patch.profileImage = profileImage;
-    if (currency) patch.currency = currency;
-    if (notificationsEnabled !== null) patch.notificationsEnabled = notificationsEnabled === 'true';
-
-    useStore.setState(patch);
+    if (!anyLockEnabled) {
+      // No lock → straight to full secret hydration (no gate to show).
+      await useStore.getState().triggerHydrationAfterUnlock();
+      useStore.setState({ sessionRestored: true });
+    } else {
+      // Lock active: mark gate-state as loaded (so the splash goes away and
+      // UnlockGate mounts, which reads the gate-state to render the prompt).
+      useStore.setState({ sessionRestored: true, hydrationCompleted: false });
+    }
   } catch (e) {
-    // If hydration fails, still mark session as restored so the app doesn't hang
+    // On any SecureStore boot failure, still mark sessionRestored so we
+    // don't hang on the splash. The user can still manually ConnectWallet
+    // (gate-state isn't readable but secrets definitely locked out can't proceed till
+    // then.
     useStore.setState({ sessionRestored: true });
   }
 })();

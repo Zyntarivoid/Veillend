@@ -10,6 +10,10 @@ import {
   Switch,
   Keyboard,
   Alert,
+  Modal,
+  KeyboardAvoidingView,
+  Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -19,6 +23,7 @@ import Toast from '../utils/toast';
 import { WalletExportModal } from '../components/WalletExportModal';
 import { WalletBackupModal } from '../components/WalletBackupModal';
 import { useWalletSecurity } from '../hooks/useWalletSecurity';
+import { useAppLockContext } from '../providers/AppLockProvider';
 import { navigationRef } from '../navigation';
 
 const CURRENCIES = ['USD', 'EUR', 'GBP'];
@@ -37,21 +42,36 @@ export default function SettingsScreen({ navigation }: any) {
     isPrivacyMode,
     togglePrivacyMode,
     logout,
+    applySecretKeyLockPolicy,
   } = useStore();
 
   const { secretKey, isBackupConfirmed, withSigner, wipeClipboardNow } = useWalletSecurity() as any;
+  const appLock = useAppLockContext();
+
   const [showExportModal, setShowExportModal] = useState(false);
+
+  // ─── AppLock enrollment / disable modals ────────────────────────────────
+  type WizardStep =
+    | null
+    | 'chooseMethod'
+    | 'pinSet'
+    | 'pinConfirm'
+    | 'disableConfirm'
+    | 'disablePin';
+
+  const [wizard, setWizard] = useState<WizardStep>(null);
+  const [pin1, setPin1] = useState('');
+  const [pin2, setPin2] = useState('');
+  const [pinDisable, setPinDisable] = useState('');
+  const [wizardError, setWizardError] = useState<string | null>(null);
+  const [wizardBusy, setWizardBusy] = useState(false);
 
   const defaultUsername = address ? shortenAddress(address) : 'Guest';
   const username = profileName ?? defaultUsername;
-  // No third-party CDN fallback (issue #344) — undefined renders a local
-  // Ionicons glyph instead of leaking the user's IP/UA to pravatar.cc.
   const avatarUri = profileImage ?? undefined;
 
   const [tempName, setTempName] = useState(username);
 
-  // Keep the editor in sync when the store's profileName changes (e.g. after
-  // saveUsername) so dependent screens always read the same value.
   useEffect(() => {
     setTempName(username);
   }, [username]);
@@ -111,6 +131,141 @@ export default function SettingsScreen({ navigation }: any) {
       return;
     }
     setShowExportModal(true);
+  };
+
+  // ─── AppLock: toggle on/off (top-level Switch press) ─────────────────
+  const anyLockEnabled = appLock.state.anyLockEnabled;
+  const { biometricsEnabled, pinEnabled } = appLock.state;
+
+  const closeWizard = () => {
+    setWizard(null);
+    setPin1('');
+    setPin2('');
+    setPinDisable('');
+    setWizardError(null);
+    setWizardBusy(false);
+  };
+
+  const handleToggleAppLock = (next: boolean) => {
+    if (next === anyLockEnabled) return;
+    if (next) {
+      // Turning ON → open enrollment wizard
+      setPin1('');
+      setPin2('');
+      setWizardError(null);
+      setWizard('chooseMethod');
+    } else {
+      // Turning OFF → require re-authentication
+      if (biometricsEnabled) {
+        setWizard('disableConfirm');
+      } else if (pinEnabled) {
+        setPinDisable('');
+        setWizardError(null);
+        setWizard('disablePin');
+      }
+    }
+  };
+
+  const handleEnrollBiometrics = async () => {
+    setWizardBusy(true);
+    setWizardError(null);
+    try {
+      const ok = await appLock.enrollBiometrics();
+      if (!ok) {
+        setWizardError(
+          'Biometric authentication failed or is not enrolled on this device. Please enable biometrics in OS Settings first.',
+        );
+        return;
+      }
+      // Elevate the stellar_secret_key to OS-authenticated storage.
+      await applySecretKeyLockPolicy(true);
+      Toast.show({ type: 'success', text1: 'Biometrics enabled' });
+      closeWizard();
+    } finally {
+      setWizardBusy(false);
+    }
+  };
+
+  const handleBeginPinEnroll = () => {
+    setPin1('');
+    setPin2('');
+    setWizardError(null);
+    setWizard('pinSet');
+  };
+
+  const handlePinSetNext = () => {
+    if (!/^\d{6}$/.test(pin1)) {
+      setWizardError('Please enter 6 digits.');
+      return;
+    }
+    if (/^(\d)\1{5}$/.test(pin1) || /^123456$|^000000$|^654321$/.test(pin1)) {
+      setWizardError('Please choose a less predictable 6-digit PIN.');
+      return;
+    }
+    setWizardError(null);
+    setPin2('');
+    setWizard('pinConfirm');
+  };
+
+  const handlePinConfirm = async () => {
+    if (pin2 !== pin1) {
+      setWizardError('PINs do not match. Please try again.');
+      setPin2('');
+      return;
+    }
+    setWizardBusy(true);
+    try {
+      const ok = await appLock.enrollPin(pin1, pin2);
+      if (!ok) {
+        setWizardError('Could not save PIN. Please try again.');
+        return;
+      }
+      Toast.show({ type: 'success', text1: 'PIN set' });
+      closeWizard();
+    } finally {
+      setWizardBusy(false);
+    }
+  };
+
+  const handleDisableConfirm = async () => {
+    setWizardBusy(true);
+    setWizardError(null);
+    try {
+      // Biometrics re-auth path: pass no PIN
+      const ok = await appLock.disableLock();
+      if (!ok) {
+        setWizardError('Authentication required to disable the lock.');
+        return;
+      }
+      // Downgrade stellar_secret_key storage policy (no longer requires OS auth)
+      await applySecretKeyLockPolicy(false);
+      Toast.show({ type: 'success', text1: 'App lock disabled' });
+      closeWizard();
+    } finally {
+      setWizardBusy(false);
+    }
+  };
+
+  const handleDisableWithPin = async () => {
+    if (!/^\d{6}$/.test(pinDisable)) {
+      setWizardError('Enter your current 6-digit PIN.');
+      return;
+    }
+    setWizardBusy(true);
+    setWizardError(null);
+    try {
+      const ok = await appLock.disableLock(pinDisable);
+      if (!ok) {
+        setWizardError('Incorrect PIN.');
+        setPinDisable('');
+        return;
+      }
+      await applySecretKeyLockPolicy(false);
+      Toast.show({ type: 'success', text1: 'App lock disabled' });
+      closeWizard();
+    } finally {
+      setWizardBusy(false);
+    }
   };
 
   return (
@@ -183,6 +338,31 @@ export default function SettingsScreen({ navigation }: any) {
               </Text>
             </View>
           </View>
+        </View>
+
+        <View style={styles.divider} />
+
+        {/* App Lock toggle + status */}
+        <View style={styles.switchRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.rowLabel}>Require Biometrics / PIN</Text>
+            <Text style={styles.rowSubLabel}>
+              {anyLockEnabled
+                ? biometricsEnabled && pinEnabled
+                  ? 'Biometrics + 6-digit PIN required'
+                  : biometricsEnabled
+                  ? 'Biometrics required on launch'
+                  : '6-digit PIN required on launch'
+                : 'Tap to secure your wallet with biometrics or a PIN'}
+            </Text>
+          </View>
+          <Switch
+            value={anyLockEnabled}
+            onValueChange={handleToggleAppLock}
+            trackColor={{ false: '#333', true: '#09cc71' }}
+            thumbColor="#FFFFFF"
+            accessibilityLabel="Toggle require biometrics or PIN"
+          />
         </View>
 
         <View style={styles.divider} />
@@ -290,6 +470,227 @@ export default function SettingsScreen({ navigation }: any) {
       </View>
 
       <View style={{ height: 60 }} />
+
+      {/* App Lock enrollment / disable wizard modal */}
+      <Modal
+        visible={wizard !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={closeWizard}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.select({ ios: 'padding', android: undefined })}
+        >
+          <View style={styles.modalCard}>
+            {wizard === 'chooseMethod' && (
+              <>
+                <Text style={styles.modalTitle}>Secure Veillend</Text>
+                <Text style={styles.modalSubtitle}>
+                  Choose how to unlock the app. You can enable both for maximum protection.
+                </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.modalBigButton,
+                    !appLock.state.biometricsHardwareAvailable && styles.modalBigButtonDisabled,
+                  ]}
+                  onPress={handleEnrollBiometrics}
+                  disabled={!appLock.state.biometricsHardwareAvailable || wizardBusy}
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="finger-print" size={22} color="#fff" />
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={styles.modalBigButtonTitle}>Use Biometrics</Text>
+                    <Text style={styles.modalBigButtonSubtitle}>
+                      {appLock.state.biometricsHardwareAvailable
+                        ? 'Face ID / Touch ID / fingerprint'
+                        : 'Biometric hardware not available or not enrolled'}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalBigButton, styles.modalBigButtonSecondary]}
+                  onPress={handleBeginPinEnroll}
+                  disabled={wizardBusy}
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="keypad-outline" size={22} color="#A855F7" />
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={[styles.modalBigButtonTitle, { color: '#fff' }]}>Set 6-Digit PIN</Text>
+                    <Text style={styles.modalBigButtonSubtitle}>PIN fallback, always works</Text>
+                  </View>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.modalCancel} onPress={closeWizard}>
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                {wizardBusy && <ActivityIndicator style={{ marginTop: 12 }} color="#A855F7" />}
+                {wizardError ? <Text style={styles.modalError}>{wizardError}</Text> : null}
+              </>
+            )}
+
+            {wizard === 'pinSet' && (
+              <>
+                <Text style={styles.modalTitle}>Create 6-Digit PIN</Text>
+                <Text style={styles.modalSubtitle}>
+                  Enter any 6 digits you can remember. If you forget it, you&apos;ll need to re-import your wallet from backup.
+                </Text>
+                <View style={styles.pinDotsRow}>
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <View
+                      key={i}
+                      style={[styles.pinDot, pin1.length > i && styles.pinDotFilled]}
+                    />
+                  ))}
+                </View>
+                <TextInput
+                  value={pin1}
+                  onChangeText={(t) => {
+                    setPin1(t.replace(/\D/g, '').slice(0, 6));
+                    setWizardError(null);
+                  }}
+                  keyboardType="number-pad"
+                  maxLength={6}
+                  textContentType="oneTimeCode"
+                  autoFocus
+                  style={styles.hiddenPinInput}
+                />
+                {wizardError ? <Text style={styles.modalError}>{wizardError}</Text> : null}
+                <View style={{ flexDirection: 'row', gap: 10, width: '100%', marginTop: 12 }}>
+                  <TouchableOpacity style={styles.modalSoftBtn} onPress={closeWizard}>
+                    <Text style={styles.modalSoftBtnText}>Back</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modalPrimaryBtn, pin1.length !== 6 && styles.modalPrimaryBtnDisabled]}
+                    onPress={handlePinSetNext}
+                    disabled={pin1.length !== 6 || wizardBusy}
+                  >
+                    <Text style={styles.modalPrimaryBtnText}>Next</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+
+            {wizard === 'pinConfirm' && (
+              <>
+                <Text style={styles.modalTitle}>Confirm 6-Digit PIN</Text>
+                <Text style={styles.modalSubtitle}>Re-enter the same PIN to confirm.</Text>
+                <View style={styles.pinDotsRow}>
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <View
+                      key={i}
+                      style={[
+                        styles.pinDot,
+                        pin2.length > i && styles.pinDotFilled,
+                        wizardError && styles.pinDotError,
+                      ]}
+                    />
+                  ))}
+                </View>
+                <TextInput
+                  value={pin2}
+                  onChangeText={(t) => {
+                    setPin2(t.replace(/\D/g, '').slice(0, 6));
+                    setWizardError(null);
+                  }}
+                  keyboardType="number-pad"
+                  maxLength={6}
+                  textContentType="oneTimeCode"
+                  autoFocus
+                  style={styles.hiddenPinInput}
+                />
+                {wizardError ? <Text style={styles.modalError}>{wizardError}</Text> : null}
+                {wizardBusy && <ActivityIndicator color="#09cc71" style={{ marginBottom: 8 }} />}
+                <View style={{ flexDirection: 'row', gap: 10, width: '100%', marginTop: 12 }}>
+                  <TouchableOpacity
+                    style={styles.modalSoftBtn}
+                    onPress={() => setWizard('pinSet')}
+                  >
+                    <Text style={styles.modalSoftBtnText}>Back</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modalPrimaryBtn, pin2.length !== 6 && styles.modalPrimaryBtnDisabled]}
+                    onPress={handlePinConfirm}
+                    disabled={pin2.length !== 6 || wizardBusy}
+                  >
+                    <Text style={styles.modalPrimaryBtnText}>Confirm & Enable</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+
+            {wizard === 'disableConfirm' && (
+              <>
+                <Text style={styles.modalTitle}>Turn Off App Lock?</Text>
+                <Text style={styles.modalSubtitle}>
+                  Confirm your identity to disable the lock. Anyone who picks up this device will be able to access your wallet.
+                </Text>
+                <TouchableOpacity
+                  style={[styles.modalBigButton, { marginTop: 8 }]}
+                  onPress={handleDisableConfirm}
+                  disabled={wizardBusy}
+                >
+                  <Ionicons name="finger-print" size={22} color="#fff" />
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={styles.modalBigButtonTitle}>Authenticate to Disable</Text>
+                    <Text style={styles.modalBigButtonSubtitle}>Biometrics prompt</Text>
+                  </View>
+                </TouchableOpacity>
+                {wizardBusy && <ActivityIndicator style={{ marginTop: 12 }} color="#FF4D4D" />}
+                {wizardError ? <Text style={styles.modalError}>{wizardError}</Text> : null}
+                <TouchableOpacity style={styles.modalCancel} onPress={closeWizard}>
+                  <Text style={styles.modalCancelText}>Keep Lock Enabled</Text>
+                </TouchableOpacity>
+              </>
+            )}
+
+            {wizard === 'disablePin' && (
+              <>
+                <Text style={styles.modalTitle}>Confirm to Disable Lock</Text>
+                <Text style={styles.modalSubtitle}>
+                  Enter your current 6-digit PIN. Anyone who picks up this device will be able to access your wallet.
+                </Text>
+                <View style={styles.pinDotsRow}>
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <View
+                      key={i}
+                      style={[
+                        styles.pinDot,
+                        pinDisable.length > i && styles.pinDotFilled,
+                        wizardError && styles.pinDotError,
+                      ]}
+                    />
+                  ))}
+                </View>
+                <TextInput
+                  value={pinDisable}
+                  onChangeText={(t) => {
+                    setPinDisable(t.replace(/\D/g, '').slice(0, 6));
+                    setWizardError(null);
+                  }}
+                  keyboardType="number-pad"
+                  maxLength={6}
+                  autoFocus
+                  style={styles.hiddenPinInput}
+                />
+                {wizardError ? <Text style={styles.modalError}>{wizardError}</Text> : null}
+                {wizardBusy && <ActivityIndicator color="#FF4D4D" style={{ marginBottom: 8 }} />}
+                <View style={{ flexDirection: 'row', gap: 10, width: '100%', marginTop: 12 }}>
+                  <TouchableOpacity style={styles.modalSoftBtn} onPress={closeWizard}>
+                    <Text style={styles.modalSoftBtnText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.modalPrimaryBtn, { backgroundColor: '#FF4D4D' }, pinDisable.length !== 6 && styles.modalPrimaryBtnDisabled]}
+                    onPress={handleDisableWithPin}
+                    disabled={pinDisable.length !== 6 || wizardBusy}
+                  >
+                    <Text style={styles.modalPrimaryBtnText}>Disable Lock</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
       {/* Wallet Export Modal */}
       <WalletExportModal
@@ -499,5 +900,134 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '500',
+  },
+
+  // ─── App Lock wizard modal styles ──────────────────────────────────
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: '#121212',
+    borderRadius: 20,
+    padding: 22,
+    borderWidth: 1,
+    borderColor: '#2A2A2A',
+    gap: 14,
+    alignItems: 'center',
+  },
+  modalTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  modalSubtitle: {
+    color: '#A1A1A1',
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  modalBigButton: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#09cc71',
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+  },
+  modalBigButtonSecondary: {
+    backgroundColor: 'rgba(168, 85, 247, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(168, 85, 247, 0.45)',
+  },
+  modalBigButtonDisabled: {
+    opacity: 0.45,
+  },
+  modalBigButtonTitle: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 15,
+  },
+  modalBigButtonSubtitle: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  modalCancel: {
+    paddingVertical: 8,
+    marginTop: 4,
+  },
+  modalCancelText: {
+    color: '#888',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  modalError: {
+    color: '#FF4D4D',
+    fontSize: 13,
+    textAlign: 'center',
+  },
+  pinDotsRow: {
+    flexDirection: 'row',
+    gap: 14,
+    marginTop: 6,
+    marginBottom: 4,
+  },
+  pinDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: '#555',
+    backgroundColor: 'transparent',
+  },
+  pinDotFilled: {
+    borderColor: '#09cc71',
+    backgroundColor: '#09cc71',
+  },
+  pinDotError: {
+    borderColor: '#FF4D4D',
+    backgroundColor: '#FF4D4D',
+  },
+  hiddenPinInput: {
+    position: 'absolute',
+    width: 1,
+    height: 1,
+    opacity: 0.01,
+  },
+  modalSoftBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: '#333',
+    alignItems: 'center',
+  },
+  modalSoftBtnText: {
+    color: '#A1A1A1',
+    fontWeight: '600',
+  },
+  modalPrimaryBtn: {
+    flex: 2,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: '#09cc71',
+    alignItems: 'center',
+  },
+  modalPrimaryBtnDisabled: {
+    opacity: 0.45,
+  },
+  modalPrimaryBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 15,
   },
 });
