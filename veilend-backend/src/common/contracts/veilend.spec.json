@@ -21,6 +21,14 @@
     {
       "topic": "asset_configured",
       "description": "Emitted when an admin configures an asset's support status"
+    },
+    {
+      "topic": "contract_upgraded",
+      "description": "Emitted by execute_upgrade before the executable swap: old contract version, new wasm hash, and ledger"
+    },
+    {
+      "topic": "storage_migrated",
+      "description": "Emitted by migrate when the stored storage-schema version advances"
     }
   ]
 }

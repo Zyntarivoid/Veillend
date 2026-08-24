@@ -1,6 +1,11 @@
 # Rust build artifacts
 /target/
 /veilend-soroban/target/
+/veilend-soroban/upgrade_fixture/target/
+
+# Soroban test harness snapshots for lib unit tests (integration-test
+# snapshots under test_snapshots/*.json are tracked)
+/veilend-soroban/test_snapshots/tests/
 
 # Root planning backlogs
 /backend.md

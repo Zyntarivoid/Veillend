@@ -1,0 +1,35 @@
+# Standalone crate that builds the test fixture wasms used by the upgrade
+# integration tests. It is intentionally NOT a member of the root workspace:
+# it is only ever built for wasm32-unknown-unknown to produce fixture
+# artifacts, never for the host target.
+#
+# Regenerate the fixtures with (the v1 variant is selected by the
+# FIXTURE_VERSION build-script env var):
+#   cargo build --manifest-path upgrade_fixture/Cargo.toml \
+#       --target wasm32-unknown-unknown --release
+#   cp upgrade_fixture/target/wasm32-unknown-unknown/release/veillend_contract_fixture.wasm \
+#       tests/fixtures/veillend_v2.wasm
+#   FIXTURE_VERSION=v1 cargo build --manifest-path upgrade_fixture/Cargo.toml \
+#       --target wasm32-unknown-unknown --release
+#   cp upgrade_fixture/target/wasm32-unknown-unknown/release/veillend_contract_fixture.wasm \
+#       tests/fixtures/veillend_v1.wasm
+#
+# The default release profile is used deliberately: the root workspace's
+# release profile (lto + opt-level z + codegen-units 1) produces a wasm whose
+# `call_indirect` table-byte encoding the protocol-23 host wasmparser rejects
+# ("reference-types not enabled"), so fixture artifacts must be built with
+# the plain release profile to be loadable in the test host.
+[package]
+name = "veillend-contract-fixture"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = "=23.5.3"

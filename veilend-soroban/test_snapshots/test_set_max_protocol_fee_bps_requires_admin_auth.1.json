@@ -178,6 +178,18 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "StorageSchemaVersion"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u32": 5
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "TimelockLedgers"
                             }
                           ]
