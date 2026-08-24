@@ -12,7 +12,14 @@ import { ProtocolModule } from '../protocol/protocol.module';
 import { AssetsModule } from '../assets/assets.module';
 
 @Module({
-  imports: [ConfigModule, AuthModule, StellarModule, IndexerModule, ProtocolModule, AssetsModule],
+  imports: [
+    ConfigModule,
+    AuthModule,
+    StellarModule,
+    IndexerModule,
+    ProtocolModule,
+    AssetsModule,
+  ],
   controllers: [AdminController],
   providers: [
     AdminService,

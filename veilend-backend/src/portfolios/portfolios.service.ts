@@ -192,6 +192,18 @@ export class PortfoliosService {
         );
       }
 
+      const stateRows = await db.$queryRaw<
+        Array<{ borrowIndex: Prisma.Decimal; supplyIndex: Prisma.Decimal }>
+      >(Prisma.sql`
+        SELECT "borrowIndex", "supplyIndex"
+        FROM "AssetInterestState"
+        WHERE "assetId" = ${assetId}
+      `);
+      const currentBorrowIndex =
+        stateRows[0]?.borrowIndex ?? new Prisma.Decimal(1.0);
+      const currentSupplyIndex =
+        stateRows[0]?.supplyIndex ?? new Prisma.Decimal(1.0);
+
       await db.position.upsert({
         where: { userId_assetId: { userId: user.id, assetId } },
         create: {
@@ -199,11 +211,17 @@ export class PortfoliosService {
           assetId,
           depositedRaw: depositedRawDelta,
           borrowedRaw: borrowedRawDelta,
+          borrowIndexSnapshot: currentBorrowIndex,
+          supplyIndexSnapshot: currentSupplyIndex,
           isStale: false,
         },
         update: {
           depositedRaw: { increment: depositedRawDelta },
           borrowedRaw: { increment: borrowedRawDelta },
+          // Notice we don't fully re-anchor here via increment because
+          // we don't know the accrued interest amount. We just let the
+          // indexer correct it in the next block. For optimistic updates,
+          // preserving the old snapshot is acceptable until indexer sync.
         },
       });
     });

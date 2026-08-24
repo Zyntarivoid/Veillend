@@ -19,11 +19,52 @@ export interface IndexerTransaction {
   timestamp: string;
 }
 
-export interface IndexerParsedEvent {
-  tx: IndexerTransaction;
-  depositedDelta: bigint;
-  borrowedDelta: bigint;
-}
+export type IndexerParsedEvent =
+  | {
+      kind: 'transaction';
+      tx: IndexerTransaction;
+      depositedDelta: bigint;
+      borrowedDelta: bigint;
+    }
+  | {
+      kind: 'interest_accrued';
+      assetAddress: string;
+      borrowIndex: string;
+      supplyIndex: string;
+      accruedAmount: string; // interest to borrowers
+      reserveShare: string; // dust to reserves
+      ledger: number;
+      timestamp: string;
+      eventId: string;
+      txHash: string;
+      eventIndex: number;
+    }
+  | {
+      kind: 'asset_reserve_updated';
+      assetAddress: string;
+      totalBalance: string;
+      protocolFees: string;
+      updateKind: string;
+      ledger: number;
+      timestamp: string;
+      eventId: string;
+      txHash: string;
+      eventIndex: number;
+    }
+  | {
+      kind: 'interest_params_updated';
+      assetAddress: string;
+      baseRateBps: number;
+      kinkUtilBps: number;
+      slope1Bps: number;
+      slope2Bps: number;
+      reserveFactorBps: number;
+      ledger: number;
+      timestamp: string;
+      eventId: string;
+      txHash: string;
+      eventIndex: number;
+    };
 
 export interface GetTransactionsOptions {
   cursor?: string;
@@ -364,22 +405,35 @@ export class IndexerRepository {
    * Returns `{ isNew: true }` if newly indexed; `{ isNew: false }` if skipped duplicate.
    */
   async processEventSafe(
-    params: {
-      tx: IndexerTransaction;
-      depositedDelta: bigint;
-      borrowedDelta: bigint;
-    },
+    event: IndexerParsedEvent,
     db?: Prisma.TransactionClient,
   ): Promise<{ isNew: boolean }> {
-    const { tx, depositedDelta, borrowedDelta } = params;
-    const timestamp = new Date(tx.timestamp);
-    const eventIndex = tx.eventIndex ?? extractEventIndex(tx.id);
-
     const execute = async (client: Prisma.TransactionClient) => {
+      let eventId = '';
+      let txHash = '';
+      let eventIndex = 0;
+      let ledger = 0;
+      let timestampStr = '';
+
+      if (event.kind === 'transaction') {
+        eventId = event.tx.id;
+        txHash = event.tx.txHash;
+        eventIndex = event.tx.eventIndex ?? extractEventIndex(eventId);
+        ledger = event.tx.ledger;
+        timestampStr = event.tx.timestamp;
+      } else {
+        eventId = event.eventId;
+        txHash = event.txHash;
+        eventIndex = event.eventIndex;
+        ledger = event.ledger;
+        timestampStr = event.timestamp;
+      }
+      const timestamp = new Date(timestampStr);
+
       // 1. Lookaside + DB deduplication check
       const isDup = await this.isEventDuplicate(
-        tx.id,
-        tx.txHash,
+        eventId,
+        txHash,
         eventIndex,
         client,
       );
@@ -387,42 +441,91 @@ export class IndexerRepository {
         return { isNew: false };
       }
 
-      const user = await this.resolveUser(client, tx.userAddress);
-      const asset = await this.resolveAsset(client, tx.assetAddress);
-
       try {
-        await client.transactionHistory.create({
-          data: {
-            userId: user.id,
-            assetId: asset.id,
-            type: TX_TYPE_MAP[tx.type],
-            status: TransactionStatus.CONFIRMED,
-            amountRaw: BigInt(tx.amount),
-            amountUsd: 0,
-            txHash: tx.txHash || null,
-            eventIndex,
-            ledgerSequence: tx.ledger,
-            contractId: this.normalize(tx.assetAddress),
-            sorobanEventId: tx.id,
-            createdAt: timestamp,
-            confirmedAt: timestamp,
-          },
-        });
+        if (event.kind === 'transaction') {
+          const { tx, depositedDelta, borrowedDelta } = event;
+          const user = await this.resolveUser(client, tx.userAddress);
+          const asset = await this.resolveAsset(client, tx.assetAddress);
 
-        await this.applyPositionDelta(
-          client,
-          user.id,
-          asset.id,
-          depositedDelta,
-          borrowedDelta,
-        );
+          await client.transactionHistory.create({
+            data: {
+              userId: user.id,
+              assetId: asset.id,
+              type: TX_TYPE_MAP[tx.type],
+              status: TransactionStatus.CONFIRMED,
+              amountRaw: BigInt(tx.amount),
+              amountUsd: 0,
+              txHash: tx.txHash || null,
+              eventIndex,
+              ledgerSequence: tx.ledger,
+              contractId: this.normalize(tx.assetAddress),
+              sorobanEventId: tx.id,
+              createdAt: timestamp,
+              confirmedAt: timestamp,
+            },
+          });
+
+          await this.applyPositionDelta(
+            client,
+            user.id,
+            asset.id,
+            depositedDelta,
+            borrowedDelta,
+          );
+        } else if (event.kind === 'interest_accrued') {
+          const asset = await this.resolveAsset(client, event.assetAddress);
+          const accruedAmount = BigInt(event.accruedAmount);
+          const reserveShare = BigInt(event.reserveShare);
+
+          await client.$executeRaw(Prisma.sql`
+            INSERT INTO "AssetInterestState" ("assetId", "borrowIndex", "supplyIndex", "lastAccrualLedger", "lastAccrualAt", "totalSupplied", "totalBorrowed", "updatedAt")
+            VALUES (${asset.id}, ${event.borrowIndex}::numeric, ${event.supplyIndex}::numeric, ${event.ledger}, ${timestamp}, 0, 0, CURRENT_TIMESTAMP)
+            ON CONFLICT ("assetId") DO UPDATE SET
+              "borrowIndex" = ${event.borrowIndex}::numeric,
+              "supplyIndex" = ${event.supplyIndex}::numeric,
+              "lastAccrualLedger" = ${event.ledger},
+              "lastAccrualAt" = ${timestamp},
+              "totalBorrowed" = "AssetInterestState"."totalBorrowed" + ${accruedAmount},
+              "totalSupplied" = "AssetInterestState"."totalSupplied" + (${accruedAmount} - ${reserveShare}),
+              "updatedAt" = CURRENT_TIMESTAMP
+          `);
+        } else if (event.kind === 'asset_reserve_updated') {
+          const asset = await this.resolveAsset(client, event.assetAddress);
+          await client.$executeRaw(Prisma.sql`
+            INSERT INTO "AssetInterestState" ("assetId", "protocolFees", "updatedAt")
+            VALUES (${asset.id}, ${BigInt(event.protocolFees)}, CURRENT_TIMESTAMP)
+            ON CONFLICT ("assetId") DO UPDATE SET
+              "protocolFees" = ${BigInt(event.protocolFees)},
+              "updatedAt" = CURRENT_TIMESTAMP
+          `);
+        } else if (event.kind === 'interest_params_updated') {
+          const asset = await this.resolveAsset(client, event.assetAddress);
+          await client.assetInterestParams.upsert({
+            where: { assetId: asset.id },
+            create: {
+              assetId: asset.id,
+              baseRateBps: event.baseRateBps,
+              kinkUtilBps: event.kinkUtilBps,
+              slope1Bps: event.slope1Bps,
+              slope2Bps: event.slope2Bps,
+              reserveFactorBps: event.reserveFactorBps,
+            },
+            update: {
+              baseRateBps: event.baseRateBps,
+              kinkUtilBps: event.kinkUtilBps,
+              slope1Bps: event.slope1Bps,
+              slope2Bps: event.slope2Bps,
+              reserveFactorBps: event.reserveFactorBps,
+            },
+          });
+        }
 
         // Record in lookaside table for fast subsequent dedup
         await this.recordEventDedup(
-          tx.id,
-          tx.txHash,
+          eventId,
+          txHash,
           eventIndex,
-          tx.ledger,
+          ledger,
           3600,
           client,
         );
@@ -482,6 +585,7 @@ export class IndexerRepository {
     borrowedDelta: bigint,
   ): Promise<boolean> {
     const result = await this.processEventSafe({
+      kind: 'transaction',
       tx,
       depositedDelta,
       borrowedDelta,
@@ -518,6 +622,19 @@ export class IndexerRepository {
     const currentDeposited = BigInt(rows[0]?.depositedRaw ?? 0n);
     const currentBorrowed = BigInt(rows[0]?.borrowedRaw ?? 0n);
 
+    // Fetch current indexes to re-anchor snapshots
+    const stateRows = await db.$queryRaw<
+      Array<{ borrowIndex: Prisma.Decimal; supplyIndex: Prisma.Decimal }>
+    >(Prisma.sql`
+      SELECT "borrowIndex", "supplyIndex"
+      FROM "AssetInterestState"
+      WHERE "assetId" = ${assetId}
+    `);
+    const currentBorrowIndex =
+      stateRows[0]?.borrowIndex ?? new Prisma.Decimal(1.0);
+    const currentSupplyIndex =
+      stateRows[0]?.supplyIndex ?? new Prisma.Decimal(1.0);
+
     let nextDeposited = currentDeposited + depositedDelta;
     let nextBorrowed = currentBorrowed + borrowedDelta;
 
@@ -528,10 +645,25 @@ export class IndexerRepository {
       UPDATE "Position"
       SET "depositedRaw" = ${nextDeposited},
           "borrowedRaw" = ${nextBorrowed},
+          "borrowIndexSnapshot" = ${currentBorrowIndex}::numeric,
+          "supplyIndexSnapshot" = ${currentSupplyIndex}::numeric,
           "isStale" = false,
           "lastSyncAt" = CURRENT_TIMESTAMP
       WHERE "userId" = ${userId} AND "assetId" = ${assetId}
     `);
+
+    // We also need to update totalSupplied and totalBorrowed on AssetInterestState
+    // based on user transactions (since interest_accrued only covers interest growth)
+    if (depositedDelta !== 0n || borrowedDelta !== 0n) {
+      await db.$executeRaw(Prisma.sql`
+        INSERT INTO "AssetInterestState" ("assetId", "updatedAt")
+        VALUES (${assetId}, CURRENT_TIMESTAMP)
+        ON CONFLICT ("assetId") DO UPDATE SET
+          "totalSupplied" = "AssetInterestState"."totalSupplied" + ${depositedDelta},
+          "totalBorrowed" = "AssetInterestState"."totalBorrowed" + ${borrowedDelta},
+          "updatedAt" = CURRENT_TIMESTAMP
+      `);
+    }
   }
 
   async getPositions(userAddress: string): Promise<IndexerPosition[]> {
@@ -593,6 +725,8 @@ export class IndexerRepository {
         where: { id: CHECKPOINT_ID },
       }),
       this.prisma.indexerEventDedup.deleteMany({}),
+      this.prisma.assetInterestState.deleteMany({}),
+      this.prisma.assetInterestParams.deleteMany({}),
     ]);
   }
 }

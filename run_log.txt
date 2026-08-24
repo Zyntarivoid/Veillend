@@ -1,0 +1,289 @@
+build-and-test	UNKNOWN STEP	﻿2026-08-24T13:39:51.3168522Z Current runner version: '2.336.0'
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.3191624Z ##[group]Runner Image Provisioner
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.3192493Z Hosted Compute Agent
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.3193151Z Version: 20260729.566
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.3193836Z Commit: cf7153fe6e25b664e8693c24944bf2b00355d109
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.3194557Z Build Date: 2026-07-29T19:17:02Z
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.3195294Z Worker ID: {97c72a77-5f22-48e9-82d9-301c1dee7e9e}
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.3195992Z Azure Region: westus
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.3196843Z ##[endgroup]
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.3198488Z ##[group]Operating System
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.3199120Z Ubuntu
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.3199713Z 24.04.4
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.3200221Z LTS
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.3200716Z ##[endgroup]
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.3201364Z ##[group]Runner Image
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.3201964Z Image: ubuntu-24.04
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.3202555Z Version: 20260816.277.1
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.3203792Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260816.277/images/ubuntu/Ubuntu2404-Readme.md
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.3205462Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260816.277
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.3206686Z ##[endgroup]
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.3207942Z ##[group]GITHUB_TOKEN Permissions
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.3209791Z Contents: read
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.3210472Z Metadata: read
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.3211097Z Packages: read
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.3211672Z ##[endgroup]
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.3213729Z Secret source: None
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.3214826Z Prepare workflow directory
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.3659135Z Prepare all required actions
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.3714833Z Getting action download info
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.7260602Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:51.8660615Z Download action repository 'actions/setup-node@v4' (SHA:49933ea5288caeca8642d1e84afbd3f7d6820020)
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.0491980Z Complete job name: build-and-test
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.1243167Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.1252190Z ##[group]Run actions/checkout@v4
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.1253000Z with:
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.1253465Z   repository: Zyntarivoid/Veillend
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.1257768Z   token: ***
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.1258232Z   ssh-strict: true
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.1258673Z   ssh-user: git
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.1259125Z   persist-credentials: true
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.1259631Z   clean: true
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.1260080Z   sparse-checkout-cone-mode: true
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.1260605Z   fetch-depth: 1
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.1261029Z   fetch-tags: false
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.1261468Z   show-progress: true
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.1261911Z   lfs: false
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.1262369Z   submodules: false
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.1262812Z   set-safe-directory: true
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.1263348Z   allow-unsafe-pr-checkout: false
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.1264191Z ##[endgroup]
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2259217Z Syncing repository: Zyntarivoid/Veillend
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2261966Z ##[group]Getting Git version info
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2263258Z Working directory is '/home/runner/work/Veillend/Veillend'
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2264858Z [command]/usr/bin/git version
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2322498Z git version 2.55.0
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2387874Z ##[endgroup]
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2401956Z Temporarily overriding HOME='/home/runner/work/_temp/a9c27815-53a8-4815-b6eb-83405d45d4c6' before making global git config changes
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2407972Z Adding repository directory to the temporary git global config as a safe directory
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2410542Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Veillend/Veillend
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2462465Z Deleting the contents of '/home/runner/work/Veillend/Veillend'
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2469398Z ##[group]Initializing the repository
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2475303Z [command]/usr/bin/git init /home/runner/work/Veillend/Veillend
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2593262Z hint: Using 'master' as the name for the initial branch. This default branch name
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2595145Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2596920Z hint: to use in all of your new repositories, which will suppress this warning,
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2598141Z hint: call:
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2598839Z hint:
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2599724Z hint: 	git config --global init.defaultBranch <name>
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2600723Z hint:
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2601650Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2603170Z hint: 'development'. The just-created branch can be renamed via this command:
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2604446Z hint:
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2605150Z hint: 	git branch -m <name>
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2605943Z hint:
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2607141Z hint: Disable this message with "git config set advice.defaultBranchName false"
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2614053Z Initialized empty Git repository in /home/runner/work/Veillend/Veillend/.git/
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2626755Z [command]/usr/bin/git remote add origin https://github.com/Zyntarivoid/Veillend
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2680229Z ##[endgroup]
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2681889Z ##[group]Disabling automatic garbage collection
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2683296Z [command]/usr/bin/git config --local gc.auto 0
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2714018Z ##[endgroup]
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2715175Z ##[group]Setting up auth
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2721070Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.2754306Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.3171250Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.3212170Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.3433747Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.3468293Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.3691282Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.3730903Z ##[endgroup]
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.3732145Z ##[group]Fetching the repository
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:52.3741969Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +4264a6e8adebc37da9cbc8ab411cd1af03608e83:refs/remotes/pull/430/merge
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.2733330Z From https://github.com/Zyntarivoid/Veillend
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.2734821Z  * [new ref]         4264a6e8adebc37da9cbc8ab411cd1af03608e83 -> pull/430/merge
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.2739172Z ##[endgroup]
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.2740561Z ##[group]Determining the checkout info
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.2743048Z ##[endgroup]
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.2752128Z [command]/usr/bin/git sparse-checkout disable
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.2809792Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.2852134Z ##[group]Checking out the ref
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.2857134Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/430/merge
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3370480Z Note: switching to 'refs/remotes/pull/430/merge'.
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3371314Z 
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3371889Z You are in 'detached HEAD' state. You can look around, make experimental
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3373211Z changes and commit them, and you can discard any commits you make in this
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3374547Z state without impacting any branches by switching back to a branch.
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3375325Z 
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3376161Z If you want to create a new branch to retain commits you create, you may
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3378398Z do so (now or later) by using -c with the switch command. Example:
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3379712Z 
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3380313Z   git switch -c <new-branch-name>
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3381247Z 
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3381819Z Or undo this operation with:
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3382694Z 
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3383216Z   git switch -
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3383925Z 
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3385052Z Turn off this advice by setting config variable advice.detachedHead to false
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3386821Z 
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3388599Z HEAD is now at 4264a6e Merge 9acd09f18036cc92b30c5b8eb0dd5b65c9b382c1 into 7353a8c2cb74da383f82cd1f8c9bf4e58027e164
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3393864Z ##[endgroup]
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3433024Z [command]/usr/bin/git log -1 --format=%H
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3459842Z 4264a6e8adebc37da9cbc8ab411cd1af03608e83
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3834936Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3840214Z ##[group]Run actions/setup-node@v4
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3841353Z with:
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3842264Z   node-version-file: .nvmrc
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3843306Z   cache: npm
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3844472Z   cache-dependency-path: veilend-backend/package-lock.json
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3845900Z   always-auth: false
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3912939Z   check-latest: false
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3928242Z   token: ***
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.3929222Z ##[endgroup]
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.5291142Z Node version file is not JSON file
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.5293218Z Resolved .nvmrc as 22.23.2
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.5316909Z Found in cache @ /opt/hostedtoolcache/node/22.23.2/x64
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.5324821Z (node:2166) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.5329530Z (Use `node --trace-deprecation ...` to show where the warning was created)
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.5333669Z ##[group]Environment details
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.9655518Z node: v22.23.2
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.9655982Z npm: 10.9.8
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.9656497Z yarn: 1.22.22
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.9657459Z ##[endgroup]
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:53.9676589Z [command]/opt/hostedtoolcache/node/22.23.2/x64/bin/npm config get cache
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:54.0803686Z /home/runner/.npm
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:54.3529653Z Cache hit for: node-cache-Linux-x64-npm-2092729f2db1e9f8fc4c0a661043b2b7b3c57b0ef4ef1fabdb0bc98a2b8f6621
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:54.3642918Z (node:2166) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:55.6463813Z Received 4194304 of 108850960 (3.9%), 4.0 MBs/sec
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:56.6463592Z Received 104857600 of 108850960 (96.3%), 50.0 MBs/sec
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:56.7500638Z Received 108850960 of 108850960 (100.0%), 49.3 MBs/sec
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:56.7501727Z Cache Size: ~104 MB (108850960 B)
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:56.7549900Z [command]/usr/bin/tar -xf /home/runner/work/_temp/84688dc1-1606-4355-a5c4-0c64d39a56bf/cache.tzst -P -C /home/runner/work/Veillend/Veillend --use-compress-program unzstd
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:57.1289158Z Cache restored successfully
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:57.1344972Z Cache restored from key: node-cache-Linux-x64-npm-2092729f2db1e9f8fc4c0a661043b2b7b3c57b0ef4ef1fabdb0bc98a2b8f6621
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:57.1543780Z ##[group]Run npm ci
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:57.1544113Z [36;1mnpm ci[0m
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:57.1598752Z shell: /usr/bin/bash -e {0}
+build-and-test	UNKNOWN STEP	2026-08-24T13:39:57.1599061Z ##[endgroup]
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:00.7673994Z npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:00.9777404Z npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:00.9792073Z npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:00.9794645Z npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:00.9814956Z npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:03.0947307Z npm warn deprecated @stellar/stellar-base@13.1.0: This package is now rolled into @stellar/stellar-sdk. Please use @stellar/stellar-sdk to continue receiving updates and support.
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:03.1042932Z npm warn deprecated @stellar/stellar-base@15.0.0: This package is now rolled into @stellar/stellar-sdk. Please use @stellar/stellar-sdk to continue receiving updates and support.
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:07.3786867Z npm warn deprecated stellar-sdk@13.3.0: ⚠️ This package has moved to @stellar/stellar-sdk! 🚚
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:13.5116854Z 
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:13.5117643Z > veilend-backend@0.0.1 postinstall
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:13.5118413Z > prisma generate
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:13.5118680Z 
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.2258625Z warn The configuration property `package.json#prisma` is deprecated and will be removed in Prisma 7. Please migrate to a Prisma config file (e.g., `prisma.config.ts`).
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.2260514Z For more information, see: https://pris.ly/prisma-config
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.2261035Z 
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.3807741Z Prisma schema loaded from prisma/schema.prisma
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.7774315Z ┌─────────────────────────────────────────────────────────┐
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.7774885Z 
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.7775845Z ✔ Generated Prisma Client (v6.19.3) to ./node_modules/@prisma/client in 218ms
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.7776861Z 
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.7777760Z Start by importing your Prisma Client (See: https://pris.ly/d/importing-client)
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.7778509Z 
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.7779610Z Tip: Interested in query caching in just a few lines of code? Try Accelerate today! https://pris.ly/tip-3-accelerate
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.7780624Z 
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.7781343Z │  Update available 6.19.3 -> 7.9.1                       │
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.7782551Z │                                                         │
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.7783925Z │  This is a major update - please follow the guide at    │
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.7785384Z │  https://pris.ly/d/major-version-upgrade                │
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.7786611Z │                                                         │
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.7787580Z │  Run the following to update                            │
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.7788584Z │    npm i --save-dev prisma@latest                       │
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.7789564Z │    npm i @prisma/client@latest                          │
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.7790929Z └─────────────────────────────────────────────────────────┘
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.8097307Z 
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.8127065Z added 804 packages, and audited 805 packages in 18s
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.8127474Z 
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.8127729Z 161 packages are looking for funding
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.8128058Z   run `npm fund` for details
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.8994728Z 
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.8995665Z 8 high severity vulnerabilities
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.8996944Z 
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.8997397Z To address issues that do not require attention, run:
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.8998334Z   npm audit fix
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.8998616Z 
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.8999235Z To address all issues (including breaking changes), run:
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.9000169Z   npm audit fix --force
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.9000580Z 
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.9001096Z Run `npm audit` for details.
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.9912061Z ##[group]Run npm run lint
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.9912365Z [36;1mnpm run lint[0m
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.9951444Z shell: /usr/bin/bash -e {0}
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:14.9951717Z ##[endgroup]
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:15.0941564Z 
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:15.0942299Z > veilend-backend@0.0.1 lint
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:15.0942908Z > eslint "{src,apps,libs,test}/**/*.ts" --fix
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:15.0943242Z 
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.2995650Z 
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.2997368Z /home/runner/work/Veillend/Veillend/veilend-backend/src/indexer/indexer-replay.spec.ts
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3031101Z ##[error]  11:7   error    'prisma' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                           @typescript-eslint/no-unused-vars
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3041397Z ##[error]  59:11  error    Unsafe assignment of an `any` value                                                                                                                                                                                                                                                                                                         @typescript-eslint/no-unsafe-assignment
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3044842Z ##[warning]  62:52  warning  Unsafe argument of type `any` assigned to a parameter of type `RequestWithUser`                                                                                                                                                                                                                                                             @typescript-eslint/no-unsafe-argument
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3047252Z   64:12  error    A method that is not declared with `this: void` may cause unintentional scoping of `this` when separated from its object.
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3048334Z Consider using an arrow function or explicitly `.bind()`ing the method to avoid calling the method with an unintended `this` value. 
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3049275Z If a function does not access `this`, it can be annotated with `this: void`  @typescript-eslint/unbound-method
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3051521Z ##[warning]  71:52  warning  Unsafe argument of type `any` assigned to a parameter of type `RequestWithUser`                                                                                                                                                                                                                                                             @typescript-eslint/no-unsafe-argument
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3052811Z 
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3053179Z /home/runner/work/Veillend/Veillend/veilend-backend/src/indexer/indexer.service.ts
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3054463Z ##[error]  552:15  error  'accruedAmountStr' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3056059Z ##[error]  594:17  error  Empty block statement                                                                        no-empty
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3057817Z ##[error]  625:17  error  Empty block statement                                                                        no-empty
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3058646Z 
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3059011Z /home/runner/work/Veillend/Veillend/veilend-backend/src/markets/markets.service.ts
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3060276Z ##[error]  31:40  error    Unsafe member access .totalSupplied on an `any` value                                               @typescript-eslint/no-unsafe-member-access
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3062335Z ##[error]  32:40  error    Unsafe member access .totalBorrowed on an `any` value                                               @typescript-eslint/no-unsafe-member-access
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3064271Z ##[error]  40:11  error    Unsafe assignment of an `any` value                                                                 @typescript-eslint/no-unsafe-assignment
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3066067Z ##[error]  40:26  error    Unsafe member access .baseRateBps on an `any` value                                                 @typescript-eslint/no-unsafe-member-access
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3068110Z ##[error]  41:11  error    Unsafe assignment of an `any` value                                                                 @typescript-eslint/no-unsafe-assignment
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3069827Z ##[error]  41:26  error    Unsafe member access .kinkUtilBps on an `any` value                                                 @typescript-eslint/no-unsafe-member-access
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3071502Z ##[error]  42:11  error    Unsafe assignment of an `any` value                                                                 @typescript-eslint/no-unsafe-assignment
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3073203Z ##[error]  42:28  error    Unsafe member access .slope1Bps on an `any` value                                                   @typescript-eslint/no-unsafe-member-access
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3075822Z ##[error]  43:11  error    Unsafe assignment of an `any` value                                                                 @typescript-eslint/no-unsafe-assignment
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3077909Z ##[error]  43:28  error    Unsafe member access .slope2Bps on an `any` value                                                   @typescript-eslint/no-unsafe-member-access
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3079614Z ##[error]  44:11  error    Unsafe assignment of an `any` value                                                                 @typescript-eslint/no-unsafe-assignment
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3081411Z ##[error]  44:35  error    Unsafe member access .reserveFactorBps on an `any` value                                            @typescript-eslint/no-unsafe-member-access
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3083137Z ##[error]  48:7   error    Unsafe assignment of an `any` value                                                                 @typescript-eslint/no-unsafe-assignment
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3084793Z ##[error]  50:7   error    Unsafe assignment of an `any` value                                                                 @typescript-eslint/no-unsafe-assignment
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3086918Z ##[warning]  66:14  warning  Unsafe argument of type `any` assigned to a parameter of type `string | number | bigint | boolean`  @typescript-eslint/no-unsafe-argument
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3088941Z ##[error]  66:20  error    Unsafe member access .totalSupplied on an `any` value                                               @typescript-eslint/no-unsafe-member-access
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3090925Z ##[warning]  66:44  warning  Unsafe argument of type `any` assigned to a parameter of type `string | number | bigint | boolean`  @typescript-eslint/no-unsafe-argument
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3092899Z ##[error]  66:50  error    Unsafe member access .totalBorrowed on an `any` value                                               @typescript-eslint/no-unsafe-member-access
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3094810Z ##[warning]  70:29  warning  Unsafe argument of type `any` assigned to a parameter of type `string | number | Date`              @typescript-eslint/no-unsafe-argument
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3097040Z ##[error]  70:35  error    Unsafe member access .lastAccrualAt on an `any` value                                               @typescript-eslint/no-unsafe-member-access
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3099168Z ##[error]  74:7   error    Unsafe assignment of an `any` value                                                                 @typescript-eslint/no-unsafe-assignment
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3101512Z ##[error]  74:22  error    Unsafe member access .assetId on an `any` value                                                     @typescript-eslint/no-unsafe-member-access
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3103492Z ##[error]  75:7   error    Unsafe assignment of an `any` value                                                                 @typescript-eslint/no-unsafe-assignment
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3105526Z ##[error]  75:22  error    Unsafe call of an `any` typed value                                                                 @typescript-eslint/no-unsafe-call
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3107706Z ##[error]  75:28  error    Unsafe member access .totalSupplied on an `any` value                                               @typescript-eslint/no-unsafe-member-access
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3109624Z ##[error]  76:7   error    Unsafe assignment of an `any` value                                                                 @typescript-eslint/no-unsafe-assignment
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3111443Z ##[error]  76:22  error    Unsafe call of an `any` typed value                                                                 @typescript-eslint/no-unsafe-call
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3113396Z ##[error]  76:28  error    Unsafe member access .totalBorrowed on an `any` value                                               @typescript-eslint/no-unsafe-member-access
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3115290Z ##[error]  84:7   error    Unsafe assignment of an `any` value                                                                 @typescript-eslint/no-unsafe-assignment
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3117358Z ##[error]  85:7   error    Unsafe assignment of an `any` value                                                                 @typescript-eslint/no-unsafe-assignment
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3119186Z ##[error]  85:21  error    Unsafe call of an `any` typed value                                                                 @typescript-eslint/no-unsafe-call
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3121082Z ##[error]  85:27  error    Unsafe member access .protocolFees on an `any` value                                                @typescript-eslint/no-unsafe-member-access
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3122971Z ##[error]  86:7   error    Unsafe assignment of an `any` value                                                                 @typescript-eslint/no-unsafe-assignment
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3124750Z ##[error]  86:22  error    Unsafe call of an `any` typed value                                                                 @typescript-eslint/no-unsafe-call
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3126805Z ##[error]  86:28  error    Unsafe member access .lastAccrualAt on an `any` value                                               @typescript-eslint/no-unsafe-member-access
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3127907Z 
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3128341Z /home/runner/work/Veillend/Veillend/veilend-backend/test/race-isolation.integration.spec.ts
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3129828Z ##[warning]  440:9  warning  Unsafe argument of type `any` assigned to a parameter of type `StellarAccountService`  @typescript-eslint/no-unsafe-argument
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3131899Z ##[warning]  441:9  warning  Unsafe argument of type `any` assigned to a parameter of type `ProtocolService`        @typescript-eslint/no-unsafe-argument
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3133038Z 
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3133478Z ✖ 45 problems (38 errors, 7 warnings)
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.3133677Z 
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.4928685Z ##[error]Process completed with exit code 1.
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.5082664Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.5083933Z Post job cleanup.
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.5895673Z [command]/usr/bin/git version
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.5936549Z git version 2.55.0
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.6009423Z Temporarily overriding HOME='/home/runner/work/_temp/06a3a1df-8246-4737-b67b-6ee12bee4e2d' before making global git config changes
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.6010541Z Adding repository directory to the temporary git global config as a safe directory
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.6015359Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Veillend/Veillend
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.6052675Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.6089466Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.6341930Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.6368160Z http.https://github.com/.extraheader
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.6379981Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.6414879Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.6699892Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.6737952Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.7133125Z Cleaning up orphan processes
+build-and-test	UNKNOWN STEP	2026-08-24T13:40:28.7515801Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-node@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

@@ -131,6 +131,8 @@ model Asset {
   deposits             UserDeposit[]
   withdrawals          WithdrawalRequest[]
   withdrawalConfig     AssetWithdrawalConfig?
+  interestState        AssetInterestState?
+  interestParams       AssetInterestParams?
 
   @@unique([code, issuer])
   @@index([contractId])
@@ -150,6 +152,10 @@ model Position {
   depositedRaw       BigInt @default(0) // collateral supplied
   borrowedRaw        BigInt @default(0) // outstanding debt
   accruedInterestRaw BigInt @default(0)
+
+  // Interest tracking snapshots (ray 1e27 typically, or whatever scale contract uses, we'll use Decimal)
+  borrowIndexSnapshot Decimal @default(1.0) @db.Decimal(28, 9)
+  supplyIndexSnapshot Decimal @default(1.0) @db.Decimal(28, 9)
 
   // Derived USD values cached from last sync (7 decimal places)
   depositedUsd Decimal @default(0) @db.Decimal(28, 7)
@@ -612,6 +618,36 @@ model AssetWithdrawalConfig {
   isEnabled         Boolean  @default(true)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+
+  @@index([assetId])
+}
+
+// ─── Interest Rate Models ────────────────────────────────────────────────────
+
+model AssetInterestState {
+  assetId           String   @id
+  asset             Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  borrowIndex       Decimal  @default(1.0) @db.Decimal(28, 9)
+  supplyIndex       Decimal  @default(1.0) @db.Decimal(28, 9)
+  lastAccrualLedger Int      @default(0)
+  lastAccrualAt     DateTime @default(now())
+  totalSupplied     BigInt   @default(0)
+  totalBorrowed     BigInt   @default(0)
+  protocolFees      BigInt   @default(0)
+  updatedAt         DateTime @updatedAt
+
+  @@index([assetId])
+}
+
+model AssetInterestParams {
+  assetId          String   @id
+  asset            Asset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  baseRateBps      Int      @default(0)
+  kinkUtilBps      Int      @default(8000)
+  slope1Bps        Int      @default(0)
+  slope2Bps        Int      @default(0)
+  reserveFactorBps Int      @default(1000)
+  updatedAt        DateTime @updatedAt
 
   @@index([assetId])
 }

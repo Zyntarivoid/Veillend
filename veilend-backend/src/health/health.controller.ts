@@ -33,6 +33,9 @@ export class HealthController {
         HttpStatus.SERVICE_UNAVAILABLE,
       );
     }
-    return { status: 'ready', protocolConfig: this.healthService.protocolConfigReachability() };
+    return {
+      status: 'ready',
+      protocolConfig: this.healthService.protocolConfigReachability(),
+    };
   }
 }
