@@ -9,7 +9,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AppConfigService } from '../config/app-config.service';
 import { HorizonService } from '../stellar/horizon.service';
 import { CreateDepositDto } from './dto/create-deposit.dto';
-import { DepositStatus } from '@prisma/client';
+import { DepositStatus, Prisma } from '@prisma/client';
+
+const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 @Injectable()
 export class DepositsService {
@@ -24,12 +26,27 @@ export class DepositsService {
   /**
    * Records a new deposit as PENDING when a user reports an on-chain transfer.
    * The watcher will then monitor confirmations before crediting.
+   * Supports idempotency via the optional idempotencyKey parameter.
    */
   async createDeposit(
     userId: string,
     userWallet: string,
     dto: CreateDepositDto,
+    idempotencyKey?: string,
   ) {
+    // ─── Idempotency check ───────────────────────────────────────────────
+    if (idempotencyKey) {
+      const existing = await this.prisma.idempotencyKey.findUnique({
+        where: { key: idempotencyKey },
+      });
+
+      if (existing && existing.expiresAt > new Date()) {
+        this.logger.log(
+          `Idempotent replay for deposit key ${idempotencyKey}, returning existing response`,
+        );
+        return existing.responseJson;
+      }
+    }
     // Find or create the asset
     const asset = await this.prisma.asset.findFirst({
       where: {
@@ -81,6 +98,21 @@ export class DepositsService {
         asset: true,
       },
     });
+
+    // Store idempotency key if provided
+    if (idempotencyKey) {
+      const now = new Date();
+      await this.prisma.idempotencyKey.create({
+        data: {
+          key: idempotencyKey,
+          userId,
+          endpoint: 'POST /deposits',
+          responseJson: deposit as unknown as Prisma.InputJsonValue,
+          statusCode: 201,
+          expiresAt: new Date(now.getTime() + IDEMPOTENCY_TTL_MS),
+        },
+      });
+    }
 
     this.logger.log(
       `Deposit created: ${deposit.id} for user ${userId}, amount ${dto.amountStroops} stroops, pending ${confirmationsRequired} confirmations`,

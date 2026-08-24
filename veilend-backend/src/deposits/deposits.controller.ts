@@ -11,6 +11,7 @@ import {
   Query,
   HttpCode,
   HttpStatus,
+  Headers,
 } from '@nestjs/common';
 import { DepositsService } from './deposits.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -38,17 +39,21 @@ export class DepositsController {
   /**
    * Record a new deposit from an on-chain transfer.
    * The user reports the txHash after making the transfer.
+   * Accepts an optional Idempotency-Key header; a repeat within 24h
+   * returns the original record instead of creating a duplicate.
    */
   @Post()
   @HttpCode(HttpStatus.CREATED)
   async createDeposit(
     @Body() dto: CreateDepositDto,
     @Req() req: RequestWithUser,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ) {
     return this.depositsService.createDeposit(
       req.user.sessionId, // Will be replaced with actual userId
       req.user.walletAddress,
       dto,
+      idempotencyKey,
     );
   }
 
