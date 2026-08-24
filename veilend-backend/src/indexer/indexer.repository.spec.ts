@@ -36,6 +36,12 @@ describe('IndexerRepository', () => {
       upsert: jest.Mock;
       deleteMany: jest.Mock;
     };
+    assetInterestState: {
+      deleteMany: jest.Mock;
+    };
+    assetInterestParams: {
+      deleteMany: jest.Mock;
+    };
     $transaction: jest.Mock;
     withSerializable: jest.Mock;
     $queryRaw: jest.Mock;
@@ -67,6 +73,12 @@ describe('IndexerRepository', () => {
         findUnique: jest.fn(),
         findMany: jest.fn(),
         upsert: jest.fn(),
+        deleteMany: jest.fn(),
+      },
+      assetInterestState: {
+        deleteMany: jest.fn(),
+      },
+      assetInterestParams: {
         deleteMany: jest.fn(),
       },
       // withSerializable passthrough: delegates directly to the callback
@@ -221,9 +233,9 @@ describe('IndexerRepository', () => {
           amountUsd: 0,
         }),
       });
-      // Position write happened: ensure-exists insert + locked update.
-      expect(prisma.$executeRaw).toHaveBeenCalledTimes(2);
-      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+      // Position write happened: ensure-exists insert + locked update + AssetInterestState update.
+      expect(prisma.$executeRaw).toHaveBeenCalledTimes(3);
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
       expect(prisma.indexerEventDedup.upsert).toHaveBeenCalled();
     });
 
@@ -278,6 +290,8 @@ describe('IndexerRepository', () => {
       expect(sqlValues(prisma.$executeRaw.mock.calls[1])).toEqual([
         120n,
         40n,
+        new Prisma.Decimal(1.0),
+        new Prisma.Decimal(1.0),
         'user-1',
         'asset-1',
       ]);
@@ -299,6 +313,8 @@ describe('IndexerRepository', () => {
       expect(sqlValues(prisma.$executeRaw.mock.calls[1])).toEqual([
         0n,
         0n,
+        new Prisma.Decimal(1.0),
+        new Prisma.Decimal(1.0),
         'user-1',
         'asset-1',
       ]);

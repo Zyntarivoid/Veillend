@@ -539,6 +539,7 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
         };
 
         return {
+          kind: 'transaction',
           tx,
           depositedDelta,
           borrowedDelta,
