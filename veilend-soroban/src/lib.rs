@@ -1909,8 +1909,7 @@ impl VeilLendContract {
 
         // health_factor_bps == 10_000 at exactly the liquidation threshold;
         // below that the position is undercollateralized.
-        let health_factor_bps =
-            (weighted_collateral_value * 10_000) / (borrowed_value * 10_000);
+        let health_factor_bps = (weighted_collateral_value * 10_000) / (borrowed_value * 10_000);
 
         const SEVERE_HEALTH_FACTOR_BPS: i128 = 9_500; // 0.95
 
@@ -1997,12 +1996,7 @@ impl VeilLendContract {
         let mut liquidator_collateral =
             Self::read_accrued_position(&env, &liquidator, &collateral_asset);
         liquidator_collateral.deposited += seize_amount;
-        Self::write_position(
-            &env,
-            &liquidator,
-            &collateral_asset,
-            &liquidator_collateral,
-        );
+        Self::write_position(&env, &liquidator, &collateral_asset, &liquidator_collateral);
         // total_deposited stays the same (seized amount moved between users).
 
         LiquidateEvent {
@@ -2921,10 +2915,7 @@ impl VeilLendContract {
             ) => {
                 Self::require_supported_asset(env, asset);
                 if *collateral_factor_bps > *liquidation_threshold_bps {
-                    panic_with_error!(
-                        env,
-                        VeilLendError::CollateralFactorExceedsThreshold
-                    );
+                    panic_with_error!(env, VeilLendError::CollateralFactorExceedsThreshold);
                 }
                 if *liquidation_threshold_bps > 10_000 {
                     panic_with_error!(env, VeilLendError::LiquidationThresholdExceedsMax);
@@ -2933,10 +2924,7 @@ impl VeilLendContract {
                     panic_with_error!(env, VeilLendError::InvalidLiquidationBonus);
                 }
                 if *liquidation_threshold_bps + *liquidation_bonus_bps > 10_000 {
-                    panic_with_error!(
-                        env,
-                        VeilLendError::LiquidationThresholdPlusBonusExceedsMax
-                    );
+                    panic_with_error!(env, VeilLendError::LiquidationThresholdPlusBonusExceedsMax);
                 }
             }
         }

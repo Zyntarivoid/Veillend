@@ -3838,7 +3838,10 @@ fn test_liquidation_bonus_math() {
         client.liquidate(&liquidator, &user, &collateral, &debt, &100);
     }));
     // Should succeed since seize_amount (21_428) > 1000 but capped at 1000.
-    assert!(result.is_ok(), "liquidation with 500 bps bonus should succeed");
+    assert!(
+        result.is_ok(),
+        "liquidation with 500 bps bonus should succeed"
+    );
 
     // Check liquidator's collateral increased by 214 (seized amount).
     let liquidator_pos = client.get_position(&liquidator, &collateral);
@@ -3883,7 +3886,10 @@ fn test_liquidation_bonus_zero_bps() {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.liquidate(&liquidator, &user, &collateral, &debt, &100);
     }));
-    assert!(result.is_ok(), "liquidation with 0 bps bonus should succeed");
+    assert!(
+        result.is_ok(),
+        "liquidation with 0 bps bonus should succeed"
+    );
 
     let liquidator_pos = client.get_position(&liquidator, &collateral);
     assert_eq!(liquidator_pos.deposited, 204);
@@ -3933,7 +3939,10 @@ fn test_liquidation_bonus_2000_bps_ceiling() {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.liquidate(&liquidator, &user, &collateral, &debt, &100);
     }));
-    assert!(result.is_ok(), "liquidation with 2_000 bps bonus should succeed");
+    assert!(
+        result.is_ok(),
+        "liquidation with 2_000 bps bonus should succeed"
+    );
 
     let liquidator_pos = client.get_position(&liquidator, &collateral);
     assert_eq!(liquidator_pos.deposited, 244);
@@ -4073,7 +4082,10 @@ fn test_asset_risk_params_fallback_unconfigured_asset() {
 
     // No per-asset params set → fallback.
     let params = client.get_asset_risk_params(&asset);
-    assert!(!params.is_explicit, "unconfigured asset should report is_explicit=false");
+    assert!(
+        !params.is_explicit,
+        "unconfigured asset should report is_explicit=false"
+    );
     // 10_000 * 10_000 / 15_000 = 6_667 (ceiling)
     assert_eq!(params.collateral_factor_bps, 6_667);
     assert_eq!(params.liquidation_threshold_bps, 6_667);
@@ -4094,7 +4106,10 @@ fn test_asset_risk_params_explicit_override() {
     set_asset_risk_params(&env, &client, &admin, &asset, &7_500, &8_000, &500);
 
     let params = client.get_asset_risk_params(&asset);
-    assert!(params.is_explicit, "configured asset should report is_explicit=true");
+    assert!(
+        params.is_explicit,
+        "configured asset should report is_explicit=true"
+    );
     assert_eq!(params.collateral_factor_bps, 7_500);
     assert_eq!(params.liquidation_threshold_bps, 8_000);
     assert_eq!(params.liquidation_bonus_bps, 500);
