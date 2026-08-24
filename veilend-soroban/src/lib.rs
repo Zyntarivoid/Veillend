@@ -8,7 +8,7 @@ pub use interest::{DEFAULT_PARAMS as INTEREST_DEFAULT_PARAMS, RATE_SCALE, SECOND
 
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error,
-    symbol_short, Address, Bytes, Env, Symbol, Vec,
+    symbol_short, Address, Bytes, BytesN, Env, Symbol, Vec,
 };
 
 mod flash_loan;
@@ -29,7 +29,7 @@ pub use flash_loan::{
 };
 
 /// Increment this only when a contract interface change requires consumers to adapt.
-pub const CONTRACT_VERSION: u32 = 7;
+pub const CONTRACT_VERSION: u32 = 8;
 
 /// Increment this only when the serialized `DataKey` or stored value layout changes.
 pub const STORAGE_SCHEMA_VERSION: u32 = 5;
@@ -50,6 +50,14 @@ pub const MIN_TIMELOCK_LEDGERS: u32 = 1;
 /// Hard ceiling for the admin-configurable timelock.
 pub const MAX_TIMELOCK_LEDGERS: u32 = 100_000;
 
+/// Hard floor (in ledgers) applied to upgrade proposals, independent of the
+/// admin-configurable timelock. Upgrades use
+/// `max(timelock_ledgers, UPGRADE_MIN_TIMELOCK_LEDGERS)`, so an admin cannot
+/// first shrink the global timelock to 1 ledger and then immediately swap the
+/// contract wasm. ~2.8 hours on Futurenet (5s ledgers); ~5.5 hours on
+/// Mainnet (10s ledgers).
+pub const UPGRADE_MIN_TIMELOCK_LEDGERS: u32 = 2000;
+
 /// Queryable metadata describing the contract interface and its storage layout.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
@@ -63,6 +71,7 @@ pub struct ContractMetadata {
 ///
 /// Instance storage: `AdminSet: Vec<Address>`, `MinCollateralRatioBps: u32`,
 /// `TimelockLedgers: u32`, `NextActionId: u64`,
+/// `StorageSchemaVersion: u32`,
 /// `PendingAction(u64): PendingAction`.
 /// Persistent storage: `SupportedAsset(Address): bool`,
 /// `Position(Address, Address): Position`, `OraclePrice(Address): i128`,
@@ -82,6 +91,10 @@ pub enum DataKey {
     NextActionId,
     /// A proposed, not-yet-executed privileged action, keyed by its id.
     PendingAction(u64),
+    /// The storage-schema version this deployed instance currently runs.
+    /// Written at construction and advanced by `migrate` after an upgrade to
+    /// a wasm with a newer storage layout.
+    StorageSchemaVersion,
     MinCollateralRatioBps,
     SupportedAsset(Address),
     AssetReserve(Address),
@@ -228,6 +241,11 @@ pub enum ActionKind {
     SetPaused,
     RecordProtocolFee,
     WithdrawReserves,
+    /// Replaces the contract executable with `Upgrade`'s wasm hash after the
+    /// timelock window. Deliberately exempt from `require_not_paused`: pausing
+    /// is the expected response to a discovered bug and must never lock out
+    /// the fix.
+    Upgrade,
 }
 
 /// The arguments captured when a privileged action is proposed. Stored in
@@ -244,6 +262,8 @@ pub enum ActionPayload {
     RecordProtocolFee(Address, i128),
     /// (asset, to, amount)
     WithdrawReserves(Address, Address, i128),
+    /// Hash of the wasm to install via `update_current_contract_wasm`.
+    Upgrade(BytesN<32>),
 }
 
 /// A proposed privileged action awaiting its timelock window.
@@ -367,6 +387,14 @@ pub enum VeilLendError {
     PermitNonceMismatch = 43,
     /// Permit chain ID does not match the contract's chain ID
     PermitChainMismatch = 44,
+    /// The proposed upgrade wasm reports a `contract_version` lower than the
+    /// one currently running. Downgrades are rejected rather than silently
+    /// rolling the contract back.
+    InvalidUpgradeVersion = 45,
+    /// Storage migration was already completed for the running wasm's target
+    /// storage-schema version. `migrate` is idempotent and refuses to run
+    /// twice for the same target.
+    AlreadyMigrated = 46,
 }
 
 #[contractevent(topics = ["veillend", "asset_configured"])]
@@ -593,6 +621,24 @@ pub struct TimelockUpdated {
     pub ledgers: u32,
 }
 
+#[contractevent(topics = ["veillend", "contract_upgraded"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContractUpgraded {
+    /// The `CONTRACT_VERSION` reported by the wasm being replaced.
+    pub old_version: u32,
+    pub new_wasm_hash: BytesN<32>,
+    /// Ledger sequence at which the swap was executed, so indexers can pin
+    /// the upgrade to a specific point on the chain.
+    pub ledger: u32,
+}
+
+#[contractevent(topics = ["veillend", "storage_migrated"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StorageMigrated {
+    pub from_version: u32,
+    pub to_version: u32,
+}
+
 #[contract]
 pub struct VeilLendContract;
 
@@ -601,10 +647,23 @@ impl VeilLendContract {
     /// Returns the interface and storage metadata for this deployed contract shape.
     ///
     /// Clients should read this before assuming a storage layout during migrations.
-    pub fn contract_metadata(_env: Env) -> ContractMetadata {
+    ///
+    /// `storage_schema_version` reflects the *deployed instance's* schema, not
+    /// the running wasm's compile-time target: it is stored at construction
+    /// and only advanced by `migrate`. Immediately after an upgrade to a wasm
+    /// with a newer storage layout, this still reports the pre-migration
+    /// version so indexers can detect that a migration is pending. The
+    /// compile-time `STORAGE_SCHEMA_VERSION` is used as the fallback for
+    /// deployments created before this mechanism existed.
+    pub fn contract_metadata(env: Env) -> ContractMetadata {
+        let schema_version = env
+            .storage()
+            .instance()
+            .get(&DataKey::StorageSchemaVersion)
+            .unwrap_or(STORAGE_SCHEMA_VERSION);
         ContractMetadata {
             contract_version: CONTRACT_VERSION,
-            storage_schema_version: STORAGE_SCHEMA_VERSION,
+            storage_schema_version: schema_version,
             storage_schema_id: STORAGE_SCHEMA_ID,
         }
     }
@@ -635,6 +694,9 @@ impl VeilLendContract {
             .instance()
             .set(&DataKey::TimelockLedgers, &DEFAULT_TIMELOCK_LEDGERS);
         env.storage().instance().set(&DataKey::NextActionId, &0u64);
+        env.storage()
+            .instance()
+            .set(&DataKey::StorageSchemaVersion, &STORAGE_SCHEMA_VERSION);
 
         // Initialize circuit breaker as not paused
         env.storage().persistent().set(&DataKey::Paused, &false);
@@ -1455,6 +1517,76 @@ impl VeilLendContract {
         admin.require_auth();
 
         Self::cancel_action(&env, &admin, action_id, ActionKind::WithdrawReserves);
+    }
+
+    /// Proposes replacing the contract executable with the wasm identified by
+    /// `new_wasm_hash` (timelocked). Returns the action id.
+    ///
+    /// The delay is `max(timelock_ledgers, UPGRADE_MIN_TIMELOCK_LEDGERS)` and
+    /// is snapshotted into the pending action at proposal time, so an admin
+    /// cannot shorten it afterwards by calling `set_timelock_ledgers`.
+    pub fn propose_upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) -> u64 {
+        Self::require_admin(&env, &admin);
+        admin.require_auth();
+
+        Self::propose_action(
+            &env,
+            &admin,
+            ActionKind::Upgrade,
+            ActionPayload::Upgrade(new_wasm_hash),
+        )
+    }
+
+    /// Executes a previously proposed upgrade action, if its timelock has
+    /// elapsed. Rejects wasms that report a lower `contract_version` than the
+    /// currently running one. Not blocked by `require_not_paused` (mirroring
+    /// `execute_set_paused`) — pausing is the expected response to a
+    /// discovered bug and must never lock out the fix.
+    pub fn execute_upgrade(env: Env, admin: Address, action_id: u64) {
+        Self::require_admin(&env, &admin);
+        admin.require_auth();
+
+        Self::execute_action(&env, &admin, action_id, ActionKind::Upgrade);
+    }
+
+    /// Cancels a pending upgrade action.
+    pub fn cancel_upgrade(env: Env, admin: Address, action_id: u64) {
+        admin.require_auth();
+
+        Self::cancel_action(&env, &admin, action_id, ActionKind::Upgrade);
+    }
+
+    /// Runs the post-upgrade storage migration for this deployment, bringing
+    /// the stored storage-schema version up to the running wasm's compile-time
+    /// `STORAGE_SCHEMA_VERSION`. Admin-only, idempotent, and refuses to run
+    /// twice for the same target version (`AlreadyMigrated`). Like
+    /// `execute_upgrade`, it is deliberately exempt from `require_not_paused`:
+    /// the upgrade + migrate flow is the incident-response path for a paused
+    /// contract.
+    ///
+    /// Concrete per-version migration steps are added inside
+    /// [`Self::migrate_storage_from`] each time `STORAGE_SCHEMA_VERSION` is
+    /// bumped; until the next schema bump the framework is a no-op because
+    /// freshly deployed contracts already run at the current version.
+    pub fn migrate(env: Env, admin: Address) {
+        Self::require_admin(&env, &admin);
+        admin.require_auth();
+
+        let from_version = Self::stored_schema_version(&env);
+        if from_version >= STORAGE_SCHEMA_VERSION {
+            panic_with_error!(&env, VeilLendError::AlreadyMigrated);
+        }
+
+        Self::migrate_storage_from(&env, from_version);
+        env.storage()
+            .instance()
+            .set(&DataKey::StorageSchemaVersion, &STORAGE_SCHEMA_VERSION);
+
+        StorageMigrated {
+            from_version,
+            to_version: STORAGE_SCHEMA_VERSION,
+        }
+        .publish(&env);
     }
 
     pub fn min_collateral_ratio_bps(env: Env) -> u32 {
@@ -2571,6 +2703,11 @@ impl VeilLendContract {
                     panic_with_error!(env, VeilLendError::InsufficientReserve);
                 }
             }
+            // Nothing to validate at propose time: wasm existence and the
+            // version guard are checked at execute time (the hash must be
+            // installed before execution, and the guard needs to inspect the
+            // wasm's metadata).
+            ActionPayload::Upgrade(_) => {}
         }
     }
 
@@ -2579,10 +2716,15 @@ impl VeilLendContract {
         Self::validate_payload(env, &payload);
 
         let action_id = Self::next_action_id(env);
-        let executable_at_ledger = env
-            .ledger()
-            .sequence()
-            .saturating_add(Self::timelock_ledgers(env));
+        // Upgrades carry a hard floor so an admin cannot shrink the global
+        // timelock to 1 ledger and immediately swap the wasm. The delay is
+        // snapshotted into `executable_at_ledger` here, so a later
+        // `set_timelock_ledgers` call cannot retroactively shorten it.
+        let delay = match kind {
+            ActionKind::Upgrade => Self::timelock_ledgers(env).max(UPGRADE_MIN_TIMELOCK_LEDGERS),
+            _ => Self::timelock_ledgers(env),
+        };
+        let executable_at_ledger = env.ledger().sequence().saturating_add(delay);
 
         let pending = PendingAction {
             kind: kind.clone(),
@@ -2685,7 +2827,77 @@ impl VeilLendContract {
             ActionPayload::WithdrawReserves(asset, to, amount) => {
                 Self::apply_withdraw_reserves(env, admin, asset, to, *amount)
             }
+            ActionPayload::Upgrade(wasm_hash) => Self::apply_upgrade(env, wasm_hash),
         }
+    }
+
+    /// Applies a pending upgrade: verifies the new wasm's reported
+    /// `contract_version` is not lower than the one currently running, emits
+    /// `ContractUpgraded`, and swaps the contract executable.
+    ///
+    /// The new wasm's metadata is read from a throwaway probe instance
+    /// deployed from the proposed hash, which also proves the hash was
+    /// actually installed (a missing upload fails here rather than at the
+    /// swap). The probe's address is derived from the wasm hash itself, so
+    /// distinct upgrades never collide and re-proposing the same hash reuses
+    /// the same probe.
+    // `DeployerWithAddress::deploy` is deprecated in favour of `deploy_v2`, but
+    // we deliberately use the no-constructor variant: a probe must be created
+    // without running `__constructor` (which would require auth and valid
+    // constructor args we don't have for an arbitrary wasm).
+    #[allow(deprecated)]
+    fn apply_upgrade(env: &Env, new_wasm_hash: &BytesN<32>) {
+        let probe_address = env
+            .deployer()
+            .with_current_contract(new_wasm_hash.clone())
+            .deploy(new_wasm_hash.clone());
+
+        let new_metadata: ContractMetadata = env.invoke_contract(
+            &probe_address,
+            &Symbol::new(env, "contract_metadata"),
+            Vec::new(env),
+        );
+        if new_metadata.contract_version < CONTRACT_VERSION {
+            panic_with_error!(env, VeilLendError::InvalidUpgradeVersion);
+        }
+
+        ContractUpgraded {
+            old_version: CONTRACT_VERSION,
+            new_wasm_hash: new_wasm_hash.clone(),
+            ledger: env.ledger().sequence(),
+        }
+        .publish(env);
+
+        // The host applies the executable swap only after this invocation
+        // finishes successfully, so the event above is observable in the
+        // upgrading transaction itself.
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
+    }
+
+    /// Reads the stored storage-schema version, defaulting to the running
+    /// wasm's compile-time target (correct for deployments created before the
+    /// `StorageSchemaVersion` key existed).
+    fn stored_schema_version(env: &Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::StorageSchemaVersion)
+            .unwrap_or(STORAGE_SCHEMA_VERSION)
+    }
+
+    /// Runs the per-version storage transformations between `from_version` and
+    /// `STORAGE_SCHEMA_VERSION`.
+    ///
+    /// There are no registered transitions for the current schema (5): every
+    /// transition between a prior version and the current one is added here as
+    /// a match arm the next time the storage layout changes, each stepping the
+    /// version by exactly one.
+    fn migrate_storage_from(_env: &Env, _from_version: u32) {
+        // Intentionally empty. Concrete migrations belong here:
+        //   match from_version {
+        //       STORAGE_SCHEMA_VERSION - 1 => { /* transform 4 -> 5 keys */ }
+        //       _ => {}
+        //   }
     }
 
     fn apply_configure_asset(env: &Env, admin: &Address, asset: &Address, supported: bool) {
@@ -3696,14 +3908,23 @@ mod tests {
         assert_eq!(VeilLendError::ArithmeticOverflow as u32, 30);
         assert_eq!(VeilLendError::SupplyCapExceeded as u32, 31);
         assert_eq!(VeilLendError::PositionNotLiquidatable as u32, 32);
+        assert_eq!(VeilLendError::InvalidUpgradeVersion as u32, 45);
+        assert_eq!(VeilLendError::AlreadyMigrated as u32, 46);
     }
 
     #[test]
     fn test_contract_metadata_identifies_current_storage_shape() {
-        let metadata = VeilLendContract::contract_metadata(Env::default());
+        use soroban_sdk::testutils::Address as _;
 
-        assert_eq!(metadata.contract_version, 7);
-        assert_eq!(metadata.storage_schema_version, 5);
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        let metadata = client.contract_metadata();
+        assert_eq!(metadata.contract_version, CONTRACT_VERSION);
+        assert_eq!(metadata.storage_schema_version, STORAGE_SCHEMA_VERSION);
         assert_eq!(metadata.storage_schema_id, symbol_short!("VLENDV5"));
     }
 
@@ -3742,6 +3963,8 @@ mod tests {
             VeilLendError::ArithmeticOverflow as u32,
             VeilLendError::SupplyCapExceeded as u32,
             VeilLendError::PositionNotLiquidatable as u32,
+            VeilLendError::InvalidUpgradeVersion as u32,
+            VeilLendError::AlreadyMigrated as u32,
         ];
         let mut sorted = codes.to_vec();
         sorted.sort();

@@ -542,6 +542,16 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
         };
       }
 
+      if (['contract_upgraded', 'storage_migrated'].includes(topic1)) {
+        // Governance/migration events: no position deltas to apply. Logged for
+        // observability; consumers can subscribe to these topics directly to
+        // track upgrades and storage-schema migrations.
+        this.logger.log(
+          `Governance event [${topic1}] at ledger ${ledger} (tx ${txHash})`,
+        );
+        return null;
+      }
+
       return null;
     } catch (error) {
       this.logger.error(

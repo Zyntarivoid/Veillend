@@ -3,9 +3,11 @@ use core::cmp::Ordering;
 use soroban_env_common::{Compare, TryFromVal};
 use soroban_sdk::events::Event;
 use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
-use soroban_sdk::{Address, Env, Symbol, Val};
+use soroban_sdk::{Address, BytesN, Env, Symbol, Val};
 use veillend_contract::{
-    InterestAccrued, InterestParams, VeilLendContract, VeilLendContractClient,
+    ActionKind, ActionPayload, ContractUpgraded, DataKey, InterestAccrued, InterestParams,
+    StorageMigrated, VeilLendContract, VeilLendContractClient, CONTRACT_VERSION,
+    STORAGE_SCHEMA_VERSION, UPGRADE_MIN_TIMELOCK_LEDGERS,
 };
 
 const SECONDS_PER_YEAR: u64 = 31_536_000;
@@ -3207,4 +3209,422 @@ fn test_repay_and_withdraw_succeed_while_paused() {
 
     client.withdraw(&user, &asset, &asset, &1_000);
     assert_eq!(client.get_total_deposited(&asset), 0);
+}
+
+// ---------------------------------------------------------------------------
+// Timelocked contract upgrade + migration tests (issue #423)
+// ---------------------------------------------------------------------------
+
+// Fixture wasms built from `upgrade_fixture/`: `veillend_v1.wasm` reports
+// CONTRACT_VERSION = 4 (a downgrade target) and `veillend_v2.wasm` reports
+// CONTRACT_VERSION = 9 plus an `upgraded_marker` function that v1 does not
+// have, so tests can prove the executable was actually swapped. Regenerate
+// them with the commands documented in UPGRADING.md.
+mod v1_fixture {
+    soroban_sdk::contractimport!(file = "./tests/fixtures/veillend_v1.wasm");
+}
+mod v2_fixture {
+    soroban_sdk::contractimport!(file = "./tests/fixtures/veillend_v2.wasm");
+}
+
+fn install_v1_wasm(env: &Env) -> BytesN<32> {
+    env.deployer().upload_contract_wasm(v1_fixture::WASM)
+}
+
+fn install_v2_wasm(env: &Env) -> BytesN<32> {
+    env.deployer().upload_contract_wasm(v2_fixture::WASM)
+}
+
+fn assert_upgrade_pending(
+    client: &VeilLendContractClient,
+    action_id: u64,
+    wasm_hash: &BytesN<32>,
+    expected_ready_at: u32,
+) {
+    let pending = client
+        .get_pending_action(&action_id)
+        .expect("pending action");
+    assert_eq!(pending.kind, ActionKind::Upgrade);
+    match &pending.payload {
+        ActionPayload::Upgrade(hash) => assert_eq!(hash, wasm_hash),
+        _ => panic!("expected Upgrade payload, got {:?}", pending.payload),
+    }
+    assert_eq!(
+        pending.executable_at_ledger, expected_ready_at,
+        "ready-at ledger must be snapshotted at proposal time"
+    );
+}
+
+#[test]
+fn test_upgrade_full_roundtrip_new_behaviour_is_live() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    assert_eq!(
+        client.contract_metadata().contract_version,
+        CONTRACT_VERSION
+    );
+
+    let new_wasm_hash = install_v2_wasm(&env);
+    let proposed_at = env.ledger().sequence();
+    let action_id = client.propose_upgrade(&admin, &new_wasm_hash);
+
+    // Pending action surfaces the wasm hash and the ready-at ledger during the
+    // delay window (indexers/admin UI show "upgrade pending, executable at
+    // ledger N").
+    assert_upgrade_pending(
+        &client,
+        action_id,
+        &new_wasm_hash,
+        proposed_at + UPGRADE_MIN_TIMELOCK_LEDGERS,
+    );
+
+    // Executing before the delay elapses must fail.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.execute_upgrade(&admin, &action_id);
+    }));
+    assert!(result.is_err(), "execute before timelock must panic");
+
+    // Wait out the floor and execute.
+    advance_ledgers(&env, UPGRADE_MIN_TIMELOCK_LEDGERS);
+    client.execute_upgrade(&admin, &action_id);
+
+    // The action executed successfully (no UnknownAction), so it was consumed.
+    // Note: after the swap the v2 wasm is running, so v1-only view functions
+    // such as get_pending_action are no longer callable.
+
+    // New behaviour is live: the marker function only exists in the v2 wasm.
+    let v2_client = v2_fixture::Client::new(&env, &contract_id);
+    assert_eq!(v2_client.upgraded_marker(), 42);
+    assert_eq!(v2_client.contract_metadata().contract_version, 9);
+}
+
+#[test]
+fn test_upgrade_emits_contract_upgraded_event_before_swap() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    let new_wasm_hash = install_v2_wasm(&env);
+    let action_id = client.propose_upgrade(&admin, &new_wasm_hash);
+    advance_ledgers(&env, UPGRADE_MIN_TIMELOCK_LEDGERS);
+    client.execute_upgrade(&admin, &action_id);
+
+    let expected = ContractUpgraded {
+        old_version: CONTRACT_VERSION,
+        new_wasm_hash,
+        ledger: env.ledger().sequence(),
+    };
+    let expected_topics = expected.topics(&env);
+    let expected_data = expected.data(&env);
+
+    let events = env.events().all();
+    let mut upgraded_count = 0u32;
+    for (_, topics, data) in events.iter() {
+        if topics == expected_topics && val_eq(&env, &data, &expected_data) {
+            upgraded_count += 1;
+        }
+    }
+    assert_eq!(
+        upgraded_count, 1,
+        "expected exactly one ContractUpgraded event with matching values"
+    );
+}
+
+#[test]
+fn test_upgrade_executes_while_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    // Pause the contract — the expected response to a discovered bug.
+    pause(&env, &client, &admin);
+    assert!(client.is_paused());
+
+    // A paused contract must still be upgradeable.
+    let new_wasm_hash = install_v2_wasm(&env);
+    let action_id = client.propose_upgrade(&admin, &new_wasm_hash);
+    advance_ledgers(&env, UPGRADE_MIN_TIMELOCK_LEDGERS);
+    client.execute_upgrade(&admin, &action_id);
+
+    let v2_client = v2_fixture::Client::new(&env, &contract_id);
+    assert_eq!(v2_client.upgraded_marker(), 42);
+}
+
+#[test]
+fn test_upgrade_cancel_removes_pending_action() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    let new_wasm_hash = install_v2_wasm(&env);
+    let action_id = client.propose_upgrade(&admin, &new_wasm_hash);
+
+    // Cancel even after the delay would have elapsed.
+    advance_ledgers(&env, UPGRADE_MIN_TIMELOCK_LEDGERS);
+    client.cancel_upgrade(&admin, &action_id);
+
+    assert!(client.get_pending_action(&action_id).is_none());
+
+    // Executing the cancelled action now fails with UnknownAction.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.execute_upgrade(&admin, &action_id);
+    }));
+    assert!(result.is_err());
+
+    // Contract was never swapped.
+    assert_eq!(
+        client.contract_metadata().contract_version,
+        CONTRACT_VERSION
+    );
+}
+
+#[test]
+fn test_upgrade_non_admin_propose_and_execute_fail() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let attacker = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    let new_wasm_hash = install_v2_wasm(&env);
+
+    // Non-admin cannot propose.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.propose_upgrade(&attacker, &new_wasm_hash);
+    }));
+    assert!(result.is_err(), "non-admin propose must panic");
+
+    // Non-admin cannot execute.
+    let action_id = client.propose_upgrade(&admin, &new_wasm_hash);
+    advance_ledgers(&env, UPGRADE_MIN_TIMELOCK_LEDGERS);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.execute_upgrade(&attacker, &action_id);
+    }));
+    assert!(result.is_err(), "non-admin execute must panic");
+
+    // Contract unchanged.
+    assert_eq!(
+        client.contract_metadata().contract_version,
+        CONTRACT_VERSION
+    );
+}
+
+#[test]
+fn test_upgrade_downgrade_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    // v1 wasm reports CONTRACT_VERSION = 4, lower than the running 8.
+    let old_wasm_hash = install_v1_wasm(&env);
+    let action_id = client.propose_upgrade(&admin, &old_wasm_hash);
+    advance_ledgers(&env, UPGRADE_MIN_TIMELOCK_LEDGERS);
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.execute_upgrade(&admin, &action_id);
+    }));
+    assert!(result.is_err(), "downgrade must be rejected");
+
+    // Contract was not rolled back.
+    assert_eq!(
+        client.contract_metadata().contract_version,
+        CONTRACT_VERSION
+    );
+}
+
+#[test]
+fn test_upgrade_mismatched_action_kind_is_unknown_action() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let asset = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    // Executing an upgrade against a configure_asset action id fails.
+    let cfg_action = client.propose_configure_asset(&admin, &asset, &true);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.execute_upgrade(&admin, &cfg_action);
+    }));
+    assert!(result.is_err(), "upgrade on wrong kind must panic");
+
+    // Executing configure_asset against an upgrade action id fails.
+    let new_wasm_hash = install_v2_wasm(&env);
+    let upgrade_action = client.propose_upgrade(&admin, &new_wasm_hash);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.execute_configure_asset(&admin, &upgrade_action);
+    }));
+    assert!(result.is_err(), "configure_asset on wrong kind must panic");
+}
+
+#[test]
+fn test_upgrade_timelock_floor_applies_when_global_timelock_is_tiny() {
+    // An admin must not be able to shrink the global timelock to 1 ledger and
+    // immediately swap the wasm: upgrades always wait at least
+    // UPGRADE_MIN_TIMELOCK_LEDGERS.
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    client.set_timelock_ledgers(&admin, &1);
+    assert_eq!(client.get_timelock_ledgers(), 1);
+
+    let new_wasm_hash = install_v2_wasm(&env);
+    let proposed_at = env.ledger().sequence();
+    let action_id = client.propose_upgrade(&admin, &new_wasm_hash);
+
+    assert_upgrade_pending(
+        &client,
+        action_id,
+        &new_wasm_hash,
+        proposed_at + UPGRADE_MIN_TIMELOCK_LEDGERS,
+    );
+
+    // After the (tiny) global timelock the upgrade is still not executable.
+    advance_ledgers(&env, 1);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.execute_upgrade(&admin, &action_id);
+    }));
+    assert!(result.is_err(), "floor must still apply with timelock = 1");
+
+    // Only once the floor elapses does the swap go through.
+    advance_ledgers(&env, UPGRADE_MIN_TIMELOCK_LEDGERS - 1);
+    client.execute_upgrade(&admin, &action_id);
+    assert_eq!(
+        v2_fixture::Client::new(&env, &contract_id).upgraded_marker(),
+        42
+    );
+}
+
+#[test]
+fn test_upgrade_timelock_snapshotted_at_proposal_time() {
+    // set_timelock_ledgers must not retroactively shorten an already-pending
+    // upgrade: the delay is captured in PendingAction.executable_at_ledger.
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    // Start with a long global timelock (above the upgrade floor).
+    let long_delay: u32 = 5_000;
+    client.set_timelock_ledgers(&admin, &long_delay);
+
+    let new_wasm_hash = install_v2_wasm(&env);
+    let proposed_at = env.ledger().sequence();
+    let action_id = client.propose_upgrade(&admin, &new_wasm_hash);
+    assert_upgrade_pending(&client, action_id, &new_wasm_hash, proposed_at + long_delay);
+
+    // Retroactively shrink the global timelock to 1.
+    client.set_timelock_ledgers(&admin, &1);
+
+    // The pending upgrade is still locked to the original (long) delay.
+    advance_ledgers(&env, 1);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.execute_upgrade(&admin, &action_id);
+    }));
+    assert!(result.is_err(), "snapshotted delay must not be shortened");
+
+    advance_ledgers(&env, long_delay - 1);
+    client.execute_upgrade(&admin, &action_id);
+    assert_eq!(
+        v2_fixture::Client::new(&env, &contract_id).upgraded_marker(),
+        42
+    );
+}
+
+#[test]
+fn test_migrate_bumps_schema_emits_event_and_refuses_double_run() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let attacker = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    // Fresh deployments run at the current schema already, so migrate is a
+    // no-op refusing to run.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.migrate(&admin);
+    }));
+    assert!(
+        result.is_err(),
+        "migrate at current schema must panic with AlreadyMigrated"
+    );
+
+    // Simulate a deployment still running an older storage schema (e.g. it was
+    // upgraded to a wasm whose target schema is higher than the stored one).
+    let from_version = STORAGE_SCHEMA_VERSION - 1;
+    env.as_contract(&contract_id, || {
+        env.storage()
+            .instance()
+            .set(&DataKey::StorageSchemaVersion, &from_version);
+    });
+    assert_eq!(
+        client.contract_metadata().storage_schema_version,
+        from_version,
+        "metadata must report the stored (pre-migration) schema"
+    );
+
+    // Non-admin cannot migrate.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.migrate(&attacker);
+    }));
+    assert!(result.is_err(), "non-admin migrate must panic");
+    assert_eq!(
+        client.contract_metadata().storage_schema_version,
+        from_version
+    );
+
+    // Admin migrates: schema bumps and the event is emitted. The event must
+    // be inspected immediately — `env.events().all()` only holds the events of
+    // the last invocation.
+    client.migrate(&admin);
+
+    let expected = StorageMigrated {
+        from_version,
+        to_version: STORAGE_SCHEMA_VERSION,
+    };
+    let expected_topics = expected.topics(&env);
+    let expected_data = expected.data(&env);
+    let events = env.events().all();
+    let mut migrated_count = 0u32;
+    for (_, topics, data) in events.iter() {
+        if topics == expected_topics && val_eq(&env, &data, &expected_data) {
+            migrated_count += 1;
+        }
+    }
+    assert_eq!(
+        migrated_count, 1,
+        "expected exactly one StorageMigrated event with matching values"
+    );
+
+    assert_eq!(
+        client.contract_metadata().storage_schema_version,
+        STORAGE_SCHEMA_VERSION
+    );
+
+    // Idempotency: a second migrate for the same target refuses to run.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.migrate(&admin);
+    }));
+    assert!(
+        result.is_err(),
+        "second migrate for same target must panic with AlreadyMigrated"
+    );
 }
