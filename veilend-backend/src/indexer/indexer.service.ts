@@ -545,12 +545,12 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
           borrowedDelta,
         };
       }
-      
+
       if (topic1 === 'interest_accrued') {
         const borrowIndex = this.topicToString(parsedTopics[2]);
         const supplyIndex = this.topicToString(parsedTopics[3]);
-        const accruedAmountStr = this.topicToString(scValToNative(event.value as xdr.ScVal)); // Note: Depending on Soroban packing, this might be a struct or vector. We'll assume event.value is an array [accrued, reserve_share].
-        
+        // Note: Depending on Soroban packing, this might be a struct or vector. We'll assume event.value is an array [accrued, reserve_share].
+
         let accruedAmount = '0';
         let reserveShare = '0';
         try {
@@ -589,7 +589,9 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
             protocolFees = vals[1]?.toString() || '0';
             updateKind = vals[2]?.toString() || '';
           }
-        } catch {}
+        } catch {
+          // fallback
+        }
 
         return {
           kind: 'asset_reserve_updated',
@@ -620,7 +622,9 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
             slope2Bps = Number(vals[3]) || 0;
             reserveFactorBps = Number(vals[4]) || 0;
           }
-        } catch {}
+        } catch {
+          // fallback
+        }
 
         return {
           kind: 'interest_params_updated',
@@ -652,7 +656,9 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
       this.unhandledEventTopics[topic1]++;
       if (!this.loggedUnhandledTopics.has(topic1)) {
         this.loggedUnhandledTopics.add(topic1);
-        this.logger.warn(`Unhandled contract event topic: ${topic1} (logged once)`);
+        this.logger.warn(
+          `Unhandled contract event topic: ${topic1} (logged once)`,
+        );
       }
 
       return null;

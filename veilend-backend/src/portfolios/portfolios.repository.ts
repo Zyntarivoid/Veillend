@@ -4,7 +4,9 @@ import { Prisma } from '@prisma/client';
 import { Asset, Position, AssetInterestState } from '@prisma/client';
 import { computeAccruedPosition } from '../common/utils/interest-math.util';
 
-export type PositionWithAsset = Position & { asset: Asset & { interestState: AssetInterestState | null } };
+export type PositionWithAsset = Position & {
+  asset: Asset & { interestState: AssetInterestState | null };
+};
 
 export interface VeilLendPortfolioData {
   positions: PositionWithAsset[];
@@ -41,12 +43,12 @@ export class PortfoliosRepository {
 
         const positions = await db.position.findMany({
           where: { userId: user.id },
-          include: { 
+          include: {
             asset: {
               include: {
-                interestState: true
-              }
-            }
+                interestState: true,
+              },
+            },
           },
         });
 
@@ -61,7 +63,7 @@ export class PortfoliosRepository {
         for (const p of positions) {
           let adjustedDeposited = p.depositedRaw;
           let adjustedBorrowed = p.borrowedRaw;
-          
+
           if (p.asset.interestState) {
             const state = p.asset.interestState;
             const res = computeAccruedPosition(
@@ -75,25 +77,29 @@ export class PortfoliosRepository {
             adjustedDeposited = res.adjustedDeposited;
             adjustedBorrowed = res.adjustedBorrowed;
           }
-          
-          // Re-compute USD value using the adjusted raw amount and the cached price 
-          // The indexer cached (oracle price × amount) in depositedUsd, but since amount changed, 
+
+          // Re-compute USD value using the adjusted raw amount and the cached price
+          // The indexer cached (oracle price × amount) in depositedUsd, but since amount changed,
           // we should extract the implicit oracle price or re-query it.
           // Wait, the USD value in Position is cached at last sync time.
           // A simple way is to scale depositedUsd by (adjustedDeposited / originalDepositedRaw).
           let adjustedDepositedUsd = Number(p.depositedUsd);
           if (p.depositedRaw > 0n) {
-            adjustedDepositedUsd = (Number(adjustedDeposited) / Number(p.depositedRaw)) * adjustedDepositedUsd;
+            adjustedDepositedUsd =
+              (Number(adjustedDeposited) / Number(p.depositedRaw)) *
+              adjustedDepositedUsd;
           }
-          
+
           let adjustedBorrowedUsd = Number(p.borrowedUsd);
           if (p.borrowedRaw > 0n) {
-            adjustedBorrowedUsd = (Number(adjustedBorrowed) / Number(p.borrowedRaw)) * adjustedBorrowedUsd;
+            adjustedBorrowedUsd =
+              (Number(adjustedBorrowed) / Number(p.borrowedRaw)) *
+              adjustedBorrowedUsd;
           }
-          
+
           collateralValue += adjustedDepositedUsd;
           borrowedValue += adjustedBorrowedUsd;
-          
+
           // Mutate the object in place so the caller (PortfoliosService) sees the adjusted values
           p.depositedRaw = adjustedDeposited;
           p.borrowedRaw = adjustedBorrowed;

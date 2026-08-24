@@ -27,10 +27,13 @@ export class MarketsService {
     return Math.pow(1 + ratePerSecond, SECONDS_PER_YEAR) - 1;
   }
 
-  public computeMarket(state: any, params: any): MarketView {
+  public computeMarket(
+    state: import('@prisma/client').AssetInterestState,
+    params?: import('@prisma/client').AssetInterestParams | null,
+  ): MarketView {
     const totalSupplied = Number(state.totalSupplied);
     const totalBorrowed = Number(state.totalBorrowed);
-    
+
     let utilizationBps = 0;
     if (totalSupplied > 0) {
       utilizationBps = Math.floor((totalBorrowed * BPS_SCALE) / totalSupplied);
@@ -48,26 +51,36 @@ export class MarketsService {
       borrowRateAnnualBps = base + (slope1 * utilizationBps) / BPS_SCALE;
     } else {
       borrowRateAnnualBps =
-        base + (slope1 * kink) / BPS_SCALE + (slope2 * (utilizationBps - kink)) / BPS_SCALE;
+        base +
+        (slope1 * kink) / BPS_SCALE +
+        (slope2 * (utilizationBps - kink)) / BPS_SCALE;
     }
 
     const supplyRateAnnualBps =
-      (borrowRateAnnualBps * utilizationBps * Math.max(0, BPS_SCALE - reserveFactor)) /
+      (borrowRateAnnualBps *
+        utilizationBps *
+        Math.max(0, BPS_SCALE - reserveFactor)) /
       (BPS_SCALE * BPS_SCALE);
 
     const borrowApy = this.computeApy(borrowRateAnnualBps);
     const supplyApy = this.computeApy(supplyRateAnnualBps);
-    
-    const availableLiquidity = BigInt(state.totalSupplied) - BigInt(state.totalBorrowed);
-    
+
+    const availableLiquidity =
+      BigInt(state.totalSupplied) - BigInt(state.totalBorrowed);
+
     // Configurable staleness window, default 24h
-    const isStale = Date.now() - new Date(state.lastAccrualAt).getTime() > 24 * 60 * 60 * 1000;
+    const isStale =
+      Date.now() - new Date(state.lastAccrualAt).getTime() >
+      24 * 60 * 60 * 1000;
 
     return {
       assetId: state.assetId,
       totalSupplied: state.totalSupplied.toString(),
       totalBorrowed: state.totalBorrowed.toString(),
-      availableLiquidity: (availableLiquidity > 0n ? availableLiquidity : 0n).toString(),
+      availableLiquidity: (availableLiquidity > 0n
+        ? availableLiquidity
+        : 0n
+      ).toString(),
       utilizationBps,
       borrowApy,
       supplyApy,
@@ -83,7 +96,9 @@ export class MarketsService {
       include: { asset: { include: { interestParams: true } } },
     });
 
-    return states.map((state) => this.computeMarket(state, state.asset?.interestParams));
+    return states.map((state) =>
+      this.computeMarket(state, state.asset?.interestParams),
+    );
   }
 
   async getMarket(assetId: string): Promise<MarketView> {

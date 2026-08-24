@@ -21,17 +21,35 @@ describe('ProtocolChainReader', () => {
   };
 
   beforeEach(() =>
-    call.mockImplementation(
-      (_id: string, method: string): Promise<unknown> =>
-        Promise.resolve(values[method]),
+    call.mockImplementation((_id: string, method: string): Promise<unknown> =>
+      Promise.resolve(values[method]),
     ),
   );
 
   it('maps all protocol and per-asset live state', async () => {
-    const reader = new ProtocolChainReader({ simulateContractCall: call } as unknown as SorobanRpcService);
+    const reader = new ProtocolChainReader({
+      simulateContractCall: call,
+    } as unknown as SorobanRpcService);
     const result = await reader.read(assetId, [{ contractId: assetId }]);
     const asset = result.assets.get(assetId)!;
-    expect(result).toMatchObject({ minCollateralRatioBps: 12_500, closeFactorBps: 5_000, paused: true, timelockLedgers: 42 });
-    expect(asset).toMatchObject({ isSupported: true, supplyCap: '1000', borrowCap: '500', oracle: { price: '123', ageSeconds: 61, isStale: true, minBound: '100', maxBound: '200', maxChangeBps: 250 } });
+    expect(result).toMatchObject({
+      minCollateralRatioBps: 12_500,
+      closeFactorBps: 5_000,
+      paused: true,
+      timelockLedgers: 42,
+    });
+    expect(asset).toMatchObject({
+      isSupported: true,
+      supplyCap: '1000',
+      borrowCap: '500',
+      oracle: {
+        price: '123',
+        ageSeconds: 61,
+        isStale: true,
+        minBound: '100',
+        maxBound: '200',
+        maxChangeBps: 250,
+      },
+    });
   });
 });

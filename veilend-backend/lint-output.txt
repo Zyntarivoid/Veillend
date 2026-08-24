@@ -1,0 +1,62 @@
+
+> veilend-backend@0.0.1 lint
+> eslint "{src,apps,libs,test}/**/*.ts" --fix
+
+
+/home/gift/Veillend/veilend-backend/src/indexer/indexer-replay.spec.ts
+  11:7   error    'prisma' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                           @typescript-eslint/no-unused-vars
+  59:11  error    Unsafe assignment of an `any` value                                                                                                                                                                                                                                                                                                         @typescript-eslint/no-unsafe-assignment
+  62:52  warning  Unsafe argument of type `any` assigned to a parameter of type `RequestWithUser`                                                                                                                                                                                                                                                             @typescript-eslint/no-unsafe-argument
+  64:12  error    A method that is not declared with `this: void` may cause unintentional scoping of `this` when separated from its object.
+Consider using an arrow function or explicitly `.bind()`ing the method to avoid calling the method with an unintended `this` value. 
+If a function does not access `this`, it can be annotated with `this: void`  @typescript-eslint/unbound-method
+  71:52  warning  Unsafe argument of type `any` assigned to a parameter of type `RequestWithUser`                                                                                                                                                                                                                                                             @typescript-eslint/no-unsafe-argument
+
+/home/gift/Veillend/veilend-backend/src/indexer/indexer.service.ts
+  552:15  error  'accruedAmountStr' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+  594:17  error  Empty block statement                                                                        no-empty
+  625:17  error  Empty block statement                                                                        no-empty
+
+/home/gift/Veillend/veilend-backend/src/markets/markets.service.ts
+  31:40  error    Unsafe member access .totalSupplied on an `any` value                                               @typescript-eslint/no-unsafe-member-access
+  32:40  error    Unsafe member access .totalBorrowed on an `any` value                                               @typescript-eslint/no-unsafe-member-access
+  40:11  error    Unsafe assignment of an `any` value                                                                 @typescript-eslint/no-unsafe-assignment
+  40:26  error    Unsafe member access .baseRateBps on an `any` value                                                 @typescript-eslint/no-unsafe-member-access
+  41:11  error    Unsafe assignment of an `any` value                                                                 @typescript-eslint/no-unsafe-assignment
+  41:26  error    Unsafe member access .kinkUtilBps on an `any` value                                                 @typescript-eslint/no-unsafe-member-access
+  42:11  error    Unsafe assignment of an `any` value                                                                 @typescript-eslint/no-unsafe-assignment
+  42:28  error    Unsafe member access .slope1Bps on an `any` value                                                   @typescript-eslint/no-unsafe-member-access
+  43:11  error    Unsafe assignment of an `any` value                                                                 @typescript-eslint/no-unsafe-assignment
+  43:28  error    Unsafe member access .slope2Bps on an `any` value                                                   @typescript-eslint/no-unsafe-member-access
+  44:11  error    Unsafe assignment of an `any` value                                                                 @typescript-eslint/no-unsafe-assignment
+  44:35  error    Unsafe member access .reserveFactorBps on an `any` value                                            @typescript-eslint/no-unsafe-member-access
+  48:7   error    Unsafe assignment of an `any` value                                                                 @typescript-eslint/no-unsafe-assignment
+  50:7   error    Unsafe assignment of an `any` value                                                                 @typescript-eslint/no-unsafe-assignment
+  66:14  warning  Unsafe argument of type `any` assigned to a parameter of type `string | number | bigint | boolean`  @typescript-eslint/no-unsafe-argument
+  66:20  error    Unsafe member access .totalSupplied on an `any` value                                               @typescript-eslint/no-unsafe-member-access
+  66:44  warning  Unsafe argument of type `any` assigned to a parameter of type `string | number | bigint | boolean`  @typescript-eslint/no-unsafe-argument
+  66:50  error    Unsafe member access .totalBorrowed on an `any` value                                               @typescript-eslint/no-unsafe-member-access
+  70:29  warning  Unsafe argument of type `any` assigned to a parameter of type `string | number | Date`              @typescript-eslint/no-unsafe-argument
+  70:35  error    Unsafe member access .lastAccrualAt on an `any` value                                               @typescript-eslint/no-unsafe-member-access
+  74:7   error    Unsafe assignment of an `any` value                                                                 @typescript-eslint/no-unsafe-assignment
+  74:22  error    Unsafe member access .assetId on an `any` value                                                     @typescript-eslint/no-unsafe-member-access
+  75:7   error    Unsafe assignment of an `any` value                                                                 @typescript-eslint/no-unsafe-assignment
+  75:22  error    Unsafe call of an `any` typed value                                                                 @typescript-eslint/no-unsafe-call
+  75:28  error    Unsafe member access .totalSupplied on an `any` value                                               @typescript-eslint/no-unsafe-member-access
+  76:7   error    Unsafe assignment of an `any` value                                                                 @typescript-eslint/no-unsafe-assignment
+  76:22  error    Unsafe call of an `any` typed value                                                                 @typescript-eslint/no-unsafe-call
+  76:28  error    Unsafe member access .totalBorrowed on an `any` value                                               @typescript-eslint/no-unsafe-member-access
+  84:7   error    Unsafe assignment of an `any` value                                                                 @typescript-eslint/no-unsafe-assignment
+  85:7   error    Unsafe assignment of an `any` value                                                                 @typescript-eslint/no-unsafe-assignment
+  85:21  error    Unsafe call of an `any` typed value                                                                 @typescript-eslint/no-unsafe-call
+  85:27  error    Unsafe member access .protocolFees on an `any` value                                                @typescript-eslint/no-unsafe-member-access
+  86:7   error    Unsafe assignment of an `any` value                                                                 @typescript-eslint/no-unsafe-assignment
+  86:22  error    Unsafe call of an `any` typed value                                                                 @typescript-eslint/no-unsafe-call
+  86:28  error    Unsafe member access .lastAccrualAt on an `any` value                                               @typescript-eslint/no-unsafe-member-access
+
+/home/gift/Veillend/veilend-backend/test/race-isolation.integration.spec.ts
+  440:9  warning  Unsafe argument of type `any` assigned to a parameter of type `StellarAccountService`  @typescript-eslint/no-unsafe-argument
+  441:9  warning  Unsafe argument of type `any` assigned to a parameter of type `ProtocolService`        @typescript-eslint/no-unsafe-argument
+
+✖ 45 problems (38 errors, 7 warnings)
+

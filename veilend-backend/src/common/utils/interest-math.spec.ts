@@ -98,13 +98,13 @@ describe('Interest Math Conformance', () => {
         slope2Bps: 0,
         reserveFactorBps: 0,
       };
-      
+
       const market = service.computeMarket(state, params);
       expect(market.utilizationBps).toBe(5000);
-      
+
       // borrow annual bps = 0 + 2000 * 5000 / 10000 = 1000
       expect(market.borrowApy).toBeCloseTo(0.105170918, 6); // exp(0.1) - 1
-      
+
       // supply annual bps = 1000 * 5000 * 10000 / 100_000_000 = 500
       expect(market.supplyApy).toBeCloseTo(0.051271096, 6); // exp(0.05) - 1
     });
@@ -124,10 +124,10 @@ describe('Interest Math Conformance', () => {
         slope2Bps: 4000,
         reserveFactorBps: 0,
       };
-      
+
       const market = service.computeMarket(state, params);
       expect(market.utilizationBps).toBe(9000);
-      
+
       // borrow annual = 0 + 2000 * 8000 / 10000 + 4000 * 1000 / 10000 = 1600 + 400 = 2000
       expect(market.borrowApy).toBeCloseTo(0.221402758, 6); // exp(0.2) - 1
     });
@@ -147,7 +147,7 @@ describe('Interest Math Conformance', () => {
         slope2Bps: 0,
         reserveFactorBps: 1000, // 10%
       };
-      
+
       const market = service.computeMarket(state, params);
       // supply annual without reserve = 500 bps
       // with 10% reserve, it's 450 bps

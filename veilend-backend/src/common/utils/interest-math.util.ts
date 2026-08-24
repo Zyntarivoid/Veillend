@@ -13,15 +13,23 @@ export function computeAccruedPosition(
 
   if (borrowIndexSnapshot.gt(0) && supplyIndexSnapshot.gt(0)) {
     if (adjustedBorrowed > 0n) {
-      const growth = Number(currentBorrowIndex.minus(borrowIndexSnapshot)) / Number(borrowIndexSnapshot);
+      const growth =
+        Number(currentBorrowIndex.minus(borrowIndexSnapshot)) /
+        Number(borrowIndexSnapshot);
       if (growth > 0) {
-        adjustedBorrowed += BigInt(Math.floor(Number(adjustedBorrowed) * growth));
+        adjustedBorrowed += BigInt(
+          Math.floor(Number(adjustedBorrowed) * growth),
+        );
       }
     }
     if (adjustedDeposited > 0n) {
-      const growth = Number(currentSupplyIndex.minus(supplyIndexSnapshot)) / Number(supplyIndexSnapshot);
+      const growth =
+        Number(currentSupplyIndex.minus(supplyIndexSnapshot)) /
+        Number(supplyIndexSnapshot);
       if (growth > 0) {
-        adjustedDeposited += BigInt(Math.floor(Number(adjustedDeposited) * growth));
+        adjustedDeposited += BigInt(
+          Math.floor(Number(adjustedDeposited) * growth),
+        );
       }
     }
   }

@@ -39,7 +39,10 @@ export class ProtocolService {
   private readonly CACHE_TTL_MS = 120_000;
 
   private configCache: CacheEntry<ProtocolConfigResponseDto> | null = null;
-  private lastKnownGood: { data: ProtocolConfigResponseDto; cachedAt: number } | null = null;
+  private lastKnownGood: {
+    data: ProtocolConfigResponseDto;
+    cachedAt: number;
+  } | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -69,9 +72,14 @@ export class ProtocolService {
       return response;
     } catch (error) {
       if (this.lastKnownGood && now - this.lastKnownGood.cachedAt <= 600_000) {
-        return plainToInstance(ProtocolConfigResponseDto, { ...this.lastKnownGood.data, staleAsOf: new Date(this.lastKnownGood.cachedAt).toISOString() });
+        return plainToInstance(ProtocolConfigResponseDto, {
+          ...this.lastKnownGood.data,
+          staleAsOf: new Date(this.lastKnownGood.cachedAt).toISOString(),
+        });
       }
-      this.logger.warn(`Protocol chain read failed; serving fallback: ${error instanceof Error ? error.message : String(error)}`);
+      this.logger.warn(
+        `Protocol chain read failed; serving fallback: ${error instanceof Error ? error.message : String(error)}`,
+      );
       return this.buildFallbackConfig();
     }
   }
@@ -99,19 +107,67 @@ export class ProtocolService {
   }
 
   private async buildChainConfig(): Promise<ProtocolConfigResponseDto> {
-    const dbAssets = await this.prisma.asset.findMany({ orderBy: [{ isSupported: 'desc' }, { code: 'asc' }] });
-    const chain = await this.chainReader.read(this.appConfig.indexer.contractId, dbAssets);
+    const dbAssets = await this.prisma.asset.findMany({
+      orderBy: [{ isSupported: 'desc' }, { code: 'asc' }],
+    });
+    const chain = await this.chainReader.read(
+      this.appConfig.indexer.contractId,
+      dbAssets,
+    );
     const assets = dbAssets.map((asset) => {
-      const live = asset.contractId ? chain.assets.get(asset.contractId) : undefined;
-      return plainToInstance(AssetRiskConfigDto, { code: asset.code, symbol: asset.symbol, collateralFactor: asset.isNative ? .6 : asset.code === 'USDC' ? .75 : .7, liquidationThreshold: asset.isNative ? .7 : asset.code === 'USDC' ? .8 : .78, isSupported: live?.isSupported ?? false, supplyCap: live?.supplyCap, borrowCap: live?.borrowCap, oracle: live?.oracle });
+      const live = asset.contractId
+        ? chain.assets.get(asset.contractId)
+        : undefined;
+      return plainToInstance(AssetRiskConfigDto, {
+        code: asset.code,
+        symbol: asset.symbol,
+        collateralFactor: asset.isNative
+          ? 0.6
+          : asset.code === 'USDC'
+            ? 0.75
+            : 0.7,
+        liquidationThreshold: asset.isNative
+          ? 0.7
+          : asset.code === 'USDC'
+            ? 0.8
+            : 0.78,
+        isSupported: live?.isSupported ?? false,
+        supplyCap: live?.supplyCap,
+        borrowCap: live?.borrowCap,
+        oracle: live?.oracle,
+      });
     });
     const metadata = chain.metadata;
-    return plainToInstance(ProtocolConfigResponseDto, { source: 'chain', network: this.buildNetworkConfig(), riskParameters: { ...DEFAULT_RISK_PARAMETERS, minCollateralRatio: bpsToConservativeDecimal(chain.minCollateralRatioBps), closeFactor: bpsToConservativeDecimal(chain.closeFactorBps) }, assets, supportedAssetCount: assets.filter((a) => a.isSupported).length, cachedAt: new Date().toISOString(), paused: chain.paused, timelockLedgers: chain.timelockLedgers, contractVersion: Number(metadata.contract_version), storageSchemaVersion: Number(metadata.storage_schema_version) });
+    return plainToInstance(ProtocolConfigResponseDto, {
+      source: 'chain',
+      network: this.buildNetworkConfig(),
+      riskParameters: {
+        ...DEFAULT_RISK_PARAMETERS,
+        minCollateralRatio: bpsToConservativeDecimal(
+          chain.minCollateralRatioBps,
+        ),
+        closeFactor: bpsToConservativeDecimal(chain.closeFactorBps),
+      },
+      assets,
+      supportedAssetCount: assets.filter((a) => a.isSupported).length,
+      cachedAt: new Date().toISOString(),
+      paused: chain.paused,
+      timelockLedgers: chain.timelockLedgers,
+      contractVersion: Number(metadata.contract_version),
+      storageSchemaVersion: Number(metadata.storage_schema_version),
+    });
   }
 
   private async buildFallbackConfig(): Promise<ProtocolConfigResponseDto> {
     const assets = await this.buildAssetRiskConfigs();
-    return plainToInstance(ProtocolConfigResponseDto, { source: 'fallback', network: this.buildNetworkConfig(), riskParameters: DEFAULT_RISK_PARAMETERS, assets, supportedAssetCount: assets.filter((a) => a.isSupported).length, cachedAt: new Date().toISOString() });
+    return plainToInstance(ProtocolConfigResponseDto, {
+      source: 'fallback',
+      network: this.buildNetworkConfig(),
+      riskParameters: DEFAULT_RISK_PARAMETERS,
+      assets,
+      supportedAssetCount: assets.filter((a) => a.isSupported).length,
+      cachedAt: new Date().toISOString(),
+    });
   }
 
   private buildNetworkConfig(): NetworkConfigDto {

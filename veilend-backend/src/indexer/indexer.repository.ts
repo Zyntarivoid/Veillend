@@ -476,7 +476,7 @@ export class IndexerRepository {
           const asset = await this.resolveAsset(client, event.assetAddress);
           const accruedAmount = BigInt(event.accruedAmount);
           const reserveShare = BigInt(event.reserveShare);
-          
+
           await client.$executeRaw(Prisma.sql`
             INSERT INTO "AssetInterestState" ("assetId", "borrowIndex", "supplyIndex", "lastAccrualLedger", "lastAccrualAt", "totalSupplied", "totalBorrowed", "updatedAt")
             VALUES (${asset.id}, ${event.borrowIndex}::numeric, ${event.supplyIndex}::numeric, ${event.ledger}, ${timestamp}, 0, 0, CURRENT_TIMESTAMP)
@@ -630,8 +630,10 @@ export class IndexerRepository {
       FROM "AssetInterestState"
       WHERE "assetId" = ${assetId}
     `);
-    const currentBorrowIndex = stateRows[0]?.borrowIndex ?? new Prisma.Decimal(1.0);
-    const currentSupplyIndex = stateRows[0]?.supplyIndex ?? new Prisma.Decimal(1.0);
+    const currentBorrowIndex =
+      stateRows[0]?.borrowIndex ?? new Prisma.Decimal(1.0);
+    const currentSupplyIndex =
+      stateRows[0]?.supplyIndex ?? new Prisma.Decimal(1.0);
 
     let nextDeposited = currentDeposited + depositedDelta;
     let nextBorrowed = currentBorrowed + borrowedDelta;
