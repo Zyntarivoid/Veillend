@@ -270,6 +270,10 @@ All contract errors are typed via `VeilLendError` (`#[contracterror]`, `#[repr(u
 | 44 | `PermitChainMismatch` | Permit chain ID does not match the contract's chain ID |
 | 45 | `InvalidUpgradeVersion` | Proposed upgrade wasm reports a `contract_version` lower than the running one (downgrade rejected) |
 | 46 | `AlreadyMigrated` | Storage migration already completed for the target storage-schema version |
+| 47 | `CollateralFactorExceedsThreshold` | `collateral_factor_bps` exceeds `liquidation_threshold_bps` in the proposed `AssetRiskParams` |
+| 48 | `LiquidationThresholdExceedsMax` | `liquidation_threshold_bps` exceeds 10_000 (100%) |
+| 49 | `InvalidLiquidationBonus` | `liquidation_bonus_bps` is outside the allowed range 0..=2_000 (max 20%) |
+| 50 | `LiquidationThresholdPlusBonusExceedsMax` | `liquidation_threshold_bps + liquidation_bonus_bps` exceeds 10_000 |
 
 ## Development Workflow
 

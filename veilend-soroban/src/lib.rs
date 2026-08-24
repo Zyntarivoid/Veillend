@@ -29,16 +29,16 @@ pub use flash_loan::{
 };
 
 /// Increment this only when a contract interface change requires consumers to adapt.
-pub const CONTRACT_VERSION: u32 = 8;
+pub const CONTRACT_VERSION: u32 = 9;
 
 /// Increment this only when the serialized `DataKey` or stored value layout changes.
-pub const STORAGE_SCHEMA_VERSION: u32 = 5;
+pub const STORAGE_SCHEMA_VERSION: u32 = 6;
 
 /// Values <= this amount after repay/withdraw are rounded to zero.
 pub const DUST_THRESHOLD: i128 = 100;
 
 /// A compact, stable identifier for the current `DataKey` storage layout.
-const STORAGE_SCHEMA_ID: Symbol = symbol_short!("VLENDV5");
+const STORAGE_SCHEMA_ID: Symbol = symbol_short!("VLENDV6");
 
 /// Default delay (in ledgers) before a proposed privileged action becomes
 /// executable. ~5 minutes on Futurenet.
@@ -67,19 +67,22 @@ pub struct ContractMetadata {
     pub storage_schema_id: Symbol,
 }
 
-/// Keys and value shapes that make up storage schema `VLENDV3`.
+/// Keys and value shapes that make up storage schema `VLENDV6`.
 ///
 /// Instance storage: `AdminSet: Vec<Address>`, `MinCollateralRatioBps: u32`,
 /// `TimelockLedgers: u32`, `NextActionId: u64`,
 /// `StorageSchemaVersion: u32`,
-/// `PendingAction(u64): PendingAction`.
+/// `PendingAction(u64): PendingAction`. Instance storage additionally
+/// holds `GlobalCloseFactorBps: u32`.
 /// Persistent storage: `SupportedAsset(Address): bool`,
 /// `Position(Address, Address): Position`, `OraclePrice(Address): i128`,
 /// `DepositCap(Address)`/`BorrowCap(Address): i128`,
 /// `AssetSupplyCap(Address)`/`AssetBorrowCap(Address): i128` (0 = unlimited),
 /// `TotalDeposited(Address)`/`TotalBorrowed(Address): i128`, `Paused: bool`,
-/// and `InterestState(Address): InterestState`. Instance storage additionally
-/// holds `GlobalCloseFactorBps: u32`.
+/// `InterestState(Address): InterestState`,
+/// `AssetRiskParams(Address): AssetRiskParams` (per-asset collateral factor,
+/// liquidation threshold, and liquidation bonus; absent assets fall back to
+/// the global `MinCollateralRatioBps`).
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
@@ -146,6 +149,15 @@ pub enum DataKey {
     /// including `reserve_factor_bps`. Falls back to
     /// `interest::DEFAULT_PARAMS` when not set.
     InterestParams(Address),
+    /// Per-asset risk parameters: collateral factor, liquidation threshold,
+    /// and liquidation bonus. When absent, the global `MinCollateralRatioBps`
+    /// is used as the fallback for both collateral factor and liquidation
+    /// threshold, with a 0 bps liquidation bonus.
+    AssetRiskParams(Address),
+    /// Ordered list of all supported asset addresses. Maintained by
+    /// `apply_configure_asset` so that `assert_collateralized` can iterate
+    /// over all collateral assets for per-asset weighted checks.
+    SupportedAssetList,
     /// Lifetime (monotonically increasing, never decremented) total of
     /// reserve interest ever accrued for an asset — an accounting counter
     /// for indexers, distinct from the current withdrawable balance
@@ -209,6 +221,46 @@ pub struct AssetCaps {
     pub borrow_cap: i128,
 }
 
+/// Per-asset risk parameters that control borrowing power and liquidation.
+///
+/// `collateral_factor_bps` determines how much borrowing power a deposited
+/// asset provides. `liquidation_threshold_bps` determines when a position
+/// becomes liquidatable (must be >= collateral_factor_bps). The difference
+/// creates a buffer so borrowers are not liquidated the instant they hit
+/// their borrow limit. `liquidation_bonus_bps` is the incentive paid to
+/// liquidators on top of the repaid debt value.
+///
+/// Storage: persistent, keyed by `DataKey::AssetRiskParams(asset)`.
+/// When absent, the global `MinCollateralRatioBps` is used as the fallback
+/// for both collateral factor and liquidation threshold, with a 0 bps bonus.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct AssetRiskParams {
+    /// Maximum borrowing power this asset provides, in bps of its value
+    /// (e.g. 7_500 = 75%). Must be <= liquidation_threshold_bps.
+    pub collateral_factor_bps: u32,
+    /// Threshold at which a position becomes liquidatable, in bps of debt
+    /// value (e.g. 8_000 = 80%). Must be >= collateral_factor_bps and <= 10_000.
+    pub liquidation_threshold_bps: u32,
+    /// Extra collateral seized by liquidators as incentive, in bps of the
+    /// repaid value (e.g. 500 = 5%). Range: 0..=2_000 (max 20%).
+    /// Must satisfy: liquidation_threshold_bps + liquidation_bonus_bps <= 10_000.
+    pub liquidation_bonus_bps: u32,
+}
+
+/// The effective `AssetRiskParams` for an asset, including whether they
+/// were explicitly configured or derived from the global fallback.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct EffectiveAssetRiskParams {
+    pub collateral_factor_bps: u32,
+    pub liquidation_threshold_bps: u32,
+    pub liquidation_bonus_bps: u32,
+    /// `true` if per-asset params were explicitly set via timelocked admin
+    /// action; `false` if this is the global `MinCollateralRatioBps` fallback.
+    pub is_explicit: bool,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct AssetReserve {
@@ -246,6 +298,9 @@ pub enum ActionKind {
     /// is the expected response to a discovered bug and must never lock out
     /// the fix.
     Upgrade,
+    /// Sets per-asset risk parameters (collateral factor, liquidation threshold,
+    /// liquidation bonus).
+    SetAssetRiskParams,
 }
 
 /// The arguments captured when a privileged action is proposed. Stored in
@@ -264,6 +319,8 @@ pub enum ActionPayload {
     WithdrawReserves(Address, Address, i128),
     /// Hash of the wasm to install via `update_current_contract_wasm`.
     Upgrade(BytesN<32>),
+    /// (asset, collateral_factor_bps, liquidation_threshold_bps, liquidation_bonus_bps)
+    SetAssetRiskParams(Address, u32, u32, u32),
 }
 
 /// A proposed privileged action awaiting its timelock window.
@@ -395,6 +452,20 @@ pub enum VeilLendError {
     /// storage-schema version. `migrate` is idempotent and refuses to run
     /// twice for the same target.
     AlreadyMigrated = 46,
+    /// `collateral_factor_bps` exceeds `liquidation_threshold_bps` in the
+    /// proposed `AssetRiskParams`. The collateral factor must be <= the
+    /// liquidation threshold.
+    CollateralFactorExceedsThreshold = 47,
+    /// `liquidation_threshold_bps` exceeds 10_000 in the proposed
+    /// `AssetRiskParams`. The liquidation threshold must be <= 100%.
+    LiquidationThresholdExceedsMax = 48,
+    /// `liquidation_bonus_bps` is outside the allowed range 0..=2_000 in the
+    /// proposed `AssetRiskParams`. Max bonus is 20%.
+    InvalidLiquidationBonus = 49,
+    /// `liquidation_threshold_bps + liquidation_bonus_bps` exceeds 10_000 in
+    /// the proposed `AssetRiskParams`. A liquidation can never seize more
+    /// value than the position holds.
+    LiquidationThresholdPlusBonusExceedsMax = 50,
 }
 
 #[contractevent(topics = ["veillend", "asset_configured"])]
@@ -489,6 +560,7 @@ pub struct LiquidateEvent {
     pub debt_asset: Address,
     pub repaid: i128,
     pub seized: i128,
+    pub liquidation_bonus_bps: u32,
 }
 
 #[contractevent(topics = ["veillend", "liquidation_clipped"])]
@@ -565,6 +637,18 @@ pub struct InterestParamsUpdated {
     pub slope1_bps: u32,
     pub slope2_bps: u32,
     pub reserve_factor_bps: u32,
+}
+
+#[contractevent(topics = ["veillend", "asset_risk_params_updated"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AssetRiskParamsUpdated {
+    #[topic]
+    pub admin: Address,
+    #[topic]
+    pub asset: Address,
+    pub collateral_factor_bps: u32,
+    pub liquidation_threshold_bps: u32,
+    pub liquidation_bonus_bps: u32,
 }
 
 #[contractevent(topics = ["veillend", "admin_added"])]
@@ -1051,6 +1135,78 @@ impl VeilLendContract {
         admin.require_auth();
 
         Self::cancel_action(&env, &admin, action_id, ActionKind::SetMinCollateralRatio);
+    }
+
+    /// Proposes setting per-asset risk parameters (timelocked). Returns
+    /// the action id.
+    pub fn propose_set_asset_risk_params(
+        env: Env,
+        admin: Address,
+        asset: Address,
+        collateral_factor_bps: u32,
+        liquidation_threshold_bps: u32,
+        liquidation_bonus_bps: u32,
+    ) -> u64 {
+        Self::require_admin(&env, &admin);
+        admin.require_auth();
+
+        Self::propose_action(
+            &env,
+            &admin,
+            ActionKind::SetAssetRiskParams,
+            ActionPayload::SetAssetRiskParams(
+                asset,
+                collateral_factor_bps,
+                liquidation_threshold_bps,
+                liquidation_bonus_bps,
+            ),
+        )
+    }
+
+    /// Executes a previously proposed set_asset_risk_params action.
+    pub fn execute_set_asset_risk_params(env: Env, admin: Address, action_id: u64) {
+        Self::require_admin(&env, &admin);
+        admin.require_auth();
+        Self::require_not_paused(&env);
+
+        Self::execute_action(&env, &admin, action_id, ActionKind::SetAssetRiskParams);
+    }
+
+    /// Cancels a pending set_asset_risk_params action.
+    pub fn cancel_set_asset_risk_params(env: Env, admin: Address, action_id: u64) {
+        admin.require_auth();
+
+        Self::cancel_action(&env, &admin, action_id, ActionKind::SetAssetRiskParams);
+    }
+
+    /// Returns the effective `AssetRiskParams` for `asset`.
+    ///
+    /// If explicit per-asset params are set, they are returned with
+    /// `is_explicit: true`. Otherwise, the global `MinCollateralRatioBps`
+    /// is returned as both `collateral_factor_bps` and
+    /// `liquidation_threshold_bps` with a 0 bps bonus, and
+    /// `is_explicit: false`.
+    pub fn get_asset_risk_params(env: Env, asset: Address) -> EffectiveAssetRiskParams {
+        if let Some(params) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, AssetRiskParams>(&DataKey::AssetRiskParams(asset))
+        {
+            EffectiveAssetRiskParams {
+                collateral_factor_bps: params.collateral_factor_bps,
+                liquidation_threshold_bps: params.liquidation_threshold_bps,
+                liquidation_bonus_bps: params.liquidation_bonus_bps,
+                is_explicit: true,
+            }
+        } else {
+            let fallback = Self::ratio_to_factor(Self::min_collateral_ratio_bps(env.clone()));
+            EffectiveAssetRiskParams {
+                collateral_factor_bps: fallback,
+                liquidation_threshold_bps: fallback,
+                liquidation_bonus_bps: 0,
+                is_explicit: false,
+            }
+        }
     }
 
     /// Get total deposited amount for an asset
@@ -1723,23 +1879,38 @@ impl VeilLendContract {
             panic_with_error!(&env, VeilLendError::PositionNotLiquidatable);
         }
 
-        let collateral_ratio_bps = Self::min_collateral_ratio_bps(env.clone()) as i128;
-        let collateral_price = Self::read_oracle_price(&env, &collateral_asset);
-        let debt_price = Self::read_oracle_price(&env, &debt_asset);
+        // Compute weighted collateral value across ALL supported assets,
+        // using per-asset liquidation_threshold_bps (not collateral_factor).
+        let asset_list: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::SupportedAssetList)
+            .unwrap_or_else(|| Vec::new(&env));
 
-        let collateral_value = collateral_position.deposited * collateral_price;
+        let debt_price = Self::read_oracle_price(&env, &debt_asset);
         let borrowed_value = debt_position.borrowed * debt_price;
 
-        // Only undercollateralized positions (health factor < 1.0) may be
-        // liquidated; this mirrors assert_collateralized's healthy condition.
-        if collateral_value * 10_000 >= borrowed_value * collateral_ratio_bps {
+        let mut weighted_collateral_value: i128 = 0;
+        for asset in asset_list.iter() {
+            let deposited = Self::read_accrued_position(&env, &user, &asset).deposited;
+            if deposited <= 0 {
+                continue;
+            }
+            let price = Self::read_oracle_price(&env, &asset);
+            let threshold = Self::read_liquidation_threshold_bps(&env, &asset) as i128;
+            weighted_collateral_value += deposited * price * threshold;
+        }
+
+        // Only positions whose weighted collateral falls below the
+        // liquidation threshold may be liquidated.
+        if weighted_collateral_value >= borrowed_value * 10_000 {
             panic_with_error!(&env, VeilLendError::PositionNotLiquidatable);
         }
 
-        // health_factor_bps == 10_000 at exactly the min-collateral-ratio
-        // threshold; below that the position is undercollateralized.
+        // health_factor_bps == 10_000 at exactly the liquidation threshold;
+        // below that the position is undercollateralized.
         let health_factor_bps =
-            (collateral_value * 10_000 * 10_000) / (borrowed_value * collateral_ratio_bps);
+            (weighted_collateral_value * 10_000) / (borrowed_value * 10_000);
 
         const SEVERE_HEALTH_FACTOR_BPS: i128 = 9_500; // 0.95
 
@@ -1767,8 +1938,42 @@ impl VeilLendContract {
             panic_with_error!(&env, VeilLendError::ZeroAmount);
         }
 
-        let seize_amount =
-            ((actual_repay * debt_price) / collateral_price).min(collateral_position.deposited);
+        // Compute seize amount with liquidation bonus.
+        let bonus_bps = Self::read_liquidation_bonus_bps(&env, &collateral_asset);
+        let collateral_price = Self::read_oracle_price(&env, &collateral_asset);
+        let repay_value = actual_repay * debt_price;
+        // seize_value = repay_value * (10_000 + bonus_bps) / 10_000
+        let seize_value = repay_value
+            .checked_mul(10_000_i128 + bonus_bps as i128)
+            .and_then(|v| v.checked_div(10_000))
+            .unwrap_or(i128::MAX);
+        let mut seize_amount = (seize_value / collateral_price).min(collateral_position.deposited);
+
+        // If the cap binds (seize_amount == collateral_position.deposited
+        // but seize_value > actual value of that collateral), record bad
+        // debt via LiquidationClipped and cap the bonus.
+        let mut clipped_bonus = false;
+        if seize_amount >= collateral_position.deposited && collateral_position.deposited > 0 {
+            // Check if we wanted to seize more than available.
+            let available_value = collateral_position.deposited * collateral_price;
+            if seize_value > available_value {
+                seize_amount = collateral_position.deposited;
+                clipped_bonus = true;
+            }
+        }
+
+        if clipped_bonus && bonus_bps > 0 {
+            // Emit LiquidationClipped with a synthetic by_bps indicating the
+            // bonus was clipped. The by_bps encodes how much of the bonus
+            // was lost, capped at u32::MAX.
+            let bonus_lost_bps = bonus_bps.min(10_000);
+            LiquidationClipped {
+                liquidator: liquidator.clone(),
+                user: user.clone(),
+                by_bps: bonus_lost_bps,
+            }
+            .publish(&env);
+        }
 
         let mut new_debt_position = debt_position;
         new_debt_position.borrowed -= actual_repay;
@@ -1784,16 +1989,21 @@ impl VeilLendContract {
 
         let mut new_collateral_position = collateral_position;
         new_collateral_position.deposited -= seize_amount;
-        let mut collateral_reserve = Self::read_asset_reserve(&env, &collateral_asset);
-        collateral_reserve.total_balance -= seize_amount;
+        // Reserve balance stays the same: collateral is transferred between
+        // users, not withdrawn from the protocol.
         Self::write_position(&env, &user, &collateral_asset, &new_collateral_position);
-        Self::write_asset_reserve(&env, &collateral_asset, &collateral_reserve);
-        let total_deposited =
-            Self::get_total_deposited(env.clone(), collateral_asset.clone()) - seize_amount;
-        env.storage().persistent().set(
-            &DataKey::TotalDeposited(collateral_asset.clone()),
-            &total_deposited,
+
+        // Transfer seized collateral to the liquidator.
+        let mut liquidator_collateral =
+            Self::read_accrued_position(&env, &liquidator, &collateral_asset);
+        liquidator_collateral.deposited += seize_amount;
+        Self::write_position(
+            &env,
+            &liquidator,
+            &collateral_asset,
+            &liquidator_collateral,
         );
+        // total_deposited stays the same (seized amount moved between users).
 
         LiquidateEvent {
             liquidator,
@@ -1802,6 +2012,7 @@ impl VeilLendContract {
             debt_asset: debt_asset.clone(),
             repaid: actual_repay,
             seized: seize_amount,
+            liquidation_bonus_bps: bonus_bps,
         }
         .publish(&env);
         Self::publish_asset_reserve_updated(
@@ -1809,12 +2020,6 @@ impl VeilLendContract {
             &debt_asset,
             &debt_reserve,
             ReserveUpdateKind::Repay,
-        );
-        Self::publish_asset_reserve_updated(
-            &env,
-            &collateral_asset,
-            &collateral_reserve,
-            ReserveUpdateKind::Withdraw,
         );
     }
 
@@ -2708,6 +2913,32 @@ impl VeilLendContract {
             // installed before execution, and the guard needs to inspect the
             // wasm's metadata).
             ActionPayload::Upgrade(_) => {}
+            ActionPayload::SetAssetRiskParams(
+                asset,
+                collateral_factor_bps,
+                liquidation_threshold_bps,
+                liquidation_bonus_bps,
+            ) => {
+                Self::require_supported_asset(env, asset);
+                if *collateral_factor_bps > *liquidation_threshold_bps {
+                    panic_with_error!(
+                        env,
+                        VeilLendError::CollateralFactorExceedsThreshold
+                    );
+                }
+                if *liquidation_threshold_bps > 10_000 {
+                    panic_with_error!(env, VeilLendError::LiquidationThresholdExceedsMax);
+                }
+                if *liquidation_bonus_bps > 2_000 {
+                    panic_with_error!(env, VeilLendError::InvalidLiquidationBonus);
+                }
+                if *liquidation_threshold_bps + *liquidation_bonus_bps > 10_000 {
+                    panic_with_error!(
+                        env,
+                        VeilLendError::LiquidationThresholdPlusBonusExceedsMax
+                    );
+                }
+            }
         }
     }
 
@@ -2828,6 +3059,19 @@ impl VeilLendContract {
                 Self::apply_withdraw_reserves(env, admin, asset, to, *amount)
             }
             ActionPayload::Upgrade(wasm_hash) => Self::apply_upgrade(env, wasm_hash),
+            ActionPayload::SetAssetRiskParams(
+                asset,
+                collateral_factor_bps,
+                liquidation_threshold_bps,
+                liquidation_bonus_bps,
+            ) => Self::apply_set_asset_risk_params(
+                env,
+                admin,
+                asset,
+                *collateral_factor_bps,
+                *liquidation_threshold_bps,
+                *liquidation_bonus_bps,
+            ),
         }
     }
 
@@ -2916,6 +3160,32 @@ impl VeilLendContract {
         env.storage()
             .persistent()
             .set(&DataKey::SupportedAsset(asset.clone()), &supported);
+
+        // Maintain the ordered list of supported assets for per-asset
+        // weighted collateral checks in assert_collateralized.
+        let mut asset_list: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::SupportedAssetList)
+            .unwrap_or_else(|| Vec::new(env));
+        if supported {
+            if !asset_list.contains(asset) {
+                asset_list.push_back(asset.clone());
+            }
+        } else {
+            // Remove the asset from the list. Soroban Vec has no efficient
+            // remove-by-value, so we rebuild without it.
+            let mut new_list: Vec<Address> = Vec::new(env);
+            for a in asset_list.iter() {
+                if a != *asset {
+                    new_list.push_back(a);
+                }
+            }
+            asset_list = new_list;
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::SupportedAssetList, &asset_list);
 
         // Initialize caps to unlimited (-1) when adding new asset, preserving existing caps
         if supported {
@@ -3098,6 +3368,33 @@ impl VeilLendContract {
         env.storage()
             .instance()
             .set(&DataKey::MinCollateralRatioBps, &min_collateral_ratio_bps);
+    }
+
+    fn apply_set_asset_risk_params(
+        env: &Env,
+        admin: &Address,
+        asset: &Address,
+        collateral_factor_bps: u32,
+        liquidation_threshold_bps: u32,
+        liquidation_bonus_bps: u32,
+    ) {
+        let params = AssetRiskParams {
+            collateral_factor_bps,
+            liquidation_threshold_bps,
+            liquidation_bonus_bps,
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::AssetRiskParams(asset.clone()), &params);
+
+        AssetRiskParamsUpdated {
+            admin: admin.clone(),
+            asset: asset.clone(),
+            collateral_factor_bps,
+            liquidation_threshold_bps,
+            liquidation_bonus_bps,
+        }
+        .publish(env);
     }
 
     fn apply_set_paused(env: &Env, admin: &Address, paused: bool) {
@@ -3574,14 +3871,14 @@ impl VeilLendContract {
 
     /// Validates a user's post-action cross-asset collateral health.
     ///
-    /// `collateral_asset` and `debt_asset` may differ: the collateral value
-    /// is `deposited(collateral_asset) × price(collateral_asset)` and the
-    /// debt value is `borrowed(debt_asset) × price(debt_asset)`. The ratio
-    /// `collateral_value / debt_value` must be ≥ `min_collateral_ratio_bps`.
+    /// Computes a weighted collateral sum across ALL of the user's deposited
+    /// assets, using each asset's per-asset `collateral_factor_bps` (or the
+    /// global `MinCollateralRatioBps` as fallback). The weighted collateral
+    /// value must cover the total debt value.
     ///
-    /// Both positions are read from storage (with interest simulated in) and
-    /// then `action_delta` is applied, so the caller may invoke this before
-    /// persisting its own mutation.
+    /// `action_delta` is applied to the specified position before computing
+    /// the check, so the caller may invoke this before persisting its own
+    /// mutation.
     fn assert_collateralized(
         env: &Env,
         collateral_asset: &Address,
@@ -3589,33 +3886,106 @@ impl VeilLendContract {
         user: &Address,
         action_delta: CollateralAction,
     ) {
-        let collateral_position = Self::read_accrued_position(env, user, collateral_asset);
+        // Compute total debt value.
         let debt_position = Self::read_accrued_position(env, user, debt_asset);
-
-        let mut collateral_deposited = collateral_position.deposited;
         let mut debt_borrowed = debt_position.borrowed;
-
         match action_delta {
             CollateralAction::Borrow { amount } => debt_borrowed += amount,
-            CollateralAction::Withdraw { amount } => collateral_deposited -= amount,
+            _ => {}
         }
-
         if debt_borrowed == 0 {
             return;
         }
-
-        let collateral_ratio_bps = Self::min_collateral_ratio_bps(env.clone()) as i128;
-
-        // Fetch the oracle price for BOTH assets independently; a missing or
-        // stale price on either side is a hard failure.
-        let collateral_price = Self::read_oracle_price(env, collateral_asset);
         let debt_price = Self::read_oracle_price(env, debt_asset);
+        let debt_value = debt_borrowed * debt_price;
 
-        let collateral_value = collateral_deposited * collateral_price;
-        let borrowed_value = debt_borrowed * debt_price;
+        // Compute weighted collateral value across ALL supported assets.
+        let asset_list: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::SupportedAssetList)
+            .unwrap_or_else(|| Vec::new(env));
 
-        if collateral_value * 10_000 < borrowed_value * collateral_ratio_bps {
+        let mut weighted_collateral_value: i128 = 0;
+        for asset in asset_list.iter() {
+            let mut deposited = Self::read_accrued_position(env, user, &asset).deposited;
+            // Apply the action delta if it pertains to this asset.
+            match action_delta {
+                CollateralAction::Withdraw { amount } if asset == *collateral_asset => {
+                    deposited -= amount;
+                }
+                _ => {}
+            }
+            if deposited <= 0 {
+                continue;
+            }
+            let price = Self::read_oracle_price(env, &asset);
+            let collateral_factor = Self::read_collateral_factor_bps(env, &asset) as i128;
+            weighted_collateral_value += deposited * price * collateral_factor;
+        }
+
+        // weighted_collateral_value is already in units of (value * bps),
+        // so compare: weighted_collateral_value >= debt_value * 10_000
+        if weighted_collateral_value < debt_value * 10_000 {
             panic_with_error!(env, VeilLendError::InsufficientCollateral);
+        }
+    }
+
+    /// Returns the effective `collateral_factor_bps` for `asset`.
+    /// Uses per-asset `AssetRiskParams` if set, otherwise falls back to the
+    /// global `MinCollateralRatioBps` converted to a factor via ceiling division.
+    fn read_collateral_factor_bps(env: &Env, asset: &Address) -> u32 {
+        if let Some(params) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, AssetRiskParams>(&DataKey::AssetRiskParams(asset.clone()))
+        {
+            params.collateral_factor_bps
+        } else {
+            Self::ratio_to_factor(Self::min_collateral_ratio_bps(env.clone()))
+        }
+    }
+
+    /// Returns the effective `liquidation_threshold_bps` for `asset`.
+    /// Uses per-asset `AssetRiskParams` if set, otherwise falls back to the
+    /// global `MinCollateralRatioBps` converted to a threshold via ceiling division.
+    fn read_liquidation_threshold_bps(env: &Env, asset: &Address) -> u32 {
+        if let Some(params) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, AssetRiskParams>(&DataKey::AssetRiskParams(asset.clone()))
+        {
+            params.liquidation_threshold_bps
+        } else {
+            Self::ratio_to_factor(Self::min_collateral_ratio_bps(env.clone()))
+        }
+    }
+
+    /// Converts a collateral ratio (>= 10_000, e.g. 15_000 = 150%) to the
+    /// equivalent collateral factor (<= 10_000) using ceiling division so
+    /// the fallback preserves the old boundary behaviour as closely as possible.
+    ///
+    /// Old formula: `collateral_value * 10_000 >= debt_value * ratio`
+    /// New formula: `collateral_value * factor >= debt_value * 10_000`
+    /// These are equivalent when `factor = ceil(10_000 * 10_000 / ratio)`.
+    fn ratio_to_factor(ratio: u32) -> u32 {
+        if ratio == 0 {
+            return 10_000;
+        }
+        (10_000_u32 * 10_000_u32 + ratio - 1) / ratio
+    }
+
+    /// Returns the effective `liquidation_bonus_bps` for `asset`.
+    /// Uses per-asset `AssetRiskParams` if set, otherwise returns 0.
+    fn read_liquidation_bonus_bps(env: &Env, asset: &Address) -> u32 {
+        if let Some(params) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, AssetRiskParams>(&DataKey::AssetRiskParams(asset.clone()))
+        {
+            params.liquidation_bonus_bps
+        } else {
+            0
         }
     }
 
@@ -3747,42 +4117,42 @@ impl VeilLendContract {
     /// Enforces the collateral ratio after a batch withdrawal.
     ///
     /// Positions have already been written to storage by the time this is
-    /// called, so each unique withdrawn asset is checked as collateral
-    /// against `debt_asset` with a zero delta (the withdrawal is already
-    /// reflected in the stored position).
-    ///
-    /// Unlike a single `withdraw`, which only compares the one withdrawn
-    /// asset against the debt, this aggregates collateral value across every
-    /// unique asset touched by the batch. This is what makes batching
-    /// meaningfully different from issuing the same withdrawals as separate
-    /// transactions: moving value out of one asset while another asset in
-    /// the same batch still covers the debt is allowed, since only the
-    /// combined final state matters.
+    /// called. Computes a weighted collateral sum across ALL supported assets
+    /// using per-asset collateral factors, then compares against total debt.
     ///
     /// # Panics
-    /// * If the aggregated collateral value of the touched assets is
-    ///   insufficient to cover the debt in `debt_asset`
+    /// * If the weighted collateral value is insufficient to cover the debt
     fn enforce_batch_health_factor_for_withdraw(
         env: &Env,
         user: &Address,
         debt_asset: &Address,
-        operations: &Vec<BatchOperation>,
+        _operations: &Vec<BatchOperation>,
     ) {
         let debt_borrowed = Self::read_accrued_position(env, user, debt_asset).borrowed;
         if debt_borrowed == 0 {
             return;
         }
 
-        let touched_assets = Self::deduplicate_assets(env, operations);
-        let mut collateral_value: i128 = 0;
-        for asset in touched_assets.iter() {
+        let debt_value = debt_borrowed * Self::read_oracle_price(env, debt_asset);
+
+        let asset_list: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::SupportedAssetList)
+            .unwrap_or_else(|| Vec::new(env));
+
+        let mut weighted_collateral_value: i128 = 0;
+        for asset in asset_list.iter() {
             let deposited = Self::read_accrued_position(env, user, &asset).deposited;
-            collateral_value += deposited * Self::read_oracle_price(env, &asset);
+            if deposited <= 0 {
+                continue;
+            }
+            let price = Self::read_oracle_price(env, &asset);
+            let collateral_factor = Self::read_collateral_factor_bps(env, &asset) as i128;
+            weighted_collateral_value += deposited * price * collateral_factor;
         }
 
-        let debt_value = debt_borrowed * Self::read_oracle_price(env, debt_asset);
-        let collateral_ratio_bps = Self::min_collateral_ratio_bps(env.clone()) as i128;
-        if collateral_value * 10_000 < debt_value * collateral_ratio_bps {
+        if weighted_collateral_value < debt_value * 10_000 {
             panic_with_error!(env, VeilLendError::InsufficientCollateral);
         }
     }
@@ -3790,19 +4160,16 @@ impl VeilLendContract {
     /// Enforces the collateral ratio after a batch borrow.
     ///
     /// Positions have already been written to storage by the time this is
-    /// called. Unlike a single `borrow`, which only compares the one
-    /// borrowed asset against the collateral, this aggregates debt value
-    /// across every unique asset touched by the batch and compares it
-    /// against the single named collateral asset, since only the combined
-    /// final state matters for a batch.
+    /// called. Computes a weighted collateral sum across ALL supported assets
+    /// using per-asset collateral factors, then compares against aggregated
+    /// debt across all touched assets.
     ///
     /// # Panics
-    /// * If `collateral_asset` is insufficient to cover the aggregated debt
-    ///   value of the touched assets
+    /// * If the weighted collateral value is insufficient to cover the debt
     fn enforce_batch_health_factor_for_borrow(
         env: &Env,
         user: &Address,
-        collateral_asset: &Address,
+        _collateral_asset: &Address,
         operations: &Vec<BatchOperation>,
     ) {
         let touched_assets = Self::deduplicate_assets(env, operations);
@@ -3816,12 +4183,24 @@ impl VeilLendContract {
             return;
         }
 
-        let collateral_deposited =
-            Self::read_accrued_position(env, user, collateral_asset).deposited;
-        let collateral_value =
-            collateral_deposited * Self::read_oracle_price(env, collateral_asset);
-        let collateral_ratio_bps = Self::min_collateral_ratio_bps(env.clone()) as i128;
-        if collateral_value * 10_000 < debt_value * collateral_ratio_bps {
+        let asset_list: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::SupportedAssetList)
+            .unwrap_or_else(|| Vec::new(env));
+
+        let mut weighted_collateral_value: i128 = 0;
+        for asset in asset_list.iter() {
+            let deposited = Self::read_accrued_position(env, user, &asset).deposited;
+            if deposited <= 0 {
+                continue;
+            }
+            let price = Self::read_oracle_price(env, &asset);
+            let collateral_factor = Self::read_collateral_factor_bps(env, &asset) as i128;
+            weighted_collateral_value += deposited * price * collateral_factor;
+        }
+
+        if weighted_collateral_value < debt_value * 10_000 {
             panic_with_error!(env, VeilLendError::InsufficientCollateral);
         }
     }
@@ -3910,6 +4289,13 @@ mod tests {
         assert_eq!(VeilLendError::PositionNotLiquidatable as u32, 32);
         assert_eq!(VeilLendError::InvalidUpgradeVersion as u32, 45);
         assert_eq!(VeilLendError::AlreadyMigrated as u32, 46);
+        assert_eq!(VeilLendError::CollateralFactorExceedsThreshold as u32, 47);
+        assert_eq!(VeilLendError::LiquidationThresholdExceedsMax as u32, 48);
+        assert_eq!(VeilLendError::InvalidLiquidationBonus as u32, 49);
+        assert_eq!(
+            VeilLendError::LiquidationThresholdPlusBonusExceedsMax as u32,
+            50
+        );
     }
 
     #[test]
@@ -3925,7 +4311,7 @@ mod tests {
         let metadata = client.contract_metadata();
         assert_eq!(metadata.contract_version, CONTRACT_VERSION);
         assert_eq!(metadata.storage_schema_version, STORAGE_SCHEMA_VERSION);
-        assert_eq!(metadata.storage_schema_id, symbol_short!("VLENDV5"));
+        assert_eq!(metadata.storage_schema_id, symbol_short!("VLENDV6"));
     }
 
     #[test]
@@ -3965,6 +4351,10 @@ mod tests {
             VeilLendError::PositionNotLiquidatable as u32,
             VeilLendError::InvalidUpgradeVersion as u32,
             VeilLendError::AlreadyMigrated as u32,
+            VeilLendError::CollateralFactorExceedsThreshold as u32,
+            VeilLendError::LiquidationThresholdExceedsMax as u32,
+            VeilLendError::InvalidLiquidationBonus as u32,
+            VeilLendError::LiquidationThresholdPlusBonusExceedsMax as u32,
         ];
         let mut sorted = codes.to_vec();
         sorted.sort();
