@@ -297,3 +297,4 @@ All contract errors are typed via `VeilLendError` (`#[contracterror]`, `#[repr(u
 
 - [Soroban Documentation](https://soroban.stellar.org/docs)
 - [Stellar Developer Docs](https://developers.stellar.org/docs)
+
