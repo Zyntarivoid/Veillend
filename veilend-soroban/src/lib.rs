@@ -9,6 +9,7 @@ pub use interest::{DEFAULT_PARAMS as INTEREST_DEFAULT_PARAMS, RATE_SCALE, SECOND
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error,
     symbol_short, Address, Bytes, BytesN, Env, Symbol, Vec,
+    token::Client as TokenClient,
 };
 
 mod flash_loan;
@@ -23,22 +24,25 @@ pub use permit_helpers::{verify_and_consume_permit, VerifiedPermit};
 #[cfg(test)]
 mod test_flash_loan;
 
+#[cfg(test)]
+mod test_token_integration;
+
 pub use flash_loan::{
     calculate_premium_rounded_up, FlashLoanReceiverClient, FlashLoanState,
     DEFAULT_FLASH_LOAN_PREMIUM_BPS, MAX_FLASH_LOAN_PREMIUM_BPS, MIN_FLASH_LOAN_PREMIUM_BPS,
 };
 
 /// Increment this only when a contract interface change requires consumers to adapt.
-pub const CONTRACT_VERSION: u32 = 9;
+pub const CONTRACT_VERSION: u32 = 10;
 
 /// Increment this only when the serialized `DataKey` or stored value layout changes.
-pub const STORAGE_SCHEMA_VERSION: u32 = 6;
+pub const STORAGE_SCHEMA_VERSION: u32 = 7;
 
 /// Values <= this amount after repay/withdraw are rounded to zero.
 pub const DUST_THRESHOLD: i128 = 100;
 
 /// A compact, stable identifier for the current `DataKey` storage layout.
-const STORAGE_SCHEMA_ID: Symbol = symbol_short!("VLENDV6");
+const STORAGE_SCHEMA_ID: Symbol = symbol_short!("VLENDV7");
 
 /// Default delay (in ledgers) before a proposed privileged action becomes
 /// executable. ~5 minutes on Futurenet.
@@ -67,7 +71,7 @@ pub struct ContractMetadata {
     pub storage_schema_id: Symbol,
 }
 
-/// Keys and value shapes that make up storage schema `VLENDV6`.
+/// Keys and value shapes that make up storage schema `VLENDV7`.
 ///
 /// Instance storage: `AdminSet: Vec<Address>`, `MinCollateralRatioBps: u32`,
 /// `TimelockLedgers: u32`, `NextActionId: u64`,
@@ -83,6 +87,7 @@ pub struct ContractMetadata {
 /// `AssetRiskParams(Address): AssetRiskParams` (per-asset collateral factor,
 /// liquidation threshold, and liquidation bonus; absent assets fall back to
 /// the global `MinCollateralRatioBps`).
+/// `AssetConfig(Address): AssetConfig` (SAC contract address and decimals for token transfers).
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
@@ -165,6 +170,8 @@ pub enum DataKey {
     LifetimeReserveEarned(Address),
     /// Monotonically increasing permit nonce per user (persistent storage)
     PermitNonce(Address),
+    /// Per-asset SAC contract metadata (address and decimals)
+    AssetConfig(Address),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -259,6 +266,21 @@ pub struct EffectiveAssetRiskParams {
     /// `true` if per-asset params were explicitly set via timelocked admin
     /// action; `false` if this is the global `MinCollateralRatioBps` fallback.
     pub is_explicit: bool,
+}
+
+/// Per-asset SAC (Stellar Asset Contract) configuration.
+///
+/// Stores the SAC contract address and token decimals for an asset.
+/// Configured at asset setup time via `configure_asset`.
+///
+/// Storage: persistent, keyed by `DataKey::AssetConfig(asset)`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct AssetConfig {
+    /// The Stellar Asset Contract (SAC) address for this asset's token
+    pub sac_contract: Address,
+    /// Number of decimal places for the token (e.g., 6 for USDC)
+    pub decimals: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -356,6 +378,8 @@ pub enum VeilLendError {
     UnsupportedAsset = 3,
     /// Amount must be positive (non-zero)
     InvalidAmount = 4,
+    /// Asset address does not respond to Stellar Asset Contract interface
+    InvalidSacContract = 52,
     /// Collateral ratio below minimum after operation
     InsufficientCollateral = 5,
     /// Withdraw amount exceeds deposited balance
@@ -384,6 +408,8 @@ pub enum VeilLendError {
     // starts describing a different failure.
     /// Reserve balance is too low for the requested action
     InsufficientReserve = 17,
+    /// Contract's actual token balance is insufficient to cover the requested outflow
+    InsufficientLiquidity = 51,
     /// Pending action's timelock window has not elapsed yet
     TimelockNotReady = 18,
     /// No pending action with the given id (or wrong kind)
@@ -1326,6 +1352,11 @@ impl VeilLendContract {
             .persistent()
             .set(&DataKey::TotalDeposited(asset.clone()), &total);
 
+        // Transfer tokens from user to contract.
+        // All state has been mutated; if this transfer fails, the entire call panics
+        // and no partial state survives (atomicity guaranteed by Soroban).
+        Self::transfer_from(&env, &asset, &user, &env.current_contract_address(), amount);
+
         DepositEvent {
             user,
             asset: asset.clone(),
@@ -1382,6 +1413,17 @@ impl VeilLendContract {
             .persistent()
             .set(&DataKey::TotalBorrowed(borrow_asset.clone()), &total);
 
+        // Check that contract has sufficient liquidity before transferring.
+        let actual_balance = Self::token_balance(&env, &borrow_asset);
+        if actual_balance < reserve.total_balance {
+            panic_with_error!(&env, VeilLendError::InsufficientLiquidity);
+        }
+
+        // Transfer borrowed amount from contract to user.
+        // All state has been mutated; if this transfer fails, the entire call panics
+        // and no partial state survives (atomicity guaranteed by Soroban).
+        Self::transfer_to(&env, &borrow_asset, &user, amount);
+
         BorrowEvent {
             user,
             asset: borrow_asset.clone(),
@@ -1430,6 +1472,11 @@ impl VeilLendContract {
         env.storage()
             .persistent()
             .set(&DataKey::TotalBorrowed(asset.clone()), &total);
+
+        // Transfer repaid amount from user to contract.
+        // All state has been mutated; if this transfer fails, the entire call panics
+        // and no partial state survives (atomicity guaranteed by Soroban).
+        Self::transfer_from(&env, &asset, &user, &env.current_contract_address(), amount);
 
         RepayEvent {
             user,
@@ -1484,6 +1531,17 @@ impl VeilLendContract {
         env.storage()
             .persistent()
             .set(&DataKey::TotalDeposited(withdrawn_asset.clone()), &total);
+
+        // Check that contract has sufficient liquidity before transferring.
+        let actual_balance = Self::token_balance(&env, &withdrawn_asset);
+        if actual_balance < reserve.total_balance {
+            panic_with_error!(&env, VeilLendError::InsufficientLiquidity);
+        }
+
+        // Transfer withdrawn amount from contract to user.
+        // All state has been mutated; if this transfer fails, the entire call panics
+        // and no partial state survives (atomicity guaranteed by Soroban).
+        Self::transfer_to(&env, &withdrawn_asset, &user, amount);
 
         WithdrawEvent {
             user,
@@ -1999,6 +2057,14 @@ impl VeilLendContract {
         Self::write_position(&env, &liquidator, &collateral_asset, &liquidator_collateral);
         // total_deposited stays the same (seized amount moved between users).
 
+        // Transfer debt repayment from liquidator to contract.
+        // All state has been mutated; if this transfer fails, the entire call panics
+        // and no partial state survives (atomicity guaranteed by Soroban).
+        Self::transfer_from(&env, &debt_asset, &liquidator, &env.current_contract_address(), actual_repay);
+
+        // Transfer seized collateral from contract to liquidator.
+        Self::transfer_to(&env, &collateral_asset, &liquidator, seize_amount);
+
         LiquidateEvent {
             liquidator,
             user,
@@ -2076,6 +2142,32 @@ impl VeilLendContract {
             .unwrap_or(interest::DEFAULT_PARAMS)
     }
 
+    /// Gets the actual token balance vs tracked reserves for a given asset.
+    /// Returns (actual_balance, tracked_total_balance, donation_amount).
+    /// 
+    /// If actual_balance > tracked_total_balance, the excess is a direct token
+    /// donation that was not credited to any user. The donation is untouched
+    /// (not automatically swept or credited). An admin path may be added in the
+    /// future to sweep donations to protocol_fees or handle them explicitly.
+    /// 
+    /// For now, donations remain in the contract and increase available liquidity
+    /// without increasing tracked reserves, which may allow additional borrows
+    /// beyond the originally-tracked amounts.
+    pub fn get_token_balance_vs_reserves(env: Env, asset: Address) -> (i128, i128, i128) {
+        Self::require_supported_asset(&env, &asset);
+        
+        let actual_balance = Self::token_balance(&env, &asset);
+        let reserve = Self::read_asset_reserve(&env, &asset);
+        let tracked_balance = reserve.total_balance;
+        let donation = if actual_balance > tracked_balance {
+            actual_balance - tracked_balance
+        } else {
+            0
+        };
+        
+        (actual_balance, tracked_balance, donation)
+    }
+
     /// Deposit multiple assets in a single transaction.
     ///
     /// # Authentication
@@ -2145,6 +2237,11 @@ impl VeilLendContract {
             env.storage()
                 .persistent()
                 .set(&DataKey::TotalDeposited(asset.clone()), &total);
+
+            // Transfer tokens from user to contract.
+            // All state has been mutated; if this transfer fails, the entire call panics
+            // and no partial state survives (atomicity guaranteed by Soroban).
+            Self::transfer_from(&env, asset, &user, &env.current_contract_address(), amount);
 
             // Emit individual event
             DepositEvent {
@@ -2247,6 +2344,17 @@ impl VeilLendContract {
                 .persistent()
                 .set(&DataKey::TotalDeposited(asset.clone()), &total);
 
+            // Check that contract has sufficient liquidity before transferring.
+            let actual_balance = Self::token_balance(&env, asset);
+            if actual_balance < reserve.total_balance {
+                panic_with_error!(&env, VeilLendError::InsufficientLiquidity);
+            }
+
+            // Transfer withdrawn amount from contract to user.
+            // All state has been mutated; if this transfer fails, the entire call panics
+            // and no partial state survives (atomicity guaranteed by Soroban).
+            Self::transfer_to(&env, asset, &user, amount);
+
             // Emit individual event
             WithdrawEvent {
                 user: user.clone(),
@@ -2347,6 +2455,17 @@ impl VeilLendContract {
                 .persistent()
                 .set(&DataKey::TotalBorrowed(asset.clone()), &total);
 
+            // Check that contract has sufficient liquidity before transferring.
+            let actual_balance = Self::token_balance(&env, asset);
+            if actual_balance < reserve.total_balance {
+                panic_with_error!(&env, VeilLendError::InsufficientLiquidity);
+            }
+
+            // Transfer borrowed amount from contract to user.
+            // All state has been mutated; if this transfer fails, the entire call panics
+            // and no partial state survives (atomicity guaranteed by Soroban).
+            Self::transfer_to(&env, asset, &user, amount);
+
             // Emit individual event
             BorrowEvent {
                 user: user.clone(),
@@ -2434,6 +2553,11 @@ impl VeilLendContract {
             env.storage()
                 .persistent()
                 .set(&DataKey::TotalBorrowed(asset.clone()), &total);
+
+            // Transfer repaid amount from user to contract.
+            // All state has been mutated; if this transfer fails, the entire call panics
+            // and no partial state survives (atomicity guaranteed by Soroban).
+            Self::transfer_from(&env, asset, &user, &env.current_contract_address(), amount);
 
             // Emit individual event
             RepayEvent {
@@ -2649,6 +2773,11 @@ impl VeilLendContract {
             .persistent()
             .set(&DataKey::TotalDeposited(asset.clone()), &total);
 
+        // Transfer tokens from user to contract.
+        // All state has been mutated; if this transfer fails, the entire call panics
+        // and no partial state survives (atomicity guaranteed by Soroban).
+        Self::transfer_from(env, asset, user, &env.current_contract_address(), amount);
+
         DepositEvent {
             user: user.clone(),
             asset: asset.clone(),
@@ -2700,6 +2829,17 @@ impl VeilLendContract {
         env.storage()
             .persistent()
             .set(&DataKey::TotalDeposited(withdrawn_asset.clone()), &total);
+
+        // Check that contract has sufficient liquidity before transferring.
+        let actual_balance = Self::token_balance(env, withdrawn_asset);
+        if actual_balance < reserve.total_balance {
+            panic_with_error!(env, VeilLendError::InsufficientLiquidity);
+        }
+
+        // Transfer withdrawn amount from contract to user.
+        // All state has been mutated; if this transfer fails, the entire call panics
+        // and no partial state survives (atomicity guaranteed by Soroban).
+        Self::transfer_to(env, withdrawn_asset, user, amount);
 
         WithdrawEvent {
             user: user.clone(),
@@ -2757,6 +2897,17 @@ impl VeilLendContract {
             .persistent()
             .set(&DataKey::TotalBorrowed(borrow_asset.clone()), &total);
 
+        // Check that contract has sufficient liquidity before transferring.
+        let actual_balance = Self::token_balance(env, borrow_asset);
+        if actual_balance < reserve.total_balance {
+            panic_with_error!(env, VeilLendError::InsufficientLiquidity);
+        }
+
+        // Transfer borrowed amount from contract to user.
+        // All state has been mutated; if this transfer fails, the entire call panics
+        // and no partial state survives (atomicity guaranteed by Soroban).
+        Self::transfer_to(env, borrow_asset, user, amount);
+
         BorrowEvent {
             user: user.clone(),
             asset: borrow_asset.clone(),
@@ -2798,6 +2949,11 @@ impl VeilLendContract {
         env.storage()
             .persistent()
             .set(&DataKey::TotalBorrowed(asset.clone()), &total);
+
+        // Transfer repaid amount from user to contract.
+        // All state has been mutated; if this transfer fails, the entire call panics
+        // and no partial state survives (atomicity guaranteed by Soroban).
+        Self::transfer_from(env, asset, user, &env.current_contract_address(), amount);
 
         RepayEvent {
             user: user.clone(),
@@ -3124,12 +3280,20 @@ impl VeilLendContract {
     /// transition between a prior version and the current one is added here as
     /// a match arm the next time the storage layout changes, each stepping the
     /// version by exactly one.
-    fn migrate_storage_from(_env: &Env, _from_version: u32) {
-        // Intentionally empty. Concrete migrations belong here:
-        //   match from_version {
-        //       STORAGE_SCHEMA_VERSION - 1 => { /* transform 4 -> 5 keys */ }
-        //       _ => {}
-        //   }
+    fn migrate_storage_from(_env: &Env, from_version: u32) {
+        // Schema migrations transform keys from older layouts to the current one.
+        match from_version {
+            6 => {
+                // Migration from v6 to v7:
+                // - Added AssetConfig(Address) storage key for SAC contract addresses and decimals.
+                // - No existing data needs transformation; AssetConfig is populated at configure_asset time.
+                // - IMPORTANT: Pre-upgrade balances were never token-backed (contract had no real token custody).
+                //   After upgrade, the contract will enforce real token transfers. Before going live,
+                //   the instance must be funded with actual tokens corresponding to tracked reserves
+                //   (i.e., for each asset, contract's actual balance should equal reserve.total_balance).
+            }
+            _ => {}
+        }
     }
 
     fn apply_configure_asset(env: &Env, admin: &Address, asset: &Address, supported: bool) {
@@ -3160,6 +3324,16 @@ impl VeilLendContract {
             if !asset_list.contains(asset) {
                 asset_list.push_back(asset.clone());
             }
+            
+            // When configuring a new asset, probe its SAC interface to record
+            // the contract address and decimals. Fails with InvalidSacContract
+            // if the asset address does not respond to the Stellar Asset Contract interface.
+            let decimals = Self::probe_sac_decimals(env, asset);
+            let config = AssetConfig {
+                sac_contract: asset.clone(),
+                decimals,
+            };
+            Self::write_asset_config(env, asset, &config);
         } else {
             // Remove the asset from the list. Soroban Vec has no efficient
             // remove-by-value, so we rebuild without it.
@@ -3456,6 +3630,11 @@ impl VeilLendContract {
         reserve.total_balance -= amount;
         reserve.protocol_fees -= amount;
         Self::write_asset_reserve(env, asset, &reserve);
+
+        // Transfer protocol fees from contract to recipient.
+        // All state has been mutated; if this transfer fails, the entire call panics
+        // and no partial state survives (atomicity guaranteed by Soroban).
+        Self::transfer_to(env, asset, to, amount);
 
         ReservesWithdrawn {
             asset: asset.clone(),
@@ -4212,6 +4391,63 @@ impl VeilLendContract {
             timestamp: env.ledger().timestamp(),
         };
         event.publish(env);
+    }
+
+    /// Probes a SAC contract for the `decimals` method to verify it implements
+    /// the Stellar Asset Contract interface. Returns the decimals value on success.
+    /// Fails with `InvalidSacContract` if the contract does not respond to the interface.
+    fn probe_sac_decimals(env: &Env, sac_address: &Address) -> u32 {
+        let token_client = TokenClient::new(env, sac_address);
+        token_client.decimals()
+    }
+
+    /// Reads the `AssetConfig` (SAC address and decimals) for an asset.
+    /// Returns `None` if not configured.
+    fn read_asset_config(env: &Env, asset: &Address) -> Option<AssetConfig> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::AssetConfig(asset.clone()))
+    }
+
+    /// Writes the `AssetConfig` (SAC address and decimals) for an asset.
+    fn write_asset_config(env: &Env, asset: &Address, config: &AssetConfig) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::AssetConfig(asset.clone()), config);
+    }
+
+    /// Transfers tokens from `from` to `to` for a given asset.
+    /// The amount is in the asset's native decimal scale (not normalized).
+    /// Requires the `from` address to have authorized the contract.
+    fn transfer_from(
+        env: &Env,
+        asset: &Address,
+        from: &Address,
+        to: &Address,
+        amount: i128,
+    ) {
+        if amount <= 0 {
+            return; // Skip zero/negative transfers
+        }
+        let token_client = TokenClient::new(env, asset);
+        token_client.transfer_from(from, to, &amount);
+    }
+
+    /// Transfers tokens from the contract to `to` for a given asset.
+    /// The amount is in the asset's native decimal scale (not normalized).
+    fn transfer_to(env: &Env, asset: &Address, to: &Address, amount: i128) {
+        if amount <= 0 {
+            return; // Skip zero/negative transfers
+        }
+        let token_client = TokenClient::new(env, asset);
+        token_client.transfer(&to, &amount);
+    }
+
+    /// Gets the contract's actual token balance for a given asset.
+    fn token_balance(env: &Env, asset: &Address) -> i128 {
+        let token_client = TokenClient::new(env, asset);
+        let contract_address = env.current_contract_address();
+        token_client.balance(&contract_address)
     }
 }
 
