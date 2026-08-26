@@ -1,0 +1,6 @@
+- Each feature is implemented as a NestJS `@Module` containing a controller, service, optional DTOs, and a dedicated `.module.ts` file, imported centrally from `app.module.ts`.
+- Configuration is exposed as typed classes under `src/config/*.config.ts` decorated with `class-validator` validators and consumed via `ConfigService` or `ConfigModule.forFeature`.
+- Request/response payloads are modeled as DTO classes under each feature's `dto/` directory and validated globally by a `ValidationPipe` configured in `main.ts`.
+- Cross-cutting behavior (logging, correlation IDs, response transformation, global exceptions) is applied via NestJS `APP_INTERCEPTOR`, `APP_FILTER`, and `APP_GUARD` providers registered in `app.module.ts`.
+- Prisma models define explicit indexes and unique constraints, and relationships are expressed with `@relation` fields plus cascade delete semantics.
+- Tests follow the `*.spec.ts` naming convention colocated with source files, with e2e specs isolated under `test/` and driven by a dedicated Jest configuration.

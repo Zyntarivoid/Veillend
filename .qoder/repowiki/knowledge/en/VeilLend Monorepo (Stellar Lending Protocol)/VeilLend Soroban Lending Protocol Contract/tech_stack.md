@@ -1,0 +1,1 @@
+Stellar Soroban SDK v23.5.3 (`soroban-sdk`) compiled to WASM via `cdylib`; uses `#![no_std]`, `#[contracttype]` structs/enums for storage, `#[contractevent]` for on-chain events, and `testutils` feature for integration tests.

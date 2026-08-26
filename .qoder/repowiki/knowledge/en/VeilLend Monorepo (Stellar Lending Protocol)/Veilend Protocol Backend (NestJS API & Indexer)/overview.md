@@ -1,0 +1,1 @@
+NestJS backend exposing REST APIs for Veilend's Stellar-based lending protocol, including wallet auth, portfolio/asset/transaction queries, admin controls, and a Soroban event indexer with PostgreSQL persistence via Prisma.

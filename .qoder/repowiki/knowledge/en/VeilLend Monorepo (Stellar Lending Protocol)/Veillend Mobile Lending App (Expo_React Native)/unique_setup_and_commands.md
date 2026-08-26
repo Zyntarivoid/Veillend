@@ -1,0 +1,1 @@
+Environment variables are loaded from `.env` (see `.env.example`). Development runs via `npm start` (or `expo start`); platform-specific dev servers via `npm run android` / `npm run ios` / `npm run web`. End-to-end tests execute with `npm test` which invokes `tsx --test "src/**/*.test.ts"` against all `*.test.ts` files. EAS build configuration lives in `eas.json`.

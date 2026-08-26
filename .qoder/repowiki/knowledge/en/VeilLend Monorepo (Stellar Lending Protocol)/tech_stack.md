@@ -1,0 +1,1 @@
+Rust/Cargo workspace for Soroban contracts; Node.js/npm for backend (NestJS + Prisma), web (Next.js), and mobile (Expo/React Native); GitHub Actions for per-submodule CI; Vercel for web hosting.

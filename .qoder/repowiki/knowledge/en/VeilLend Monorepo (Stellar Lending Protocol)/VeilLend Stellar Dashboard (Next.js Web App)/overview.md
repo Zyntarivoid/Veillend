@@ -1,0 +1,1 @@
+Next.js client-side dashboard for VeilLend's privacy-first Stellar campaign, providing wallet connection via Freighter and a shielded-asset analytics UI.

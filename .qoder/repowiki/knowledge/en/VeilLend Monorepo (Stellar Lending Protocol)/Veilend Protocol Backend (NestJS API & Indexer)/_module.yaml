@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: backend
+title: Veilend Protocol Backend (NestJS API & Indexer)
+scope:
+    - veilend-backend/
+source_files: []
+depends_on: []
+related_to:
+    - path: mobile_app
+    - path: soroban_contracts
+    - path: web_app

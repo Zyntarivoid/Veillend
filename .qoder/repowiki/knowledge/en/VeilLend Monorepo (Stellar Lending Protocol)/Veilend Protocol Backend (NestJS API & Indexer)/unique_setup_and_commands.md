@@ -1,0 +1,1 @@
+Database schema and seed are managed via Prisma (`npx prisma migrate deploy`, `npm run seed`). E2E tests use a separate Jest config at `test/jest-e2e.json`. Contract spec validation runs via `npm run validate-contracts` using `scripts/validate-contract-spec.ts`. Dockerized builds use `Dockerfile` and `docker-compose.yml`; entrypoint is `docker-entrypoint.sh`.

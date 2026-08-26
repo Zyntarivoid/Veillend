@@ -1,0 +1,1 @@
+Expo ~54 with React Native 0.81 / React 19; navigation via `@react-navigation/native` + `native-stack` + `bottom-tabs`; styling via NativeWind (Tailwind v3) over StyleSheet; global state via Zustand 5; HTTP via Axios; secure persistence via `expo-secure-store` with a local shim fallback; Stellar SDK via `@stellar/stellar-base`; testing with `tsx --test` runner.

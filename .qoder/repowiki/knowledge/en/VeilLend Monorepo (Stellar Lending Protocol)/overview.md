@@ -1,0 +1,1 @@
+Monorepo uniting the VeilLend Soroban lending contract, NestJS backend indexer, Next.js web dashboard, and Expo mobile app under shared CI, Cargo workspace, and Vercel deployment configuration.

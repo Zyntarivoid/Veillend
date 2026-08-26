@@ -1,0 +1,6 @@
+- Every public entrypoint begins with validation guards (`require_not_paused`, `require_supported_asset`, `require_positive_amount`, user/admin `require_auth`) before touching storage or calling interest accrual.
+- Mutating entrypoints call `accrue_and_persist_interest` first so cap checks and balance mutations operate on up-to-date, time-aware totals and positions.
+- Per-asset aggregate state is accessed through private helpers (`read_asset_reserve`, `write_asset_reserve`, `read_position`, `write_position`, `read_interest_state`, `write_interest_state`) that apply sensible defaults when keys are missing.
+- All protocol state changes emit a typed `#[contractevent]` via `.publish(&env)` (e.g. `DepositEvent`, `BorrowEvent`, `CapsUpdated`, `CircuitBreakerEvent`, `AssetReserveUpdated`) rather than ad-hoc logging.
+- Error handling uses a single `#[contracterror]` enum `VeilLendError` with explicit `repr(u32)` codes, raised via `panic_with_error!` instead of returning `Result` types.
+- Storage schema versioning is tracked by bumping `CONTRACT_VERSION`, `STORAGE_SCHEMA_VERSION`, and the `STORAGE_SCHEMA_ID` symbol together, and exposing them through `contract_metadata`.

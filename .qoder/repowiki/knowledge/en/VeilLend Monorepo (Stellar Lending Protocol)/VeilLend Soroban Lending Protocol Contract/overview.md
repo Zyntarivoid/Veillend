@@ -1,0 +1,1 @@
+Soroban smart contract implementing a time-based, per-asset lending pool with interest accrual, oracle-backed collateral ratios, admin-managed caps, and circuit-breaker pause.

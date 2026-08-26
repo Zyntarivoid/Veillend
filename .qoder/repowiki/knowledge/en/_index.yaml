@@ -1,0 +1,69 @@
+# 知识卡导出索引文件
+schema_version: 1
+locale: en-US
+branch: fix/266-lending-validation-max-loading
+nodes_managed: true
+exported_at: "2026-08-17T23:05:00Z"
+modules:
+    "":
+        dir_name: VeilLend Monorepo (Stellar Lending Protocol)
+        title: VeilLend Monorepo (Stellar Lending Protocol)
+        scope:
+            - README.md
+            - .gitignore
+            - .vercelignore
+            - Cargo.toml
+            - Cargo.lock
+            - vercel.json
+            - .github/
+            - .vercel/
+        source_files: []
+        children:
+            - backend
+            - mobile_app
+            - soroban_contracts
+            - web_app
+        depends_on: []
+        related_to: []
+    backend:
+        dir_name: Veilend Protocol Backend (NestJS API & Indexer)
+        title: Veilend Protocol Backend (NestJS API & Indexer)
+        scope:
+            - veilend-backend/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: mobile_app
+            - path: soroban_contracts
+            - path: web_app
+    mobile_app:
+        dir_name: Veillend Mobile Lending App (Expo_React Native)
+        title: Veillend Mobile Lending App (Expo/React Native)
+        scope:
+            - veilend-mobile/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: backend
+    soroban_contracts:
+        dir_name: VeilLend Soroban Lending Protocol Contract
+        title: VeilLend Soroban Lending Protocol Contract
+        scope:
+            - veilend-soroban/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: backend
+    web_app:
+        dir_name: VeilLend Stellar Dashboard (Next.js Web App)
+        title: VeilLend Stellar Dashboard (Next.js Web App)
+        scope:
+            - veilend-web/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: backend

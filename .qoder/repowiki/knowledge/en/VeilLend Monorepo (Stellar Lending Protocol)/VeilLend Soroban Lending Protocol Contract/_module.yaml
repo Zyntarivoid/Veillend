@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: soroban_contracts
+title: VeilLend Soroban Lending Protocol Contract
+scope:
+    - veilend-soroban/
+source_files: []
+depends_on: []
+related_to:
+    - path: backend

@@ -1,0 +1,1 @@
+Each child has its own CI entrypoint under `.github/workflows/` triggered by path filters on its directory; the Soroban contract uses `cargo build --target wasm32-unknown-unknown` and `stellar contract build` within the `veilend-soroban` workspace, while the web/mobile backends are built via `npm ci` + `npm run build` in their respective directories.

@@ -1,0 +1,1 @@
+Expo-based React Native mobile app for Stellar lending, providing wallet authentication, deposit/borrow/repay screens, portfolio view, and settings with Zustand state management.

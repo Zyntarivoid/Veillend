@@ -1,0 +1,1 @@
+Run `pnpm dev` / `npm run dev` to start the Next.js dev server; `npm run build` triggers `validateConfig()` at startup which reads `.env.example` and fails fast if required variables are missing. Tests execute via `npm test` (Vitest).

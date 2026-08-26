@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: web_app
+title: VeilLend Stellar Dashboard (Next.js Web App)
+scope:
+    - veilend-web/
+source_files: []
+depends_on: []
+related_to:
+    - path: backend

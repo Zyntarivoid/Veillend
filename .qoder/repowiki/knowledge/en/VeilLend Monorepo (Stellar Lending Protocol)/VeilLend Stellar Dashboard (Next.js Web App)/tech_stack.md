@@ -1,0 +1,1 @@
+Next.js 16 App Router with React 19 client components; Tailwind CSS v4 + shadcn/ui (Radix UI primitives) for the design system; `@stellar/freighter-api` and `@stellar/stellar-sdk` for Stellar/Freighter wallet integration; Vitest for testing; ESLint + Prettier for linting/formatting.

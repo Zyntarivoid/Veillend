@@ -1,0 +1,3 @@
+- Each child module is isolated in its own top-level directory with dedicated CI workflows that set `working-directory` to that subfolder.
+- Node-based children pin their Node version in CI (backend uses 20.x, web/mobile use 22) and cache `package-lock.json` via `setup-node`.
+- Soroban contracts enforce strict Rust hygiene via workspace-level release profile settings (LTO, strip symbols, panic=abort, overflow checks).

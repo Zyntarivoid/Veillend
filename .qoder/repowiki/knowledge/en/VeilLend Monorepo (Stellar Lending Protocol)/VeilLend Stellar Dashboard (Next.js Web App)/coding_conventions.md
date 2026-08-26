@@ -1,0 +1,6 @@
+- Client-only pages and components opt into interactivity with the `'use client'` directive at the top of the file.
+- Wallet state is never managed locally in pages; consumers call `useWallet()` from `@/context/WalletContext` and gate UI on `isConnected`/`isAuthenticated`.
+- UI is assembled from shadcn/ui primitives (`@/components/ui/*`) combined with Tailwind utility classes rather than custom CSS modules.
+- Route groups are used to isolate layout-scoped routes, e.g., `(dashboard)/page.tsx` shares a common shell separate from the root `/` page.
+- Environment variables are validated once at process start via `validateConfig()` imported from `src/lib/config-validation.ts`, invoked in `next.config.ts` before any app code runs.
+- Async side effects around wallet operations wrap try/catch blocks and surface errors through the context's `error` field, which components render via `Alert`/`Badge` UI.

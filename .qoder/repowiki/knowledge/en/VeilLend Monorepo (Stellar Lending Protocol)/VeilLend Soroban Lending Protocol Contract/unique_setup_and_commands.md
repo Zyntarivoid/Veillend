@@ -1,0 +1,1 @@
+Build with standard Cargo; run unit tests with `cargo test` and integration tests with `cargo test --test integration`. The `.cargo/config.toml` and `rust-toolchain.toml` pin the toolchain expected by the Soroban SDK.

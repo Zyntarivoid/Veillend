@@ -1,0 +1,1 @@
+NestJS 11 with Passport/JWT for authentication, Prisma Client against PostgreSQL, `@stellar/stellar-sdk` and Horizon/Soroban RPC clients for on-chain data, `nestjs-cls` for request-scoped correlation IDs, `@nestjs/throttler` for rate limiting, and Jest + Supertest for unit/e2e tests.

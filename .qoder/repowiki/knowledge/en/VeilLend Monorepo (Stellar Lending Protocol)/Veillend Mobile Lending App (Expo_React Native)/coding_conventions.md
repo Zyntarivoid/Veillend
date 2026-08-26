@@ -1,0 +1,5 @@
+- Zustand store actions persist mutable fields to SecureStore immediately after `set()`, wrapping each `setItemAsync`/`deleteItemAsync` in try/catch that silently ignores errors.
+- Async operations follow a set-loading → try → set-success/failure pattern, using dedicated loading flags per slice (`authLoading`, `lendingLoading`, `portfolioLoading`, `transactionsLoading`, `protocolStatusLoading`).
+- Navigation routes are declared as string literals in the tab/stack definitions and referenced consistently by name across screen components and icon mappings.
+- UI state mutations use thin setter functions (e.g. `setProfileName`, `setCurrency`, `setNotificationsEnabled`) rather than direct state writes from screens.
+- External dependencies are wrapped behind shims or runtime guards (e.g. `require('expo-secure-store')` inside try/catch falling back to `secureStoreShim`) to keep the codebase runnable without native modules during development.

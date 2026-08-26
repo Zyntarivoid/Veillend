@@ -1,0 +1,15 @@
+schema_version: 1
+module_path: ""
+title: VeilLend Monorepo (Stellar Lending Protocol)
+scope:
+    - README.md
+    - .gitignore
+    - .vercelignore
+    - Cargo.toml
+    - Cargo.lock
+    - vercel.json
+    - .github/
+    - .vercel/
+source_files: []
+depends_on: []
+related_to: []
