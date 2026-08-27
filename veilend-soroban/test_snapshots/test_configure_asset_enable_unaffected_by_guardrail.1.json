@@ -244,7 +244,7 @@
             },
             "ext": "v0"
           },
-          4145
+          518450
         ]
       ],
       [
@@ -289,7 +289,7 @@
             },
             "ext": "v0"
           },
-          4145
+          518450
         ]
       ],
       [
@@ -334,7 +334,77 @@
             },
             "ext": "v0"
           },
-          4145
+          518450
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "InterestState"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "InterestState"
+                    },
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "borrow_index"
+                      },
+                      "val": {
+                        "i128": "1000000000"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "last_accrual_timestamp"
+                      },
+                      "val": {
+                        "u64": "0"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "supply_index"
+                      },
+                      "val": {
+                        "i128": "1000000000"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          518450
         ]
       ],
       [
@@ -373,7 +443,7 @@
             },
             "ext": "v0"
           },
-          4095
+          518450
         ]
       ],
       [
@@ -418,7 +488,7 @@
             },
             "ext": "v0"
           },
-          4145
+          518450
         ]
       ],
       [
@@ -461,7 +531,7 @@
             },
             "ext": "v0"
           },
-          4145
+          518450
         ]
       ],
       [
@@ -506,7 +576,7 @@
             },
             "ext": "v0"
           },
-          4145
+          518450
         ]
       ],
       [
@@ -551,7 +621,7 @@
             },
             "ext": "v0"
           },
-          4145
+          518450
         ]
       ],
       [
@@ -626,7 +696,7 @@
                           ]
                         },
                         "val": {
-                          "u32": 6
+                          "u32": 7
                         }
                       },
                       {

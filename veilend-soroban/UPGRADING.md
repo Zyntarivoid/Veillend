@@ -111,7 +111,7 @@ indexer is still consuming events (it should also observe the new
 The upgrade integration tests (`tests/integration.rs`) upgrade to two small
 purpose-built fixture wasms committed under `tests/fixtures/`:
 
-- `veillend_v2.wasm` — "v2": `contract_version = 9`, storage schema 6, plus an
+- `veillend_v2.wasm` — "v2": `contract_version = 11`, storage schema 7, plus an
   `upgraded_marker()` function that v1 does not have (proves the swap). Its
   version always exceeds the contract's current `CONTRACT_VERSION` so the
   upgrade version guard accepts it.

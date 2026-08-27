@@ -17,7 +17,7 @@ mod flash_loan_receiver_example;
 mod permit;
 mod permit_helpers;
 
-pub use permit::{DomainSeparator, Permit, PermitWithExtra};
+pub use permit::{compute_permit_digest, signer_address, DomainSeparator, Permit, PermitWithExtra};
 pub use permit_helpers::{verify_and_consume_permit, VerifiedPermit};
 
 #[cfg(test)]
@@ -29,16 +29,53 @@ pub use flash_loan::{
 };
 
 /// Increment this only when a contract interface change requires consumers to adapt.
-pub const CONTRACT_VERSION: u32 = 9;
+pub const CONTRACT_VERSION: u32 = 10;
 
 /// Increment this only when the serialized `DataKey` or stored value layout changes.
-pub const STORAGE_SCHEMA_VERSION: u32 = 6;
+pub const STORAGE_SCHEMA_VERSION: u32 = 7;
 
 /// Values <= this amount after repay/withdraw are rounded to zero.
 pub const DUST_THRESHOLD: i128 = 100;
 
 /// A compact, stable identifier for the current `DataKey` storage layout.
-const STORAGE_SCHEMA_ID: Symbol = symbol_short!("VLENDV6");
+const STORAGE_SCHEMA_ID: Symbol = symbol_short!("VLENDV7");
+
+// ─── Storage TTL policy ───────────────────────────────────────────────────────
+//
+// See README.md ("Storage lifetime & TTL policy") for the operator-facing
+// summary of which keys live where and what to do if something archives
+// anyway. Every constant below is chosen with headroom under Soroban's
+// protocol-wide `max_entry_ttl` network setting (on Mainnet, ~3,110,400
+// ledgers at a ~5s ledger close time, i.e. roughly 6 months) so a call to
+// `extend_ttl` can never panic with `ExceededLimit`.
+
+/// Ledgers of remaining TTL at or below which a persistent entry is renewed
+/// on next touch. ~7 days at 5s/ledger — comfortably wider than any expected
+/// gap between a keeper/user touching an active asset, while still catching
+/// a stalled indexer well before an entry gets anywhere near archival.
+pub const PERSISTENT_TTL_THRESHOLD: u32 = 120_960;
+
+/// Ledgers a renewed persistent entry's TTL is extended to. ~30 days at
+/// 5s/ledger.
+pub const PERSISTENT_TTL_EXTEND_TO: u32 = 518_400;
+
+/// Ledgers of remaining TTL at or below which instance storage is renewed.
+/// ~30 days. Instance storage backs contract-wide config (admin set,
+/// timelock, `SupportedAsset`, etc.) that's touched by nearly every
+/// invocation, so it can safely run on a longer cycle than a single
+/// persistent entry.
+pub const INSTANCE_TTL_THRESHOLD: u32 = 518_400;
+
+/// Ledgers a renewed instance TTL is extended to. ~180 days — near the
+/// practical ceiling, since instance liveness gates the whole contract.
+pub const INSTANCE_TTL_EXTEND_TO: u32 = 3_110_400;
+
+/// Ledgers a permit nonce/epoch entry is extended to on every consumption.
+/// An archived permit-nonce entry is the single highest-severity outcome in
+/// this contract's storage surface (see `PermitNonce` below), so it is armed
+/// to the longest TTL Soroban allows rather than the standard
+/// `PERSISTENT_TTL_EXTEND_TO` window.
+pub const PERMIT_TTL_EXTEND_TO: u32 = 3_110_400;
 
 /// Default delay (in ledgers) before a proposed privileged action becomes
 /// executable. ~5 minutes on Futurenet.
@@ -67,7 +104,7 @@ pub struct ContractMetadata {
     pub storage_schema_id: Symbol,
 }
 
-/// Keys and value shapes that make up storage schema `VLENDV6`.
+/// Keys and value shapes that make up storage schema `VLENDV7`.
 ///
 /// Instance storage: `AdminSet: Vec<Address>`, `MinCollateralRatioBps: u32`,
 /// `TimelockLedgers: u32`, `NextActionId: u64`,
@@ -83,6 +120,25 @@ pub struct ContractMetadata {
 /// `AssetRiskParams(Address): AssetRiskParams` (per-asset collateral factor,
 /// liquidation threshold, and liquidation bonus; absent assets fall back to
 /// the global `MinCollateralRatioBps`).
+///
+/// # Storage lifetime (TTL) policy
+///
+/// Every persistent key above (and `PermitNonce`/`PermitEpoch` below) is on a
+/// finite TTL clock and must be kept alive by `bump_persistent`/
+/// `bump_instance` (see the constants and helpers just above `DataKey`) or it
+/// archives and further access fails until restored. See README.md's
+/// "Storage lifetime & TTL policy" section for the full operator-facing
+/// picture; in short:
+/// - Every mutating entrypoint bumps the persistent entries it touches.
+/// - Read-only entrypoints (`get_position`, `get_interest_state`,
+///   `get_asset_reserve`, `is_asset_supported`, …) deliberately do *not*
+///   bump: doing so would let an unauthenticated caller keep arbitrary
+///   entries alive for free, and would make simulated (read-only) calls have
+///   an observable storage side effect.
+/// - `SupportedAsset` and `OraclePrice`/`OracleLastUpdated` are bumped from
+///   `require_supported_asset`/`read_oracle_price`, the chokepoints every
+///   mutating entrypoint already routes through, so no per-entrypoint
+///   bump call was needed at each of their ~30 call sites.
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
@@ -163,8 +219,17 @@ pub enum DataKey {
     /// for indexers, distinct from the current withdrawable balance
     /// (`AssetReserve.protocol_fees`).
     LifetimeReserveEarned(Address),
-    /// Monotonically increasing permit nonce per user (persistent storage)
+    /// Monotonically increasing permit nonce per user (persistent storage).
+    /// Bumped to `PERMIT_TTL_EXTEND_TO` on every consumption. Paired with
+    /// `PermitEpoch` — see that key's doc comment for the replay-safety
+    /// rationale.
     PermitNonce(Address),
+    /// Per-user permit epoch (persistent storage). Included in every
+    /// `Permit`'s signed digest; `revoke_permits` increments it to
+    /// invalidate every permit signed under a prior epoch in one call,
+    /// regardless of nonce. Always read/written/bumped alongside
+    /// `PermitNonce` for the same user so the two can never drift apart.
+    PermitEpoch(Address),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -440,7 +505,11 @@ pub enum VeilLendError {
     InvalidSignature = 41,
     /// Permit has expired (deadline passed)
     PermitExpired = 42,
-    /// Permit nonce does not match the expected value
+    /// Permit nonce does not match the expected value. Also returned when
+    /// the permit's `epoch` doesn't match the signer's current
+    /// `PermitEpoch` (see `revoke_permits`) — both share this code because
+    /// `VeilLendError` is at `#[contracterror]`'s 50-case XDR limit (see
+    /// `InterestStateMissing`), and both call for the same client response.
     PermitNonceMismatch = 43,
     /// Permit chain ID does not match the contract's chain ID
     PermitChainMismatch = 44,
@@ -466,6 +535,18 @@ pub enum VeilLendError {
     /// the proposed `AssetRiskParams`. A liquidation can never seize more
     /// value than the position holds.
     LiquidationThresholdPlusBonusExceedsMax = 50,
+    /// An asset is marked supported but has no `InterestState`. Every
+    /// supported asset gets one seeded at `apply_configure_asset` time (and
+    /// backfilled by `migrate` for pre-existing assets), so a missing entry
+    /// here means TTL archival wiped it — silently re-defaulting to a fresh
+    /// 1.0x index would zero out real accrued interest, so this fails loudly
+    /// instead. See the "Storage lifetime & TTL policy" section of README.md.
+    ///
+    /// This is the 50th and last error code `#[contracterror]` allows
+    /// (`ScSpecUdtErrorEnumV0.cases` is XDR-bounded to 50 entries) — there is
+    /// no room to add another without retiring one first, the same way `16`
+    /// was retired below rather than reused.
+    InterestStateMissing = 51,
 }
 
 #[contractevent(topics = ["veillend", "asset_configured"])]
@@ -516,6 +597,15 @@ pub struct WithdrawEvent {
     #[topic]
     pub asset: Address,
     pub amount: i128,
+}
+
+#[contractevent(topics = ["veillend", "permits_revoked"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PermitsRevoked {
+    #[topic]
+    pub user: Address,
+    pub new_epoch: u64,
+    pub timestamp: u64,
 }
 
 #[contractevent(topics = ["veillend", "caps_updated"])]
@@ -1322,9 +1412,7 @@ impl VeilLendContract {
 
         // Update total deposits
         let total = Self::get_total_deposited(env.clone(), asset.clone()) + amount;
-        env.storage()
-            .persistent()
-            .set(&DataKey::TotalDeposited(asset.clone()), &total);
+        Self::write_total_deposited(&env, &asset, total);
 
         DepositEvent {
             user,
@@ -1378,9 +1466,7 @@ impl VeilLendContract {
 
         // Update total borrows
         let total = Self::get_total_borrowed(env.clone(), borrow_asset.clone()) + amount;
-        env.storage()
-            .persistent()
-            .set(&DataKey::TotalBorrowed(borrow_asset.clone()), &total);
+        Self::write_total_borrowed(&env, &borrow_asset, total);
 
         BorrowEvent {
             user,
@@ -1427,9 +1513,7 @@ impl VeilLendContract {
 
         // Update total borrows
         let total = Self::get_total_borrowed(env.clone(), asset.clone()) - amount - dust_delta;
-        env.storage()
-            .persistent()
-            .set(&DataKey::TotalBorrowed(asset.clone()), &total);
+        Self::write_total_borrowed(&env, &asset, total);
 
         RepayEvent {
             user,
@@ -1481,9 +1565,7 @@ impl VeilLendContract {
 
         // Update total deposits
         let total = Self::get_total_deposited(env.clone(), withdrawn_asset.clone()) - amount;
-        env.storage()
-            .persistent()
-            .set(&DataKey::TotalDeposited(withdrawn_asset.clone()), &total);
+        Self::write_total_deposited(&env, &withdrawn_asset, total);
 
         WithdrawEvent {
             user,
@@ -1509,7 +1591,11 @@ impl VeilLendContract {
     }
 
     pub fn get_asset_reserve(env: Env, asset: Address) -> AssetReserve {
-        Self::require_supported_asset(&env, &asset);
+        // Read-only: checks support without the `require_supported_asset`
+        // bump side effect (see that function's doc comment).
+        if !Self::peek_supported_asset(&env, &asset) {
+            panic_with_error!(&env, VeilLendError::UnsupportedAsset);
+        }
         Self::read_asset_reserve(&env, &asset)
     }
 
@@ -1544,10 +1630,7 @@ impl VeilLendContract {
     }
 
     pub fn is_asset_supported(env: Env, asset: Address) -> bool {
-        env.storage()
-            .persistent()
-            .get(&DataKey::SupportedAsset(asset))
-            .unwrap_or(false)
+        Self::peek_supported_asset(&env, &asset)
     }
 
     /// Proposes recording a protocol fee for an asset (timelocked). Returns
@@ -1881,6 +1964,9 @@ impl VeilLendContract {
 
         // Compute weighted collateral value across ALL supported assets,
         // using per-asset liquidation_threshold_bps (not collateral_factor).
+        if env.storage().persistent().has(&DataKey::SupportedAssetList) {
+            Self::bump_persistent(&env, &DataKey::SupportedAssetList);
+        }
         let asset_list: Vec<Address> = env
             .storage()
             .persistent()
@@ -1982,9 +2068,7 @@ impl VeilLendContract {
         Self::write_asset_reserve(&env, &debt_asset, &debt_reserve);
         let total_borrowed =
             Self::get_total_borrowed(env.clone(), debt_asset.clone()) - actual_repay;
-        env.storage()
-            .persistent()
-            .set(&DataKey::TotalBorrowed(debt_asset.clone()), &total_borrowed);
+        Self::write_total_borrowed(&env, &debt_asset, total_borrowed);
 
         let mut new_collateral_position = collateral_position;
         new_collateral_position.deposited -= seize_amount;
@@ -2051,9 +2135,11 @@ impl VeilLendContract {
         // Accrue with the old params first so interest up to now is settled.
         Self::accrue_and_persist_interest(&env, &asset);
 
+        let interest_params_key = DataKey::InterestParams(asset.clone());
         env.storage()
             .persistent()
-            .set(&DataKey::InterestParams(asset.clone()), &params);
+            .set(&interest_params_key, &params);
+        Self::bump_persistent(&env, &interest_params_key);
 
         InterestParamsUpdated {
             admin,
@@ -2142,9 +2228,7 @@ impl VeilLendContract {
 
             // Update total deposits
             let total = Self::get_total_deposited(env.clone(), asset.clone()) + amount;
-            env.storage()
-                .persistent()
-                .set(&DataKey::TotalDeposited(asset.clone()), &total);
+            Self::write_total_deposited(&env, asset, total);
 
             // Emit individual event
             DepositEvent {
@@ -2243,9 +2327,7 @@ impl VeilLendContract {
 
             // Update total deposits
             let total = Self::get_total_deposited(env.clone(), asset.clone()) - amount;
-            env.storage()
-                .persistent()
-                .set(&DataKey::TotalDeposited(asset.clone()), &total);
+            Self::write_total_deposited(&env, asset, total);
 
             // Emit individual event
             WithdrawEvent {
@@ -2343,9 +2425,7 @@ impl VeilLendContract {
 
             // Update total borrows
             let total = Self::get_total_borrowed(env.clone(), asset.clone()) + amount;
-            env.storage()
-                .persistent()
-                .set(&DataKey::TotalBorrowed(asset.clone()), &total);
+            Self::write_total_borrowed(&env, asset, total);
 
             // Emit individual event
             BorrowEvent {
@@ -2431,9 +2511,7 @@ impl VeilLendContract {
 
             // Update total borrows
             let total = Self::get_total_borrowed(env.clone(), asset.clone()) - amount - dust_delta;
-            env.storage()
-                .persistent()
-                .set(&DataKey::TotalBorrowed(asset.clone()), &total);
+            Self::write_total_borrowed(&env, asset, total);
 
             // Emit individual event
             RepayEvent {
@@ -2478,6 +2556,33 @@ impl VeilLendContract {
     /// Gets the current permit nonce for a user.
     pub fn get_permit_nonce(env: Env, user: Address) -> u64 {
         permit::get_current_nonce(&env, &user)
+    }
+
+    /// Gets a user's current permit epoch (see `revoke_permits`).
+    pub fn get_permit_epoch(env: Env, user: Address) -> u64 {
+        permit::get_current_epoch(&env, &user)
+    }
+
+    /// Invalidates every permit `user` has ever signed, regardless of its
+    /// nonce, by incrementing their `PermitEpoch`. Returns the new epoch.
+    ///
+    /// A user-facing kill switch: if a signed permit is suspected leaked (or
+    /// simply as routine hygiene after using an untrusted relayer), calling
+    /// this makes every previously-signed permit for this user rejected with
+    /// `PermitNonceMismatch` on its next use, without needing to know which
+    /// nonce it was signed against.
+    pub fn revoke_permits(env: Env, user: Address) -> u64 {
+        user.require_auth();
+        let new_epoch = permit::revoke_permits(&env, &user);
+
+        PermitsRevoked {
+            user,
+            new_epoch,
+            timestamp: env.ledger().timestamp(),
+        }
+        .publish(&env);
+
+        new_epoch
     }
 
     /// Deposit on behalf of a user using a signed permit.
@@ -2645,9 +2750,7 @@ impl VeilLendContract {
         Self::write_asset_reserve(env, asset, &reserve);
 
         let total = Self::get_total_deposited(env.clone(), asset.clone()) + amount;
-        env.storage()
-            .persistent()
-            .set(&DataKey::TotalDeposited(asset.clone()), &total);
+        Self::write_total_deposited(env, asset, total);
 
         DepositEvent {
             user: user.clone(),
@@ -2697,9 +2800,7 @@ impl VeilLendContract {
         Self::write_asset_reserve(env, withdrawn_asset, &reserve);
 
         let total = Self::get_total_deposited(env.clone(), withdrawn_asset.clone()) - amount;
-        env.storage()
-            .persistent()
-            .set(&DataKey::TotalDeposited(withdrawn_asset.clone()), &total);
+        Self::write_total_deposited(env, withdrawn_asset, total);
 
         WithdrawEvent {
             user: user.clone(),
@@ -2753,9 +2854,7 @@ impl VeilLendContract {
         Self::write_asset_reserve(env, borrow_asset, &reserve);
 
         let total = Self::get_total_borrowed(env.clone(), borrow_asset.clone()) + amount;
-        env.storage()
-            .persistent()
-            .set(&DataKey::TotalBorrowed(borrow_asset.clone()), &total);
+        Self::write_total_borrowed(env, borrow_asset, total);
 
         BorrowEvent {
             user: user.clone(),
@@ -2795,9 +2894,7 @@ impl VeilLendContract {
         Self::write_asset_reserve(env, asset, &reserve);
 
         let total = Self::get_total_borrowed(env.clone(), asset.clone()) - amount - dust_delta;
-        env.storage()
-            .persistent()
-            .set(&DataKey::TotalBorrowed(asset.clone()), &total);
+        Self::write_total_borrowed(env, asset, total);
 
         RepayEvent {
             user: user.clone(),
@@ -3124,12 +3221,50 @@ impl VeilLendContract {
     /// transition between a prior version and the current one is added here as
     /// a match arm the next time the storage layout changes, each stepping the
     /// version by exactly one.
-    fn migrate_storage_from(_env: &Env, _from_version: u32) {
-        // Intentionally empty. Concrete migrations belong here:
-        //   match from_version {
-        //       STORAGE_SCHEMA_VERSION - 1 => { /* transform 4 -> 5 keys */ }
-        //       _ => {}
-        //   }
+    fn migrate_storage_from(env: &Env, from_version: u32) {
+        // 6 -> 7: `read_interest_state` now treats a supported asset with no
+        // `InterestState` as archival (see `VeilLendError::InterestStateMissing`)
+        // rather than a legitimately fresh asset, because `apply_configure_asset`
+        // now always seeds one. Assets configured before that existed need a
+        // one-time backfill so they don't start hard-failing every accrual
+        // the moment this wasm goes live.
+        if from_version < 7 {
+            let asset_list: Vec<Address> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::SupportedAssetList)
+                .unwrap_or_else(|| Vec::new(env));
+            for asset in asset_list.iter() {
+                let key = DataKey::InterestState(asset.clone());
+                if !env.storage().persistent().has(&key) {
+                    Self::write_interest_state(
+                        env,
+                        &asset,
+                        &InterestState {
+                            supply_index: interest::RATE_SCALE,
+                            borrow_index: interest::RATE_SCALE,
+                            last_accrual_timestamp: env.ledger().timestamp(),
+                        },
+                    );
+                }
+
+                // `read_oracle_price` now fails closed (`OraclePriceStale`)
+                // when `OracleLastUpdated` is missing next to a live
+                // `OraclePrice`, instead of skipping the staleness check —
+                // see that function's doc comment. Backfill it (as "just
+                // updated") for any asset priced before this field existed,
+                // so migration doesn't itself make every read look stale.
+                let oracle_price_key = DataKey::OraclePrice(asset.clone());
+                let last_updated_key = DataKey::OracleLastUpdated(asset.clone());
+                if env.storage().persistent().has(&oracle_price_key)
+                    && !env.storage().persistent().has(&last_updated_key)
+                {
+                    let now = env.ledger().timestamp();
+                    env.storage().persistent().set(&last_updated_key, &now);
+                    Self::bump_oracle_keys(env, &asset);
+                }
+            }
+        }
     }
 
     fn apply_configure_asset(env: &Env, admin: &Address, asset: &Address, supported: bool) {
@@ -3145,9 +3280,9 @@ impl VeilLendContract {
             }
         }
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::SupportedAsset(asset.clone()), &supported);
+        let supported_key = DataKey::SupportedAsset(asset.clone());
+        env.storage().persistent().set(&supported_key, &supported);
+        Self::bump_persistent(env, &supported_key);
 
         // Maintain the ordered list of supported assets for per-asset
         // weighted collateral checks in assert_collateralized.
@@ -3174,27 +3309,21 @@ impl VeilLendContract {
         env.storage()
             .persistent()
             .set(&DataKey::SupportedAssetList, &asset_list);
+        Self::bump_persistent(env, &DataKey::SupportedAssetList);
 
         // Initialize caps to unlimited (-1) when adding new asset, preserving existing caps
         if supported {
-            if !env
-                .storage()
-                .persistent()
-                .has(&DataKey::DepositCap(asset.clone()))
-            {
-                env.storage()
-                    .persistent()
-                    .set(&DataKey::DepositCap(asset.clone()), &-1i128);
+            let deposit_cap_key = DataKey::DepositCap(asset.clone());
+            if !env.storage().persistent().has(&deposit_cap_key) {
+                env.storage().persistent().set(&deposit_cap_key, &-1i128);
             }
-            if !env
-                .storage()
-                .persistent()
-                .has(&DataKey::BorrowCap(asset.clone()))
-            {
-                env.storage()
-                    .persistent()
-                    .set(&DataKey::BorrowCap(asset.clone()), &-1i128);
+            Self::bump_persistent(env, &deposit_cap_key);
+
+            let borrow_cap_key = DataKey::BorrowCap(asset.clone());
+            if !env.storage().persistent().has(&borrow_cap_key) {
+                env.storage().persistent().set(&borrow_cap_key, &-1i128);
             }
+            Self::bump_persistent(env, &borrow_cap_key);
 
             // Initialize totals to 0, preserving existing totals
             if !env
@@ -3202,18 +3331,39 @@ impl VeilLendContract {
                 .persistent()
                 .has(&DataKey::TotalDeposited(asset.clone()))
             {
-                env.storage()
-                    .persistent()
-                    .set(&DataKey::TotalDeposited(asset.clone()), &0i128);
+                Self::write_total_deposited(env, asset, 0);
+            } else {
+                Self::bump_persistent(env, &DataKey::TotalDeposited(asset.clone()));
             }
             if !env
                 .storage()
                 .persistent()
                 .has(&DataKey::TotalBorrowed(asset.clone()))
             {
-                env.storage()
-                    .persistent()
-                    .set(&DataKey::TotalBorrowed(asset.clone()), &0i128);
+                Self::write_total_borrowed(env, asset, 0);
+            } else {
+                Self::bump_persistent(env, &DataKey::TotalBorrowed(asset.clone()));
+            }
+
+            // Seed InterestState for every newly-supported asset (and
+            // backfill it for one that was already supported before this
+            // existed — see `migrate_storage_from`). This is what lets
+            // `read_interest_state` treat "supported but no InterestState"
+            // as unambiguous evidence of TTL archival rather than a
+            // legitimately fresh asset. See `VeilLendError::InterestStateMissing`.
+            let interest_state_key = DataKey::InterestState(asset.clone());
+            if !env.storage().persistent().has(&interest_state_key) {
+                Self::write_interest_state(
+                    env,
+                    asset,
+                    &InterestState {
+                        supply_index: interest::RATE_SCALE,
+                        borrow_index: interest::RATE_SCALE,
+                        last_accrual_timestamp: env.ledger().timestamp(),
+                    },
+                );
+            } else {
+                Self::bump_persistent(env, &interest_state_key);
             }
         }
 
@@ -3308,6 +3458,11 @@ impl VeilLendContract {
         env.storage()
             .persistent()
             .set(&DataKey::OracleLastUpdated(asset.clone()), &now);
+
+        // Refresh the whole oracle key group together (see `bump_oracle_keys`)
+        // so an unwritten member (e.g. the bounds keys) never lags behind and
+        // archives independently of the ones just written.
+        Self::bump_oracle_keys(env, asset);
     }
 
     fn apply_update_asset_caps(
@@ -3371,9 +3526,9 @@ impl VeilLendContract {
             liquidation_threshold_bps,
             liquidation_bonus_bps,
         };
-        env.storage()
-            .persistent()
-            .set(&DataKey::AssetRiskParams(asset.clone()), &params);
+        let key = DataKey::AssetRiskParams(asset.clone());
+        env.storage().persistent().set(&key, &params);
+        Self::bump_persistent(env, &key);
 
         AssetRiskParamsUpdated {
             admin: admin.clone(),
@@ -3387,6 +3542,7 @@ impl VeilLendContract {
 
     fn apply_set_paused(env: &Env, admin: &Address, paused: bool) {
         env.storage().persistent().set(&DataKey::Paused, &paused);
+        Self::bump_persistent(env, &DataKey::Paused);
 
         CircuitBreakerEvent {
             admin: admin.clone(),
@@ -3472,6 +3628,42 @@ impl VeilLendContract {
         );
     }
 
+    /// Extends `key`'s persistent-storage TTL when it has dropped to or below
+    /// `PERSISTENT_TTL_THRESHOLD`, renewing it to `PERSISTENT_TTL_EXTEND_TO`.
+    /// Called from every write path (and the few read chokepoints —
+    /// `require_supported_asset`, `read_oracle_price` — that touch keys a
+    /// mutating entrypoint reads but never writes) so no persistent entry
+    /// this contract still uses can silently archive. Never called from a
+    /// read-only entrypoint: see the `DataKey` doc comment.
+    fn bump_persistent(env: &Env, key: &DataKey) {
+        env.storage().persistent().extend_ttl(
+            key,
+            PERSISTENT_TTL_THRESHOLD,
+            PERSISTENT_TTL_EXTEND_TO,
+        );
+    }
+
+    /// Like `bump_persistent`, but extends to an explicit ledger count
+    /// instead of `PERSISTENT_TTL_EXTEND_TO`. Used for `PermitNonce`/
+    /// `PermitEpoch`, which are armed to `PERMIT_TTL_EXTEND_TO`.
+    fn bump_persistent_to(env: &Env, key: &DataKey, extend_to: u32) {
+        env.storage()
+            .persistent()
+            .extend_ttl(key, PERSISTENT_TTL_THRESHOLD, extend_to);
+    }
+
+    /// Extends this contract instance's storage TTL when it has dropped to or
+    /// below `INSTANCE_TTL_THRESHOLD`, renewing it to `INSTANCE_TTL_EXTEND_TO`.
+    /// Called from `require_supported_asset`, which every mutating entrypoint
+    /// routes through, so instance storage (the admin set, timelock,
+    /// `SupportedAsset`'s neighbors, etc.) stays alive as long as the
+    /// contract sees any activity at all.
+    fn bump_instance(env: &Env) {
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
+    }
+
     fn read_asset_reserve(env: &Env, asset: &Address) -> AssetReserve {
         env.storage()
             .persistent()
@@ -3483,9 +3675,9 @@ impl VeilLendContract {
     }
 
     fn write_asset_reserve(env: &Env, asset: &Address, reserve: &AssetReserve) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::AssetReserve(asset.clone()), reserve);
+        let key = DataKey::AssetReserve(asset.clone());
+        env.storage().persistent().set(&key, reserve);
+        Self::bump_persistent(env, &key);
     }
 
     fn read_lifetime_reserve_earned(env: &Env, asset: &Address) -> i128 {
@@ -3493,6 +3685,12 @@ impl VeilLendContract {
             .persistent()
             .get(&DataKey::LifetimeReserveEarned(asset.clone()))
             .unwrap_or(0)
+    }
+
+    fn write_lifetime_reserve_earned(env: &Env, asset: &Address, value: i128) {
+        let key = DataKey::LifetimeReserveEarned(asset.clone());
+        env.storage().persistent().set(&key, &value);
+        Self::bump_persistent(env, &key);
     }
 
     fn publish_asset_reserve_updated(
@@ -3522,21 +3720,52 @@ impl VeilLendContract {
             })
     }
 
+    /// Reads `asset`'s `InterestState`.
+    ///
+    /// Every supported asset gets an `InterestState` seeded at
+    /// `apply_configure_asset` time (and backfilled by `migrate` for assets
+    /// configured before this existed), so a *supported* asset with no entry
+    /// here means TTL archival wiped it, not that it's legitimately fresh —
+    /// panics with `InterestStateMissing` rather than silently re-anchoring
+    /// at a fresh 1.0x index, which would zero out real accrued interest.
+    /// An *unsupported* (never configured) asset legitimately has no entry;
+    /// that path still returns a harmless fresh default so read-only callers
+    /// (e.g. `get_position` for an address that was never configured) don't
+    /// regress.
     fn read_interest_state(env: &Env, asset: &Address) -> InterestState {
-        env.storage()
+        if let Some(state) = env
+            .storage()
             .persistent()
             .get(&DataKey::InterestState(asset.clone()))
-            .unwrap_or(InterestState {
-                supply_index: interest::RATE_SCALE,
-                borrow_index: interest::RATE_SCALE,
-                last_accrual_timestamp: env.ledger().timestamp(),
-            })
+        {
+            return state;
+        }
+        if Self::peek_supported_asset(env, asset) {
+            panic_with_error!(env, VeilLendError::InterestStateMissing);
+        }
+        InterestState {
+            supply_index: interest::RATE_SCALE,
+            borrow_index: interest::RATE_SCALE,
+            last_accrual_timestamp: env.ledger().timestamp(),
+        }
     }
 
     fn write_interest_state(env: &Env, asset: &Address, state: &InterestState) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::InterestState(asset.clone()), state);
+        let key = DataKey::InterestState(asset.clone());
+        env.storage().persistent().set(&key, state);
+        Self::bump_persistent(env, &key);
+    }
+
+    fn write_total_deposited(env: &Env, asset: &Address, value: i128) {
+        let key = DataKey::TotalDeposited(asset.clone());
+        env.storage().persistent().set(&key, &value);
+        Self::bump_persistent(env, &key);
+    }
+
+    fn write_total_borrowed(env: &Env, asset: &Address, value: i128) {
+        let key = DataKey::TotalBorrowed(asset.clone());
+        env.storage().persistent().set(&key, &value);
+        Self::bump_persistent(env, &key);
     }
 
     /// Accrues time-based interest for `asset`'s reserve, persisting the
@@ -3573,6 +3802,10 @@ impl VeilLendContract {
             .persistent()
             .has(&DataKey::InterestState(asset.clone()));
         if already_persisted && now <= state.last_accrual_timestamp {
+            // No new interest, but this is still a touch from a mutating
+            // entrypoint — keep the entry from drifting toward archival even
+            // though nothing about its value changes.
+            Self::bump_persistent(env, &DataKey::InterestState(asset.clone()));
             return interest::AccrualResult {
                 state,
                 interest_to_suppliers: 0,
@@ -3586,10 +3819,14 @@ impl VeilLendContract {
 
         // Load per-asset interest params; fall back to safe zero-rate defaults
         // so assets without configured params accrue no interest (backward-compat).
+        let interest_params_key = DataKey::InterestParams(asset.clone());
+        if env.storage().persistent().has(&interest_params_key) {
+            Self::bump_persistent(env, &interest_params_key);
+        }
         let params: InterestParams = env
             .storage()
             .persistent()
-            .get(&DataKey::InterestParams(asset.clone()))
+            .get(&interest_params_key)
             .unwrap_or(interest::DEFAULT_PARAMS);
         let reserve_factor_bps = params.reserve_factor_bps;
 
@@ -3598,10 +3835,7 @@ impl VeilLendContract {
 
         Self::write_interest_state(env, asset, &result.state);
         if result.interest_to_suppliers != 0 {
-            env.storage().persistent().set(
-                &DataKey::TotalDeposited(asset.clone()),
-                &(total_supplied + result.interest_to_suppliers),
-            );
+            Self::write_total_deposited(env, asset, total_supplied + result.interest_to_suppliers);
 
             // Interest owed to suppliers is a new claim on the reserve, so the
             // reserve's tracked balance must grow to back it. Borrow-side
@@ -3612,10 +3846,7 @@ impl VeilLendContract {
             Self::write_asset_reserve(env, asset, &reserve);
         }
         if result.interest_to_borrowers != 0 {
-            env.storage().persistent().set(
-                &DataKey::TotalBorrowed(asset.clone()),
-                &(total_borrowed + result.interest_to_borrowers),
-            );
+            Self::write_total_borrowed(env, asset, total_borrowed + result.interest_to_borrowers);
         }
 
         // Truncation dust (interest_to_borrowers - interest_to_suppliers)
@@ -3643,10 +3874,7 @@ impl VeilLendContract {
 
                 let lifetime_reserve_earned =
                     Self::read_lifetime_reserve_earned(env, asset) + result.dust_to_reserves;
-                env.storage().persistent().set(
-                    &DataKey::LifetimeReserveEarned(asset.clone()),
-                    &lifetime_reserve_earned,
-                );
+                Self::write_lifetime_reserve_earned(env, asset, lifetime_reserve_earned);
 
                 ReservesAccrued {
                     asset: asset.clone(),
@@ -3699,27 +3927,41 @@ impl VeilLendContract {
     }
 
     fn write_position(env: &Env, user: &Address, asset: &Address, position: &Position) {
+        let key = DataKey::Position(user.clone(), asset.clone());
         if position.deposited == 0 && position.borrowed == 0 {
-            env.storage()
-                .persistent()
-                .remove(&DataKey::Position(user.clone(), asset.clone()));
+            env.storage().persistent().remove(&key);
         } else {
-            env.storage()
-                .persistent()
-                .set(&DataKey::Position(user.clone(), asset.clone()), position);
+            env.storage().persistent().set(&key, position);
+            Self::bump_persistent(env, &key);
         }
     }
 
-    fn require_supported_asset(env: &Env, asset: &Address) {
-        let is_supported = env
-            .storage()
+    /// Reads `SupportedAsset` without side effects. The only allowed use from
+    /// a *read-only* entrypoint (`get_asset_reserve`, `is_asset_supported`,
+    /// `read_interest_state`'s fallback) — anything mutating must go through
+    /// `require_supported_asset` instead, which also bumps.
+    fn peek_supported_asset(env: &Env, asset: &Address) -> bool {
+        env.storage()
             .persistent()
             .get(&DataKey::SupportedAsset(asset.clone()))
-            .unwrap_or(false);
+            .unwrap_or(false)
+    }
 
-        if !is_supported {
+    /// Panics with `UnsupportedAsset` unless `asset` is currently supported.
+    ///
+    /// This is the chokepoint nearly every mutating entrypoint calls before
+    /// touching an asset, so it doubles as the bump site for `SupportedAsset`
+    /// and for this contract's instance storage (see `bump_instance`):
+    /// bumping here — rather than at each of its ~30 call sites — is what
+    /// keeps a live-balance asset from archiving into `UnsupportedAsset` (the
+    /// exact trap `apply_configure_asset`'s active-positions guard exists to
+    /// prevent) without an admin ever needing to touch it again.
+    fn require_supported_asset(env: &Env, asset: &Address) {
+        if !Self::peek_supported_asset(env, asset) {
             panic_with_error!(env, VeilLendError::UnsupportedAsset);
         }
+        Self::bump_persistent(env, &DataKey::SupportedAsset(asset.clone()));
+        Self::bump_instance(env);
     }
 
     fn require_positive_amount(env: &Env, amount: i128) {
@@ -3759,6 +4001,9 @@ impl VeilLendContract {
     ///   need in order to recover (e.g. removing a compromised admin, or
     ///   cancelling a malicious pending action) must not be paused shut too.
     fn require_not_paused(env: &Env) {
+        if env.storage().persistent().has(&DataKey::Paused) {
+            Self::bump_persistent(env, &DataKey::Paused);
+        }
         let paused: bool = env
             .storage()
             .persistent()
@@ -3770,11 +4015,11 @@ impl VeilLendContract {
     }
 
     fn check_deposit_cap(env: &Env, asset: &Address, amount: i128) {
-        let cap = env
-            .storage()
-            .persistent()
-            .get(&DataKey::DepositCap(asset.clone()))
-            .unwrap_or(-1);
+        let cap_key = DataKey::DepositCap(asset.clone());
+        if env.storage().persistent().has(&cap_key) {
+            Self::bump_persistent(env, &cap_key);
+        }
+        let cap = env.storage().persistent().get(&cap_key).unwrap_or(-1);
 
         // -1 means unlimited
         if cap == -1 {
@@ -3793,11 +4038,11 @@ impl VeilLendContract {
     }
 
     fn check_borrow_cap(env: &Env, asset: &Address, amount: i128) {
-        let cap = env
-            .storage()
-            .persistent()
-            .get(&DataKey::BorrowCap(asset.clone()))
-            .unwrap_or(-1);
+        let cap_key = DataKey::BorrowCap(asset.clone());
+        if env.storage().persistent().has(&cap_key) {
+            Self::bump_persistent(env, &cap_key);
+        }
+        let cap = env.storage().persistent().get(&cap_key).unwrap_or(-1);
 
         // -1 means unlimited
         if cap == -1 {
@@ -3820,11 +4065,11 @@ impl VeilLendContract {
     /// (-1 = unlimited) mechanism checked by `check_deposit_cap`; both are
     /// enforced independently.
     fn enforce_supply_cap(env: &Env, asset: &Address, amount: i128) {
-        let cap: i128 = env
-            .storage()
-            .persistent()
-            .get(&DataKey::AssetSupplyCap(asset.clone()))
-            .unwrap_or(0);
+        let cap_key = DataKey::AssetSupplyCap(asset.clone());
+        if env.storage().persistent().has(&cap_key) {
+            Self::bump_persistent(env, &cap_key);
+        }
+        let cap: i128 = env.storage().persistent().get(&cap_key).unwrap_or(0);
 
         if cap == 0 {
             return;
@@ -3841,11 +4086,11 @@ impl VeilLendContract {
     /// (-1 = unlimited) mechanism checked by `check_borrow_cap`; both are
     /// enforced independently.
     fn enforce_borrow_cap(env: &Env, asset: &Address, amount: i128) {
-        let cap: i128 = env
-            .storage()
-            .persistent()
-            .get(&DataKey::AssetBorrowCap(asset.clone()))
-            .unwrap_or(0);
+        let cap_key = DataKey::AssetBorrowCap(asset.clone());
+        if env.storage().persistent().has(&cap_key) {
+            Self::bump_persistent(env, &cap_key);
+        }
+        let cap: i128 = env.storage().persistent().get(&cap_key).unwrap_or(0);
 
         if cap == 0 {
             return;
@@ -3887,6 +4132,9 @@ impl VeilLendContract {
         let debt_value = debt_borrowed * debt_price;
 
         // Compute weighted collateral value across ALL supported assets.
+        if env.storage().persistent().has(&DataKey::SupportedAssetList) {
+            Self::bump_persistent(env, &DataKey::SupportedAssetList);
+        }
         let asset_list: Vec<Address> = env
             .storage()
             .persistent()
@@ -3922,11 +4170,13 @@ impl VeilLendContract {
     /// Uses per-asset `AssetRiskParams` if set, otherwise falls back to the
     /// global `MinCollateralRatioBps` converted to a factor via ceiling division.
     fn read_collateral_factor_bps(env: &Env, asset: &Address) -> u32 {
+        let key = DataKey::AssetRiskParams(asset.clone());
         if let Some(params) = env
             .storage()
             .persistent()
-            .get::<DataKey, AssetRiskParams>(&DataKey::AssetRiskParams(asset.clone()))
+            .get::<DataKey, AssetRiskParams>(&key)
         {
+            Self::bump_persistent(env, &key);
             params.collateral_factor_bps
         } else {
             Self::ratio_to_factor(Self::min_collateral_ratio_bps(env.clone()))
@@ -3937,11 +4187,13 @@ impl VeilLendContract {
     /// Uses per-asset `AssetRiskParams` if set, otherwise falls back to the
     /// global `MinCollateralRatioBps` converted to a threshold via ceiling division.
     fn read_liquidation_threshold_bps(env: &Env, asset: &Address) -> u32 {
+        let key = DataKey::AssetRiskParams(asset.clone());
         if let Some(params) = env
             .storage()
             .persistent()
-            .get::<DataKey, AssetRiskParams>(&DataKey::AssetRiskParams(asset.clone()))
+            .get::<DataKey, AssetRiskParams>(&key)
         {
+            Self::bump_persistent(env, &key);
             params.liquidation_threshold_bps
         } else {
             Self::ratio_to_factor(Self::min_collateral_ratio_bps(env.clone()))
@@ -3965,11 +4217,13 @@ impl VeilLendContract {
     /// Returns the effective `liquidation_bonus_bps` for `asset`.
     /// Uses per-asset `AssetRiskParams` if set, otherwise returns 0.
     fn read_liquidation_bonus_bps(env: &Env, asset: &Address) -> u32 {
+        let key = DataKey::AssetRiskParams(asset.clone());
         if let Some(params) = env
             .storage()
             .persistent()
-            .get::<DataKey, AssetRiskParams>(&DataKey::AssetRiskParams(asset.clone()))
+            .get::<DataKey, AssetRiskParams>(&key)
         {
+            Self::bump_persistent(env, &key);
             params.liquidation_bonus_bps
         } else {
             0
@@ -3983,8 +4237,49 @@ impl VeilLendContract {
         interest::compute_accrued_position(&Self::read_position(env, user, asset), &state)
     }
 
+    /// Bumps every key in an asset's oracle group together: `OraclePrice`,
+    /// `OracleLastUpdated`, `OraclePrevPrice`, and the two bounds keys.
+    /// Partial archival within this group is the dangerous case — an
+    /// archived `OracleLastUpdated` next to a live `OraclePrice` makes
+    /// `read_oracle_price`'s staleness check silently no-op (its `if let
+    /// Some(last_updated)` guard treats "absent" and "expired" the same) —
+    /// so every touch (read via `read_oracle_price`, or write via
+    /// `apply_set_oracle_price`) refreshes the whole group at once rather
+    /// than only the key that was actually written. `.has()`-guarded because
+    /// the bounds keys are optional and may never have been set.
+    fn bump_oracle_keys(env: &Env, asset: &Address) {
+        let price_key = DataKey::OraclePrice(asset.clone());
+        if env.storage().persistent().has(&price_key) {
+            Self::bump_persistent(env, &price_key);
+        }
+        let last_updated_key = DataKey::OracleLastUpdated(asset.clone());
+        if env.storage().persistent().has(&last_updated_key) {
+            Self::bump_persistent(env, &last_updated_key);
+        }
+        let prev_price_key = DataKey::OraclePrevPrice(asset.clone());
+        if env.storage().persistent().has(&prev_price_key) {
+            Self::bump_persistent(env, &prev_price_key);
+        }
+        let min_key = DataKey::OracleMinPrice(asset.clone());
+        if env.storage().persistent().has(&min_key) {
+            Self::bump_persistent(env, &min_key);
+        }
+        let max_key = DataKey::OracleMaxPrice(asset.clone());
+        if env.storage().persistent().has(&max_key) {
+            Self::bump_persistent(env, &max_key);
+        }
+        let max_change_key = DataKey::OracleMaxChangeBps(asset.clone());
+        if env.storage().persistent().has(&max_change_key) {
+            Self::bump_persistent(env, &max_change_key);
+        }
+    }
+
     /// Returns an asset's oracle price, panicking with `OraclePriceMissing`
     /// if unset and `OraclePriceStale` if it has exceeded `MaxOracleAge`.
+    ///
+    /// Only called from mutating-entrypoint internals (`liquidate`,
+    /// `assert_collateralized`, the batch health-factor checks) — never from
+    /// a read-only getter — so bumping the oracle key group here is safe.
     fn read_oracle_price(env: &Env, asset: &Address) -> i128 {
         // Get oracle price for the asset — fail explicitly if not set
         let price: i128 = env
@@ -3993,24 +4288,33 @@ impl VeilLendContract {
             .get(&DataKey::OraclePrice(asset.clone()))
             .unwrap_or_else(|| panic_with_error!(env, VeilLendError::OraclePriceMissing));
 
-        // Check price staleness
-        if let Some(last_updated) = env
+        // Check price staleness. `OracleLastUpdated` is always written in the
+        // same call as `OraclePrice` (`apply_set_oracle_price`) and the two
+        // are always bumped together (`bump_oracle_keys`), so an `OraclePrice`
+        // with no `OracleLastUpdated` should not happen in normal operation —
+        // treating it as missing (rather than skipping the check) closes the
+        // gap this fix exists for: a live price next to a *lost* timestamp
+        // must not silently read as fresh. `migrate` backfills
+        // `OracleLastUpdated` for any pre-existing asset so this is not a
+        // breaking change for assets configured before the field existed.
+        let last_updated: u64 = env
             .storage()
             .persistent()
-            .get::<DataKey, u64>(&DataKey::OracleLastUpdated(asset.clone()))
-        {
-            let now = env.ledger().timestamp();
-            let max_age = env
-                .storage()
-                .instance()
-                .get(&DataKey::MaxOracleAge)
-                .unwrap_or(86400u64);
+            .get(&DataKey::OracleLastUpdated(asset.clone()))
+            .unwrap_or_else(|| panic_with_error!(env, VeilLendError::OraclePriceStale));
 
-            if now.saturating_sub(last_updated) > max_age {
-                panic_with_error!(env, VeilLendError::OraclePriceStale);
-            }
+        let now = env.ledger().timestamp();
+        let max_age = env
+            .storage()
+            .instance()
+            .get(&DataKey::MaxOracleAge)
+            .unwrap_or(86400u64);
+
+        if now.saturating_sub(last_updated) > max_age {
+            panic_with_error!(env, VeilLendError::OraclePriceStale);
         }
 
+        Self::bump_oracle_keys(env, asset);
         price
     }
 
@@ -4122,6 +4426,9 @@ impl VeilLendContract {
 
         let debt_value = debt_borrowed * Self::read_oracle_price(env, debt_asset);
 
+        if env.storage().persistent().has(&DataKey::SupportedAssetList) {
+            Self::bump_persistent(env, &DataKey::SupportedAssetList);
+        }
         let asset_list: Vec<Address> = env
             .storage()
             .persistent()
@@ -4170,6 +4477,9 @@ impl VeilLendContract {
             return;
         }
 
+        if env.storage().persistent().has(&DataKey::SupportedAssetList) {
+            Self::bump_persistent(env, &DataKey::SupportedAssetList);
+        }
         let asset_list: Vec<Address> = env
             .storage()
             .persistent()
@@ -4298,7 +4608,7 @@ mod tests {
         let metadata = client.contract_metadata();
         assert_eq!(metadata.contract_version, CONTRACT_VERSION);
         assert_eq!(metadata.storage_schema_version, STORAGE_SCHEMA_VERSION);
-        assert_eq!(metadata.storage_schema_id, symbol_short!("VLENDV6"));
+        assert_eq!(metadata.storage_schema_id, symbol_short!("VLENDV7"));
     }
 
     #[test]

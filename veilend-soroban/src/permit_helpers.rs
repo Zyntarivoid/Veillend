@@ -1,7 +1,6 @@
 //! Permit helper functions for the Veilend contract.
 
 use crate::permit::{DomainSeparator, Permit};
-use crate::DataKey;
 use soroban_sdk::{Address, Bytes, Env, Symbol};
 
 /// A verified permit that has passed signature, deadline, and nonce checks.
@@ -43,8 +42,8 @@ pub fn verify_and_consume_permit(
     signature: &Bytes,
 ) -> Result<VerifiedPermit, crate::VeilLendError> {
     use crate::permit::{
-        advance_nonce, emit_permit_executed, emit_permit_failed, signer_address, validate_permit,
-        verify_permit,
+        advance_nonce, emit_permit_executed, emit_permit_failed, get_current_epoch,
+        get_current_nonce, signer_address, validate_permit, verify_permit,
     };
 
     // The acting Address is a pure function of the public key, so it can be
@@ -61,11 +60,12 @@ pub fn verify_and_consume_permit(
         return Err(e);
     }
 
-    // Get the current nonce
+    // Get the current nonce and epoch
     let current_nonce = get_current_nonce(env, &user);
+    let current_epoch = get_current_epoch(env, &user);
 
-    // Validate deadline and nonce
-    if let Err(e) = validate_permit(env, permit, current_nonce) {
+    // Validate deadline, epoch, and nonce
+    if let Err(e) = validate_permit(env, permit, current_nonce, current_epoch) {
         emit_permit_failed(env, &user, &permit.action, e as u32);
         return Err(e);
     }
@@ -90,10 +90,4 @@ pub fn verify_and_consume_permit(
         amount: permit.amount,
         nonce: new_nonce,
     })
-}
-
-/// Gets the current nonce for a user.
-pub fn get_current_nonce(env: &Env, user: &Address) -> u64 {
-    let key = DataKey::PermitNonce(user.clone());
-    env.storage().persistent().get(&key).unwrap_or(0)
 }
