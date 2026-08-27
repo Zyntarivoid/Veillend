@@ -17,6 +17,7 @@ The contract currently provides an initial VeilLend lending scaffold with:
 - a propose/execute/cancel timelock on privileged mutations (configurable `set_timelock_ledgers`)
 - queryable contract and storage-schema metadata for migration safety
 - a timelocked contract upgrade path (`propose_upgrade`/`execute_upgrade`/`cancel_upgrade`) with a hard minimum delay, a downgrade version guard, and a post-upgrade `migrate` entrypoint
+- automatic persistent/instance storage TTL management (`bump_persistent`/`bump_instance`) on every mutating entrypoint, plus archival-safe permit nonces (`PermitEpoch`, `revoke_permits`) and an `InterestState` archival discriminator — see "Storage lifetime & TTL policy" below
 
 This is a protocol foundation, not the full privacy implementation yet. Token transfers, price oracles, liquidation logic, and shielded proof verification still need to be added in follow-up iterations.
 
@@ -143,13 +144,13 @@ Call `contract_metadata()` on a deployed contract before writing a migration or 
 
 | Metadata field | Current value | Meaning |
 | :--- | :--- | :--- |
-| `contract_version` | `8` | The public contract interface version. |
-| `storage_schema_version` | `5` | The version of serialized storage keys and values. |
-| `storage_schema_id` | `VLENDV5` | A compact, stable identifier for this storage layout. |
+| `contract_version` | `10` | The public contract interface version. |
+| `storage_schema_version` | `7` | The version of serialized storage keys and values. |
+| `storage_schema_id` | `VLENDV7` | A compact, stable identifier for this storage layout. |
 
 `storage_schema_version` reflects the **deployed instance's** schema: it is stored at construction and only advanced by `migrate`, so immediately after an upgrade to a wasm with a newer storage layout it still reports the pre-migration version until the migration runs.
 
-Schema `VLENDV5` uses these keys:
+Schema `VLENDV7` uses these keys:
 
 | Durability | Key | Value |
 | :--- | :--- | :--- |
@@ -160,21 +161,56 @@ Schema `VLENDV5` uses these keys:
 | Instance | `StorageSchemaVersion` | `u32` |
 | Instance | `MinCollateralRatioBps` | `u32` |
 | Instance | `MaxOracleAge` | `u64` |
+| Instance | `MaxProtocolFeeBps` | `u32` |
+| Instance | `GlobalCloseFactorBps` | `u32` |
+| Instance | `ReentrancyGuard` | `ReentrancyGuard { locked_asset: Address, caller: Address }` (transient: set and removed within one `flash_loan` call) |
 | Persistent | `SupportedAsset(Address)` | `bool` |
+| Persistent | `SupportedAssetList` | `Vec<Address>` |
 | Persistent | `AssetReserve(Address)` | `AssetReserve { total_balance: i128, protocol_fees: i128 }` |
 | Persistent | `Position(Address, Address)` | `Position { deposited: i128, borrowed: i128, supply_index_snapshot: i128, borrow_index_snapshot: i128 }` |
 | Persistent | `OraclePrice(Address)` | `i128` |
 | Persistent | `DepositCap(Address)` | `i128` |
 | Persistent | `BorrowCap(Address)` | `i128` |
+| Persistent | `AssetSupplyCap(Address)` | `i128` (0 = unlimited) |
+| Persistent | `AssetBorrowCap(Address)` | `i128` (0 = unlimited) |
 | Persistent | `TotalDeposited(Address)` | `i128` |
 | Persistent | `TotalBorrowed(Address)` | `i128` |
 | Persistent | `Paused` | `bool` |
 | Persistent | `InterestState(Address)` | `InterestState { supply_index: i128, borrow_index: i128, last_accrual_timestamp: u64 }` |
+| Persistent | `InterestParams(Address)` | `InterestParams { base_rate_bps, kink_util_bps, slope1_bps, slope2_bps, reserve_factor_bps: u32 }` |
+| Persistent | `AssetRiskParams(Address)` | `AssetRiskParams { collateral_factor_bps, liquidation_threshold_bps, liquidation_bonus_bps: u32 }` |
+| Persistent | `LifetimeReserveEarned(Address)` | `i128` |
 | Persistent | `OracleLastUpdated(Address)` | `u64` |
 | Persistent | `OraclePrevPrice(Address)` | `i128` |
 | Persistent | `OracleMaxChangeBps(Address)` | `u32` |
 | Persistent | `OracleMinPrice(Address)` | `i128` |
 | Persistent | `OracleMaxPrice(Address)` | `i128` |
+| Persistent | `FlashLoanState(Address)` | `FlashLoanState { enabled: bool, premium_bps: u32, max_bps: u32 }` |
+| Persistent | `PermitNonce(Address)` | `u64` |
+| Persistent | `PermitEpoch(Address)` | `u64` |
+
+## Storage lifetime & TTL policy
+
+Every **persistent** entry above (and instance storage as a whole) is on a finite TTL clock: Soroban archives an entry once its ledger-relative TTL expires, and any transaction that touches an archived entry fails until someone submits a `RestoreFootprint` operation for it. This contract keeps its storage alive automatically rather than relying on an operator noticing an archival failure:
+
+- **`bump_persistent(env, key)`** / **`bump_instance(env)`** (private helpers in `lib.rs`) wrap `extend_ttl`, driven by four constants: `PERSISTENT_TTL_THRESHOLD` / `PERSISTENT_TTL_EXTEND_TO` (~7 / ~30 days at a 5s ledger) and `INSTANCE_TTL_THRESHOLD` / `INSTANCE_TTL_EXTEND_TO` (~30 / ~180 days). Both extend-to values sit well under Soroban's protocol-wide `max_entry_ttl` (~3,110,400 ledgers / ~6 months on Mainnet), so `extend_ttl` can never panic with `ExceededLimit`.
+- **Every mutating entrypoint bumps the entries it touches.** `deposit`/`borrow`/`repay`/`withdraw`/`liquidate`/`accrue_interest`, the four `*_batch` variants, the four `*_for` permit variants, and `flash_loan` all route their `Position`/`InterestState`/`AssetReserve`/`TotalDeposited`/`TotalBorrowed`/`OraclePrice`/`SupportedAsset` accesses through helpers that bump on write (`write_position`, `write_asset_reserve`, `write_interest_state`, `write_total_deposited`, `write_total_borrowed`, …), or through the two read chokepoints every one of them already calls — `require_supported_asset` (bumps `SupportedAsset` + instance storage) and `read_oracle_price` (bumps the whole oracle key group). No entrypoint calls `storage().persistent()` directly outside of these helpers.
+- **Read-only entrypoints never bump** (`get_position`, `get_interest_state`, `get_asset_reserve`, `is_asset_supported`, `get_oracle_price`, …). Bumping on a free, unauthenticated read would let anyone keep arbitrary entries alive at the protocol's expense, and would make `simulateTransaction` results depend on invocation history. This is deliberate — do not "fix" it by adding a bump to a getter.
+- **Oracle keys are bumped as a group.** `OraclePrice`, `OracleLastUpdated`, `OraclePrevPrice`, `OracleMinPrice`, and `OracleMaxPrice` are refreshed together (`bump_oracle_keys`) on every oracle write and on every `read_oracle_price` call, because a *partially* archived group is worse than a fully archived one: `read_oracle_price`'s staleness check only runs `if let Some(last_updated) = ...`, so a live `OraclePrice` next to a gone `OracleLastUpdated` would make an arbitrarily stale price read as fresh.
+- **`SupportedAsset` cannot archive out from under a live-balance asset.** Every entrypoint that touches an asset calls `require_supported_asset` first, which bumps `SupportedAsset` on success — the same guard `apply_configure_asset`'s active-positions check exists to prevent (disabling an asset with live balances) can't be reproduced by TTL expiry either, as long as *something* (a user action or a permissionless `accrue_interest` keeper call) touches the asset within the TTL window.
+- **`PermitNonce`/`PermitEpoch` get the longest TTL in the contract** (`PERMIT_TTL_EXTEND_TO`, ~180 days), armed on every permit consumption — a permit-nonce entry is the single highest-severity key in this contract, since historically it also carried a `.unwrap_or(0)` fallback that could not tell "never used" apart from "lost". That ambiguity is now closed a different way: see `revoke_permits` below, which does not depend on TTL bookkeeping at all.
+- **`InterestState` cannot silently reset to a fresh 1.0x index.** Every supported asset gets one seeded at `apply_configure_asset` time (and backfilled by `migrate` for assets configured before this existed). If a supported asset's `InterestState` is ever missing, `read_interest_state` panics with `InterestStateMissing` instead of quietly re-anchoring at `RATE_SCALE` — a defaulted state and a genuinely-fresh one are indistinguishable otherwise, and treating the former as the latter would wipe real accrued interest.
+
+**If an entry archives anyway** (e.g. after a long, contract-wide dormancy that exceeds even `PERSISTENT_TTL_EXTEND_TO`/`INSTANCE_TTL_EXTEND_TO`): submit a `RestoreFootprintOp` for the affected key(s) — `stellar contract restore` (via `stellar-cli`) or the equivalent RPC call, sourced from the transaction's simulated footprint — before retrying the failing call. Restoration recovers the original stored value; it does not reset anything.
+
+## Permit replay safety (`PermitNonce` / `PermitEpoch`)
+
+Meta-transactions (`deposit_for`/`withdraw_for`/`borrow_for`/`repay_for`) are authorized by an off-chain-signed `Permit`, gated on a per-user `nonce` (must equal the stored value exactly) and a per-user `epoch` (must equal the stored `PermitEpoch`, default `0`). Both are read together, and both are bumped together on every consumption, so they can never drift independently of one another.
+
+- `get_permit_nonce(user)` / `get_permit_epoch(user)`: read-only, no bump.
+- `revoke_permits(user)` (user-authenticated): increments `PermitEpoch(user)`, immediately invalidating **every** permit ever signed for that user, regardless of nonce — a kill switch for a suspected-leaked signature, without needing to know which nonce it was signed against. Emits `PermitsRevoked`.
+- An epoch mismatch and a nonce mismatch both surface as `VeilLendError::PermitNonceMismatch` (code 43): `#[contracterror]` enums are XDR-bounded to 50 cases and `VeilLendError` is already at that cap (see `InterestStateMissing`, code 51 — note the enum has 50 *cases* even though the highest discriminant is 51, because code 16 is permanently retired), so the two conditions intentionally share a code. Both call for the same client response: fetch the current nonce/epoch and re-sign.
+- Bumping `CONTRACT_VERSION` also invalidates every previously-signed permit on its own: the signed digest includes `DomainSeparator.version`, which is always the running `CONTRACT_VERSION`.
 
 The admin authority is a `Vec<Address>` (`AdminSet`): any one of N admins can act, and `add_admin`/`remove_admin` manage membership (with a last-admin lockout guard). Privileged mutations — `configure_asset`, `set_oracle_price`, `update_asset_caps`, `set_min_collateral_ratio`, pausing, `record_protocol_fee`, `withdraw_reserves`, and upgrading — follow a `propose_*` → `execute_*` (after the `TimelockLedgers` delay) → `cancel_*` flow, with `set_paused(false)` exempt so unpausing stays immediate.
 
@@ -266,7 +302,7 @@ All contract errors are typed via `VeilLendError` (`#[contracterror]`, `#[repr(u
 | 40 | `InvalidInterestParams` | Interest-rate model parameters are out of the allowed bounds |
 | 41 | `InvalidSignature` | Permit signature verification failed |
 | 42 | `PermitExpired` | Permit has expired (deadline passed) |
-| 43 | `PermitNonceMismatch` | Permit nonce does not match the expected value |
+| 43 | `PermitNonceMismatch` | Permit nonce does not match the expected value — also returned for an `epoch` mismatch (see `revoke_permits`) |
 | 44 | `PermitChainMismatch` | Permit chain ID does not match the contract's chain ID |
 | 45 | `InvalidUpgradeVersion` | Proposed upgrade wasm reports a `contract_version` lower than the running one (downgrade rejected) |
 | 46 | `AlreadyMigrated` | Storage migration already completed for the target storage-schema version |
@@ -274,6 +310,9 @@ All contract errors are typed via `VeilLendError` (`#[contracterror]`, `#[repr(u
 | 48 | `LiquidationThresholdExceedsMax` | `liquidation_threshold_bps` exceeds 10_000 (100%) |
 | 49 | `InvalidLiquidationBonus` | `liquidation_bonus_bps` is outside the allowed range 0..=2_000 (max 20%) |
 | 50 | `LiquidationThresholdPlusBonusExceedsMax` | `liquidation_threshold_bps + liquidation_bonus_bps` exceeds 10_000 |
+| 51 | `InterestStateMissing` | A supported asset's `InterestState` is missing (TTL archival) rather than legitimately fresh; see "Storage lifetime & TTL policy" |
+
+`VeilLendError` is at `#[contracterror]`'s hard limit of 50 cases (`ScSpecUdtErrorEnumV0.cases` is XDR-bounded to `VecM<_, 50>`) — code 16 is permanently retired (see above) and codes 1-15 and 17-51 are in use, for exactly 50 variants. Adding another error code requires retiring one first, the same way 16 was.
 
 ## Development Workflow
 

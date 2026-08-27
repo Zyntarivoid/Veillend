@@ -6,11 +6,11 @@
 //! build-script env var):
 //!
 //! - default (`FIXTURE_VERSION` unset): "v2" — a future VeilLend release
-//!   reporting `contract_version = 9` / storage schema 6 and exposing a new
+//!   reporting `contract_version = 11` / storage schema 7 and exposing a new
 //!   function (`upgraded_marker`) that v1 does not have, so tests can prove
 //!   the executable was actually swapped and that new behaviour is live.
 //!   The version must always exceed the contract's current `CONTRACT_VERSION`
-//!   (8) or the upgrade version guard would reject it as a downgrade.
+//!   (10) or the upgrade version guard would reject it as a downgrade.
 //! - `FIXTURE_VERSION=v1`: "v1" — reports `contract_version = 4`, a version
 //!   below the current one, used to prove the version guard rejects
 //!   downgrades.
@@ -24,17 +24,17 @@ use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Env, Symbo
 #[cfg(fixture_v1)]
 pub const CONTRACT_VERSION: u32 = 4;
 #[cfg(not(fixture_v1))]
-pub const CONTRACT_VERSION: u32 = 9;
+pub const CONTRACT_VERSION: u32 = 11;
 
 #[cfg(fixture_v1)]
 pub const STORAGE_SCHEMA_VERSION: u32 = 5;
 #[cfg(not(fixture_v1))]
-pub const STORAGE_SCHEMA_VERSION: u32 = 6;
+pub const STORAGE_SCHEMA_VERSION: u32 = 7;
 
 #[cfg(fixture_v1)]
 const STORAGE_SCHEMA_ID: Symbol = symbol_short!("VLENDV5");
 #[cfg(not(fixture_v1))]
-const STORAGE_SCHEMA_ID: Symbol = symbol_short!("VLENDV6");
+const STORAGE_SCHEMA_ID: Symbol = symbol_short!("VLENDV7");
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]

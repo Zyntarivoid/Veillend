@@ -4,7 +4,7 @@
 //! permits, enabling relayers to submit transactions on behalf of users who
 //! have signed a structured permit message.
 
-use crate::{DataKey, VeilLendError};
+use crate::{DataKey, VeilLendContract, VeilLendError, PERMIT_TTL_EXTEND_TO};
 use soroban_sdk::{
     address_payload::AddressPayload, contractevent, contracttype, xdr::ToXdr, Address, Bytes,
     BytesN, Env, Symbol,
@@ -47,6 +47,12 @@ pub struct Permit {
     pub amount: i128,
     /// The current nonce for this user (must match expected value)
     pub nonce: u64,
+    /// The signer's current `PermitEpoch` (must match exactly). Distinct
+    /// from `nonce`: `revoke_permits` bumps this to invalidate every permit
+    /// signed under a prior epoch in a single call, regardless of nonce —
+    /// e.g. after a signature is suspected leaked, without needing to know
+    /// (or race) the exact nonce it was signed against.
+    pub epoch: u64,
     /// Timestamp deadline (ledger timestamp) after which this permit expires
     pub deadline: u64,
     /// Chain ID to prevent cross-chain replay
@@ -126,26 +132,39 @@ pub fn verify_permit(
     Ok(())
 }
 
-/// Validates a permit's deadline and nonce.
+/// Validates a permit's deadline, epoch, and nonce.
 ///
 /// # Arguments
 /// * `env` - The Soroban environment
 /// * `permit` - The permit to validate
 /// * `current_nonce` - The current nonce for the user
+/// * `current_epoch` - The user's current `PermitEpoch`
 ///
 /// # Returns
 /// * `Ok(())` if the permit is valid
 /// * `Err(VeilLendError::PermitExpired)` if the deadline has passed
-/// * `Err(VeilLendError::PermitNonceMismatch)` if the nonce doesn't match
+/// * `Err(VeilLendError::PermitNonceMismatch)` if the epoch or nonce doesn't
+///   match. `#[contracterror]` enums are XDR-bounded to 50 cases and
+///   `VeilLendError` is already at that cap (see `InterestStateMissing`), so
+///   an epoch mismatch (from `revoke_permits`) intentionally reuses this
+///   code rather than getting a distinct one — both cases call for the same
+///   client response: re-fetch the current nonce/epoch and re-sign.
 pub fn validate_permit(
     env: &Env,
     permit: &Permit,
     current_nonce: u64,
+    current_epoch: u64,
 ) -> Result<(), VeilLendError> {
     // Check deadline
     let now = env.ledger().timestamp();
     if now > permit.deadline {
         return Err(VeilLendError::PermitExpired);
+    }
+
+    // Epoch is checked before nonce, but reported as the same error code
+    // (see doc comment above).
+    if permit.epoch != current_epoch {
+        return Err(VeilLendError::PermitNonceMismatch);
     }
 
     // Check nonce (must be exactly the current expected value)
@@ -156,7 +175,12 @@ pub fn validate_permit(
     Ok(())
 }
 
-/// Advances the nonce for a user.
+/// Advances the nonce for a user and re-arms both `PermitNonce` and
+/// `PermitEpoch`'s TTL to `PERMIT_TTL_EXTEND_TO`.
+///
+/// The two keys are always touched together (even though only the nonce
+/// changes value here) so they can never drift apart and archive
+/// independently of one another — see `DataKey::PermitEpoch`.
 ///
 /// # Arguments
 /// * `env` - The Soroban environment
@@ -165,14 +189,24 @@ pub fn validate_permit(
 /// # Returns
 /// * The new nonce value
 pub fn advance_nonce(env: &Env, user: &Address) -> u64 {
-    let key = DataKey::PermitNonce(user.clone());
-    let current: u64 = env.storage().persistent().get(&key).unwrap_or(0);
+    let nonce_key = DataKey::PermitNonce(user.clone());
+    let current: u64 = env.storage().persistent().get(&nonce_key).unwrap_or(0);
     let next = current + 1;
-    env.storage().persistent().set(&key, &next);
+    env.storage().persistent().set(&nonce_key, &next);
+    VeilLendContract::bump_persistent_to(env, &nonce_key, PERMIT_TTL_EXTEND_TO);
+
+    // `extend_ttl` requires an existing entry, so a user consuming their very
+    // first permit needs `PermitEpoch` explicitly written (as its
+    // current-or-default value) before it can be bumped at all.
+    let epoch_key = DataKey::PermitEpoch(user.clone());
+    let current_epoch: u64 = env.storage().persistent().get(&epoch_key).unwrap_or(0);
+    env.storage().persistent().set(&epoch_key, &current_epoch);
+    VeilLendContract::bump_persistent_to(env, &epoch_key, PERMIT_TTL_EXTEND_TO);
+
     next
 }
 
-/// Gets the current nonce for a user.
+/// Gets the current nonce for a user. Read-only: does not bump.
 ///
 /// # Arguments
 /// * `env` - The Soroban environment
@@ -183,6 +217,26 @@ pub fn advance_nonce(env: &Env, user: &Address) -> u64 {
 pub fn get_current_nonce(env: &Env, user: &Address) -> u64 {
     let key = DataKey::PermitNonce(user.clone());
     env.storage().persistent().get(&key).unwrap_or(0)
+}
+
+/// Gets a user's current permit epoch. Read-only: does not bump.
+pub fn get_current_epoch(env: &Env, user: &Address) -> u64 {
+    let key = DataKey::PermitEpoch(user.clone());
+    env.storage().persistent().get(&key).unwrap_or(0)
+}
+
+/// Increments a user's permit epoch, invalidating every permit signed under
+/// the prior epoch regardless of nonce. Returns the new epoch.
+///
+/// Bumps `PermitEpoch` to `PERMIT_TTL_EXTEND_TO`, same as `advance_nonce`,
+/// so a deliberate revocation doesn't itself shorten the entry's lifetime.
+pub fn revoke_permits(env: &Env, user: &Address) -> u64 {
+    let epoch_key = DataKey::PermitEpoch(user.clone());
+    let current: u64 = env.storage().persistent().get(&epoch_key).unwrap_or(0);
+    let next = current + 1;
+    env.storage().persistent().set(&epoch_key, &next);
+    VeilLendContract::bump_persistent_to(env, &epoch_key, PERMIT_TTL_EXTEND_TO);
+    next
 }
 
 /// Emits a permit executed event.
