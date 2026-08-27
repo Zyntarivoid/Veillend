@@ -4208,8 +4208,7 @@ fn test_bumped_position_survives_long_dormancy() {
     });
     assert!(
         ttl_after_deposit >= PERSISTENT_TTL_EXTEND_TO - PERSISTENT_TTL_THRESHOLD,
-        "deposit did not bump Position's TTL close to PERSISTENT_TTL_EXTEND_TO: got {}",
-        ttl_after_deposit
+        "deposit did not bump Position's TTL close to PERSISTENT_TTL_EXTEND_TO: got {ttl_after_deposit}"
     );
 
     // Jump most of the way across the bumped window without touching
@@ -4369,8 +4368,7 @@ fn test_supported_asset_with_live_balance_survives_long_dormancy() {
     });
     assert!(
         ttl >= PERSISTENT_TTL_EXTEND_TO - PERSISTENT_TTL_THRESHOLD,
-        "deposit did not bump SupportedAsset's TTL close to PERSISTENT_TTL_EXTEND_TO: got {}",
-        ttl
+        "deposit did not bump SupportedAsset's TTL close to PERSISTENT_TTL_EXTEND_TO: got {ttl}"
     );
 
     advance_ledgers(&env, PERSISTENT_TTL_EXTEND_TO - 100);
