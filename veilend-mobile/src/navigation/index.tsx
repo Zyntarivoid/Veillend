@@ -11,6 +11,8 @@ import RepayScreen from '../screens/RepayScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import { useStore } from '../store/store';
 import { Ionicons } from '@expo/vector-icons';
+import LiquidationsScreen from '../screens/LiquidationsScreen';
+import LiquidationReviewScreen from '../screens/LiquidationReviewScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -38,6 +40,7 @@ function MainTabs() {
           else if (route.name === 'Deposit') iconName = focused ? 'arrow-down' : 'arrow-down-outline';
           else if (route.name === 'Borrow') iconName = focused ? 'cash' : 'cash-outline';
           else if (route.name === 'Repay') iconName = focused ? 'arrow-up' : 'arrow-up-outline';
+          else if (route.name === 'Liquidations') iconName = focused ? 'shield-checkmark' : 'shield-outline';
           return <Ionicons name={iconName} size={size} color={color} />;
         },
       })}
@@ -46,6 +49,7 @@ function MainTabs() {
       <Tab.Screen name="Deposit" component={DepositScreen} />
       <Tab.Screen name="Borrow" component={BorrowScreen} />
       <Tab.Screen name="Repay" component={RepayScreen} />
+      <Tab.Screen name="Liquidations" component={LiquidationsScreen} />
     </Tab.Navigator>
   );
 }
@@ -85,6 +89,7 @@ export default function RootNavigator() {
           <>
             <Stack.Screen name="Main" component={MainTabs} />
             <Stack.Screen name="Settings" component={SettingsScreen} />
+            <Stack.Screen name="LiquidationReview" component={LiquidationReviewScreen} />
           </>
         )}
       </Stack.Navigator>

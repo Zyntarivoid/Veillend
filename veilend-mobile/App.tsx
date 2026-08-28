@@ -10,6 +10,7 @@ import NetworkProvider from './src/components/NetworkProvider';
 import { setupCrashInstrumentation } from './src/utils/errorReporting';
 import { AppLockProvider, useAppLockContext } from './src/providers/AppLockProvider';
 import UnlockGate from './src/screens/UnlockGate';
+import { handleNotification, registerPush } from './src/utils/push';
 
 // Install global crash handlers once on module load
 setupCrashInstrumentation();
@@ -37,6 +38,7 @@ function LockGateOverlay() {
 }
 
 function AppInner() {
+  const authToken = useStore((s) => s.authToken);
   const authLoading = useStore((s) => s.authLoading);
   const lendingLoading = useStore((s) => s.lendingLoading);
   const shieldedLoading = useStore((s) => s.shieldedLoading);
@@ -47,6 +49,23 @@ function AppInner() {
       AccessibilityInfo.announceForAccessibility('Loading, please wait');
     }
   }, [anyLoading]);
+
+  useEffect(() => {
+    if (!authToken) return;
+    let Notifications: any;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      Notifications = require('expo-notifications');
+    } catch {
+      return;
+    }
+    registerPush().catch(() => {});
+    const subscription = Notifications.addNotificationResponseReceivedListener(handleNotification);
+    Notifications.getLastNotificationResponseAsync?.().then((response: any) => {
+      if (response) handleNotification(response);
+    }).catch(() => {});
+    return () => subscription.remove();
+  }, [authToken]);
 
   return (
     <>

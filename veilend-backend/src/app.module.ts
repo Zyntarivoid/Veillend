@@ -21,6 +21,7 @@ import { UsersModule } from './users/users.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { DepositsModule } from './deposits/deposits.module';
 import { WithdrawalsModule } from './withdrawals/withdrawals.module';
+import { LiquidationsModule } from './liquidations/liquidations.module';
 import { ConfigModule } from './config/config.module';
 import { AppLoggerService } from './common/logging/app-logger.service';
 import { LoggingInterceptor } from './common/logging/logging.interceptor';
@@ -70,6 +71,7 @@ import {
     NotificationsModule,
     DepositsModule,
     WithdrawalsModule,
+    LiquidationsModule,
   ],
   controllers: [AppController],
   providers: [

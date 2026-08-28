@@ -39,6 +39,12 @@ export type GetTransactionStatus =
   | 'FAILED'
   | 'NOT_FOUND';
 
+export type SimulationResult = {
+  ok: boolean;
+  error?: string;
+  healthFactor?: number;
+};
+
 export interface GetTransactionResult {
   status: GetTransactionStatus;
   /** Present when status === 'SUCCESS'. */
@@ -116,6 +122,24 @@ export async function sendTransaction(
     return { status: 'PENDING', hash: result.hash ?? '' };
   } catch (err: any) {
     return { status: 'ERROR', error: err?.message ?? 'Failed to send transaction' };
+  }
+}
+
+/** Simulate an unsigned Soroban transaction immediately before signing. */
+export async function simulateTransaction(
+  unsignedXdr: string,
+  rpcUrl?: string,
+): Promise<SimulationResult> {
+  try {
+    const result = await rpcCall<{ error?: string; result?: { retval?: unknown; healthFactor?: number } }>(
+      'simulateTransaction',
+      [{ transaction: unsignedXdr }],
+      rpcUrl,
+    );
+    if (result.error) return { ok: false, error: result.error };
+    return { ok: true, healthFactor: result.result?.healthFactor };
+  } catch (error: any) {
+    return { ok: false, error: error?.message ?? 'Simulation failed' };
   }
 }
 

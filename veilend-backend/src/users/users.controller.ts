@@ -35,6 +35,14 @@ export class UsersController {
     return this.usersService.upsertPushToken(this.requireUserId(req), dto);
   }
 
+  @Post('me/push-token')
+  async registerPushTokenSingular(
+    @Body() dto: CreatePushTokenDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<PushTokenResponseDto> {
+    return this.usersService.upsertPushToken(this.requireUserId(req), dto);
+  }
+
   @Delete('me/push-tokens/:id')
   async removePushToken(
     @Param('id') id: string,

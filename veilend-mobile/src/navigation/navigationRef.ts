@@ -11,6 +11,7 @@ const _delegate: {
 	_mockRoute: NavRoute;
 	isReady: () => boolean;
 	reset: (state: { index: number; routes: { name: string }[] }) => void;
+	navigate: (name: string, params?: unknown) => void;
 	getCurrentRoute: () => NavRoute;
 } = {
 	_nativeRef: null,
@@ -32,11 +33,19 @@ const _delegate: {
 		}
 		return this._mockRoute;
 	},
+	navigate(name: string, params?: unknown) {
+		if (this._nativeRef && typeof this._nativeRef.navigate === 'function') {
+			this._nativeRef.navigate(name, params);
+		} else {
+			this._mockRoute = { name };
+		}
+	},
 };
 
 export const navigationRef = {
 	reset: (state: { index: number; routes: { name: string }[] }) => _delegate.reset(state),
 	getCurrentRoute: () => _delegate.getCurrentRoute(),
+	navigate: (name: string, params?: unknown) => _delegate.navigate(name, params),
 	isReady: () => _delegate.isReady(),
 };
 
