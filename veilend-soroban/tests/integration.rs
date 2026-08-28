@@ -1,13 +1,16 @@
 use core::cmp::Ordering;
 
+use ed25519_dalek::{Signer, SigningKey};
 use soroban_env_common::{Compare, TryFromVal};
 use soroban_sdk::events::Event;
+use soroban_sdk::testutils::storage::Persistent as _;
 use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
-use soroban_sdk::{Address, BytesN, Env, Symbol, Val};
+use soroban_sdk::{Address, Bytes, BytesN, Env, Symbol, Val};
 use veillend_contract::{
-    ActionKind, ActionPayload, ContractUpgraded, DataKey, InterestAccrued, InterestParams,
-    StorageMigrated, VeilLendContract, VeilLendContractClient, CONTRACT_VERSION,
-    STORAGE_SCHEMA_VERSION, UPGRADE_MIN_TIMELOCK_LEDGERS,
+    compute_permit_digest, signer_address, ActionKind, ActionPayload, ContractUpgraded, DataKey,
+    InterestAccrued, InterestParams, Permit, StorageMigrated, VeilLendContract,
+    VeilLendContractClient, CONTRACT_VERSION, PERMIT_TTL_EXTEND_TO, PERSISTENT_TTL_EXTEND_TO,
+    PERSISTENT_TTL_THRESHOLD, STORAGE_SCHEMA_VERSION, UPGRADE_MIN_TIMELOCK_LEDGERS,
 };
 
 const SECONDS_PER_YEAR: u64 = 31_536_000;
@@ -2395,7 +2398,7 @@ mod flash_loan_integration_tests {
 
 /// Helper: register a fresh contract, configure one asset, set its oracle price.
 /// Uses MCR=10_000 (100%) so tests can achieve high utilization ratios.
-fn setup_with_asset(env: &Env) -> (VeilLendContractClient, Address, Address) {
+fn setup_with_asset(env: &Env) -> (VeilLendContractClient<'_>, Address, Address) {
     env.mock_all_auths();
     let admin = Address::generate(env);
     let asset = Address::generate(env);
@@ -3299,7 +3302,7 @@ fn test_upgrade_full_roundtrip_new_behaviour_is_live() {
     // New behaviour is live: the marker function only exists in the v2 wasm.
     let v2_client = v2_fixture::Client::new(&env, &contract_id);
     assert_eq!(v2_client.upgraded_marker(), 42);
-    assert_eq!(v2_client.contract_metadata().contract_version, 9);
+    assert_eq!(v2_client.contract_metadata().contract_version, 11);
 }
 
 #[test]
@@ -4160,4 +4163,262 @@ fn test_cancel_set_asset_risk_params() {
         client.execute_set_asset_risk_params(&admin, &action_id);
     }));
     assert!(result.is_err(), "execute after cancel must fail");
+}
+
+// ─── Storage TTL / archival-safety tests ─────────────────────────────────────
+//
+// See README.md's "Storage lifetime & TTL policy" section. These tests use
+// the test-env ledger controls (`advance_ledgers`, which jumps only the
+// ledger sequence — not the timestamp — matching how TTL is actually
+// measured on Soroban) to prove entries this fix bumps survive a long,
+// TTL-relevant gap rather than archiving.
+
+/// A deterministic (no RNG) Ed25519 keypair for signing test `Permit`s.
+fn test_signing_key(seed_byte: u8) -> SigningKey {
+    SigningKey::from_bytes(&[seed_byte; 32])
+}
+
+fn sign_permit(
+    env: &Env,
+    signing_key: &SigningKey,
+    domain: &veillend_contract::DomainSeparator,
+    permit: &Permit,
+) -> Bytes {
+    let digest = compute_permit_digest(env, domain, permit);
+    let digest_bytes: Vec<u8> = digest.iter().collect();
+    let signature = signing_key.sign(&digest_bytes);
+    Bytes::from_array(env, &signature.to_bytes())
+}
+
+/// A bumped `Position` (and the `SupportedAsset`/instance storage it implies)
+/// must still read correctly after an interval that spans the entirety of
+/// `PERSISTENT_TTL_EXTEND_TO` — the window `write_position` and
+/// `require_supported_asset` arm it to on every touch.
+#[test]
+fn test_bumped_position_survives_long_dormancy() {
+    let env = Env::default();
+    let (client, _admin, asset) = setup_with_asset(&env);
+    let user = Address::generate(&env);
+
+    client.deposit(&user, &asset, &1_000i128);
+
+    let position_key = DataKey::Position(user.clone(), asset.clone());
+    let ttl_after_deposit = env.as_contract(&client.address, || {
+        env.storage().persistent().get_ttl(&position_key)
+    });
+    assert!(
+        ttl_after_deposit >= PERSISTENT_TTL_EXTEND_TO - PERSISTENT_TTL_THRESHOLD,
+        "deposit did not bump Position's TTL close to PERSISTENT_TTL_EXTEND_TO: got {ttl_after_deposit}"
+    );
+
+    // Jump most of the way across the bumped window without touching
+    // anything else.
+    advance_ledgers(&env, PERSISTENT_TTL_EXTEND_TO - 100);
+
+    let position = client.get_position(&user, &asset);
+    assert_eq!(position.deposited, 1_000);
+}
+
+/// `PermitNonce`/`PermitEpoch` must not lose their value across a long
+/// dormancy: `get_permit_nonce` must still report the correct, advanced
+/// nonce (not silently reset to `0`), and a fresh permit signed at that
+/// nonce must still be accepted.
+#[test]
+fn test_permit_state_survives_long_dormancy() {
+    let env = Env::default();
+    let (client, _admin, asset) = setup_with_asset(&env);
+
+    let signing_key = test_signing_key(1);
+    let public_key = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let user = signer_address(&env, &public_key);
+
+    let domain = client.get_domain_separator();
+    let permit0 = Permit {
+        public_key: public_key.clone(),
+        action: Symbol::new(&env, "deposit"),
+        asset: asset.clone(),
+        amount: 500,
+        nonce: 0,
+        epoch: 0,
+        deadline: env.ledger().timestamp() + 10_000,
+        chain_id: domain.chain_id,
+        contract_id: client.address.clone(),
+    };
+    let sig0 = sign_permit(&env, &signing_key, &domain, &permit0);
+    client.deposit_for(&permit0, &sig0, &asset, &500);
+    assert_eq!(client.get_permit_nonce(&user), 1);
+
+    // Advance across nearly the entire PERMIT_TTL_EXTEND_TO window (longer
+    // than the ordinary PERSISTENT_TTL_EXTEND_TO window every other entry
+    // gets, since a permit nonce is the highest-severity key in this
+    // contract's storage surface).
+    advance_ledgers(&env, PERMIT_TTL_EXTEND_TO - 1_000);
+
+    assert_eq!(
+        client.get_permit_nonce(&user),
+        1,
+        "nonce must survive the dormancy unchanged, not reset to 0"
+    );
+    assert_eq!(client.get_permit_epoch(&user), 0);
+
+    // A fresh permit signed at the current (correct, advanced) nonce still
+    // works — the long gap did not break legitimate future use either.
+    let permit1 = Permit {
+        nonce: 1,
+        deadline: env.ledger().timestamp() + 10_000,
+        ..permit0.clone()
+    };
+    let sig1 = sign_permit(&env, &signing_key, &domain, &permit1);
+    client.deposit_for(&permit1, &sig1, &asset, &500);
+    assert_eq!(client.get_permit_nonce(&user), 2);
+}
+
+/// Replaying an already-consumed permit must still fail after a long
+/// dormancy — the nonce must not have silently reset to a value that would
+/// let an old, already-used signature validate again.
+///
+/// `deposit_for` (like the other `*_for` permit entrypoints) calls
+/// `.unwrap()` on `verify_and_consume_permit`'s `Result`, so a validation
+/// failure surfaces as a Rust panic carrying the `VeilLendError` variant's
+/// name (here `PermitNonceMismatch`, code 43 — see `permit_failed`'s
+/// `error_code` in the event log) rather than a typed `Error(Contract, #N)`
+/// host error; this is pre-existing behavior of the permit entrypoints, not
+/// something this fix changes.
+#[test]
+#[should_panic(expected = "PermitNonceMismatch")]
+fn test_permit_replay_fails_after_long_dormancy() {
+    let env = Env::default();
+    let (client, _admin, asset) = setup_with_asset(&env);
+
+    let signing_key = test_signing_key(2);
+    let public_key = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+
+    let domain = client.get_domain_separator();
+    let permit0 = Permit {
+        public_key: public_key.clone(),
+        action: Symbol::new(&env, "deposit"),
+        asset: asset.clone(),
+        amount: 500,
+        nonce: 0,
+        epoch: 0,
+        deadline: env.ledger().timestamp() + 10_000,
+        chain_id: domain.chain_id,
+        contract_id: client.address.clone(),
+    };
+    let sig0 = sign_permit(&env, &signing_key, &domain, &permit0);
+    client.deposit_for(&permit0, &sig0, &asset, &500);
+
+    advance_ledgers(&env, PERMIT_TTL_EXTEND_TO - 1_000);
+
+    // Replay the same, already-consumed permit (nonce 0) again.
+    client.deposit_for(&permit0, &sig0, &asset, &500);
+}
+
+/// `revoke_permits` invalidates a previously-signed permit immediately,
+/// regardless of its nonce, without needing to know which nonce it used.
+/// See `test_permit_replay_fails_after_long_dormancy` for why the expected
+/// panic string is the error variant's name rather than `Contract, #N`.
+#[test]
+#[should_panic(expected = "PermitNonceMismatch")]
+fn test_revoke_permits_invalidates_outstanding_permit() {
+    let env = Env::default();
+    let (client, _admin, asset) = setup_with_asset(&env);
+
+    let signing_key = test_signing_key(3);
+    let public_key = BytesN::from_array(&env, &signing_key.verifying_key().to_bytes());
+    let user = signer_address(&env, &public_key);
+
+    let domain = client.get_domain_separator();
+    let permit0 = Permit {
+        public_key: public_key.clone(),
+        action: Symbol::new(&env, "deposit"),
+        asset: asset.clone(),
+        amount: 500,
+        nonce: 0,
+        epoch: 0,
+        deadline: env.ledger().timestamp() + 10_000,
+        chain_id: domain.chain_id,
+        contract_id: client.address.clone(),
+    };
+    let sig0 = sign_permit(&env, &signing_key, &domain, &permit0);
+
+    let new_epoch = client.revoke_permits(&user);
+    assert_eq!(new_epoch, 1);
+
+    // The permit was signed under epoch 0, which is no longer current.
+    client.deposit_for(&permit0, &sig0, &asset, &500);
+}
+
+/// A `SupportedAsset` with a live balance must survive a long dormancy: it
+/// must not archive into "unsupported" purely from time passing, which
+/// would otherwise trap the deposited funds behind `UnsupportedAsset` (the
+/// exact outcome `apply_configure_asset`'s active-positions guard exists to
+/// prevent for an explicit admin call).
+#[test]
+fn test_supported_asset_with_live_balance_survives_long_dormancy() {
+    let env = Env::default();
+    let (client, _admin, asset) = setup_with_asset(&env);
+    let user = Address::generate(&env);
+
+    client.deposit(&user, &asset, &1_000i128);
+
+    let supported_key = DataKey::SupportedAsset(asset.clone());
+    let ttl = env.as_contract(&client.address, || {
+        env.storage().persistent().get_ttl(&supported_key)
+    });
+    assert!(
+        ttl >= PERSISTENT_TTL_EXTEND_TO - PERSISTENT_TTL_THRESHOLD,
+        "deposit did not bump SupportedAsset's TTL close to PERSISTENT_TTL_EXTEND_TO: got {ttl}"
+    );
+
+    advance_ledgers(&env, PERSISTENT_TTL_EXTEND_TO - 100);
+
+    // Still usable — no UnsupportedAsset panic, and the live balance is intact.
+    client.deposit(&user, &asset, &1i128);
+    assert!(client.is_asset_supported(&asset));
+    assert_eq!(client.get_asset_reserve(&asset).total_balance, 1_001);
+}
+
+/// Oracle staleness enforcement must survive the loss of `OracleLastUpdated`
+/// specifically: a live `OraclePrice` next to a *missing* `OracleLastUpdated`
+/// must fail closed (`OraclePriceStale`), not silently skip the staleness
+/// check and let an arbitrarily stale price read as fresh. Normal operation
+/// always writes and bumps the two keys together (`apply_set_oracle_price`,
+/// `bump_oracle_keys`), so this simulates the only way they could
+/// realistically diverge — using `env.as_contract` to reach into storage
+/// directly, standing in for a partial-archival edge case.
+#[test]
+#[should_panic(expected = "Contract, #23")]
+fn test_oracle_staleness_survives_loss_of_last_updated() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let collateral_asset = Address::generate(&env);
+    let borrow_asset = Address::generate(&env);
+    let user = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    configure_asset(&env, &client, &admin, &collateral_asset);
+    configure_asset(&env, &client, &admin, &borrow_asset);
+    set_oracle_price(&env, &client, &admin, &collateral_asset, &1);
+    set_oracle_price(&env, &client, &admin, &borrow_asset, &1);
+
+    let supplier = Address::generate(&env);
+    client.deposit(&supplier, &borrow_asset, &1_000);
+    client.deposit(&user, &collateral_asset, &1_000);
+
+    // Sanity: borrowing works normally before anything is removed.
+    client.borrow(&user, &borrow_asset, &collateral_asset, &100);
+
+    // Simulate the borrow asset's OracleLastUpdated having diverged from its
+    // still-live OraclePrice.
+    env.as_contract(&contract_id, || {
+        env.storage()
+            .persistent()
+            .remove(&DataKey::OracleLastUpdated(borrow_asset.clone()));
+    });
+
+    // Must fail closed rather than treat the (possibly ancient) price as fresh.
+    client.borrow(&user, &borrow_asset, &collateral_asset, &10);
 }

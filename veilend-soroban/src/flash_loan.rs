@@ -142,9 +142,9 @@ impl VeilLendContract {
             max_bps,
         };
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::FlashLoanState(asset.clone()), &state);
+        let key = DataKey::FlashLoanState(asset.clone());
+        env.storage().persistent().set(&key, &state);
+        Self::bump_persistent(&env, &key);
 
         FlashLoanConfigUpdated {
             admin,
@@ -255,9 +255,7 @@ impl VeilLendContract {
 
         // Update total deposits (the asset is temporarily lent out)
         let total_deposited = Self::get_total_deposited(env.clone(), asset.clone()) - amount;
-        env.storage()
-            .persistent()
-            .set(&DataKey::TotalDeposited(asset.clone()), &total_deposited);
+        Self::write_total_deposited(&env, &asset, total_deposited);
 
         // Transfer principal to receiver before callback
         Self::transfer_to(&env, &asset, &receiver, amount);
@@ -279,10 +277,7 @@ impl VeilLendContract {
 
         let final_total_deposited =
             Self::get_total_deposited(env.clone(), asset.clone()) + total_repayment;
-        env.storage().persistent().set(
-            &DataKey::TotalDeposited(asset.clone()),
-            &final_total_deposited,
-        );
+        Self::write_total_deposited(&env, &asset, final_total_deposited);
 
         // Release reentrancy guard
         Self::release_reentrancy_guard(&env, &asset);
