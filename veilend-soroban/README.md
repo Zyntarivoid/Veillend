@@ -144,13 +144,13 @@ Call `contract_metadata()` on a deployed contract before writing a migration or 
 
 | Metadata field | Current value | Meaning |
 | :--- | :--- | :--- |
-| `contract_version` | `10` | The public contract interface version. |
-| `storage_schema_version` | `7` | The version of serialized storage keys and values. |
-| `storage_schema_id` | `VLENDV7` | A compact, stable identifier for this storage layout. |
+| `contract_version` | `11` | The public contract interface version. |
+| `storage_schema_version` | `8` | The version of serialized storage keys and values. |
+| `storage_schema_id` | `VLENDV8` | A compact, stable identifier for this storage layout. |
 
 `storage_schema_version` reflects the **deployed instance's** schema: it is stored at construction and only advanced by `migrate`, so immediately after an upgrade to a wasm with a newer storage layout it still reports the pre-migration version until the migration runs.
 
-Schema `VLENDV7` uses these keys:
+Schema `VLENDV8` uses these keys:
 
 | Durability | Key | Value |
 | :--- | :--- | :--- |
@@ -164,6 +164,10 @@ Schema `VLENDV7` uses these keys:
 | Instance | `MaxProtocolFeeBps` | `u32` |
 | Instance | `GlobalCloseFactorBps` | `u32` |
 | Instance | `ReentrancyGuard` | `ReentrancyGuard { locked_asset: Address, caller: Address }` (transient: set and removed within one `flash_loan` call) |
+| Instance | `RewardToken` | `Address` |
+| Instance | `RewardPoolFunded` | `i128` |
+| Instance | `VestingCliffSeconds` | `u64` |
+| Instance | `VestingDurationSeconds` | `u64` |
 | Persistent | `SupportedAsset(Address)` | `bool` |
 | Persistent | `SupportedAssetList` | `Vec<Address>` |
 | Persistent | `AssetReserve(Address)` | `AssetReserve { total_balance: i128, protocol_fees: i128 }` |
@@ -188,6 +192,9 @@ Schema `VLENDV7` uses these keys:
 | Persistent | `FlashLoanState(Address)` | `FlashLoanState { enabled: bool, premium_bps: u32, max_bps: u32 }` |
 | Persistent | `PermitNonce(Address)` | `u64` |
 | Persistent | `PermitEpoch(Address)` | `u64` |
+| Persistent | `AssetRewardState(Address)` | `AssetRewardState { supply_index, borrow_index, supply_speed, borrow_speed: i128, last_reward_ts: u64 }` |
+| Persistent | `UserRewardState(Address, Address)` | `UserRewardState { supply_index_snapshot, borrow_index_snapshot, unclaimed_supply, unclaimed_borrow: i128 }` |
+| Persistent | `VestingGrants(Address)` | `Vec<VestingGrant>` |
 
 ## Storage lifetime & TTL policy
 
@@ -212,7 +219,7 @@ Meta-transactions (`deposit_for`/`withdraw_for`/`borrow_for`/`repay_for`) are au
 - An epoch mismatch and a nonce mismatch both surface as `VeilLendError::PermitNonceMismatch` (code 43): `#[contracterror]` enums are XDR-bounded to 50 cases and `VeilLendError` is already at that cap (see `InterestStateMissing`, code 51 — note the enum has 50 *cases* even though the highest discriminant is 51, because code 16 is permanently retired), so the two conditions intentionally share a code. Both call for the same client response: fetch the current nonce/epoch and re-sign.
 - Bumping `CONTRACT_VERSION` also invalidates every previously-signed permit on its own: the signed digest includes `DomainSeparator.version`, which is always the running `CONTRACT_VERSION`.
 
-The admin authority is a `Vec<Address>` (`AdminSet`): any one of N admins can act, and `add_admin`/`remove_admin` manage membership (with a last-admin lockout guard). Privileged mutations — `configure_asset`, `set_oracle_price`, `update_asset_caps`, `set_min_collateral_ratio`, pausing, `record_protocol_fee`, `withdraw_reserves`, and upgrading — follow a `propose_*` → `execute_*` (after the `TimelockLedgers` delay) → `cancel_*` flow, with `set_paused(false)` exempt so unpausing stays immediate.
+The admin authority is a `Vec<Address>` (`AdminSet`): any one of N admins can act, and `add_admin`/`remove_admin` manage membership (with a last-admin lockout guard). Privileged mutations — `configure_asset`, `set_oracle_price`, `update_asset_caps`, `set_min_collateral_ratio`, pausing, `record_protocol_fee`, `withdraw_reserves`, `recover_rewards`, and upgrading — follow a `propose_*` → `execute_*` (after the `TimelockLedgers` delay) → `cancel_*` flow, with `set_paused(false)` exempt so unpausing stays immediate.
 
 Upgrades (`propose_upgrade`/`execute_upgrade`/`cancel_upgrade`) are timelocked like every other privileged mutation but with a hard floor: the delay is `max(TimelockLedgers, UPGRADE_MIN_TIMELOCK_LEDGERS)` and is snapshotted into the pending action at proposal time, so an admin cannot shrink the global timelock and immediately swap the wasm. `execute_upgrade` is **not** blocked while the contract is paused — pausing is the expected response to a discovered bug and must never lock out the fix. It also rejects downgrades: a wasm whose `contract_metadata().contract_version` is lower than the running one fails with `InvalidUpgradeVersion`.
 
@@ -239,12 +246,15 @@ After an upgrade to a wasm with a newer storage layout, an admin calls `migrate(
 | `execute_record_protocol_fee`, `set_max_protocol_fee_bps` | `record_protocol_fee` credits the protocol treasury from user-reserve funds — exactly the "funnel value while paused" vector this issue closes. |
 | `execute_withdraw_reserves` | Directly moves protocol treasury funds out of the contract. |
 | `configure_flash_loan` | Admin config for `flash_loan`; must not be reconfigurable to set up value extraction while paused. |
+| `set_reward_token`, `set_reward_speeds`, `set_vesting_params`, `fund_reward_pool` | Admin reward-layer config; must not be re-pointed or re-funded while paused. |
+| `execute_recover_rewards` | Directly moves reward-token treasury out of the contract. |
 
 **Not checked (intentionally still callable while paused):**
 
 | Entrypoint | Why it stays open |
 | :--- | :--- |
 | `repay`, `withdraw` (+ batch/permit variants) | Users must always be able to reduce debt or exit collateral, especially during an incident. |
+| `claim_asset`, `claim_all`, `vest_claimable` | Users must still be able to realize and withdraw vested rewards during an incident. |
 | `liquidate` | Blocking liquidations while paused would let bad debt accumulate exactly when the protocol is most exposed. |
 | `set_paused`, `propose_set_paused`/`execute_set_paused`/`cancel_set_paused` | The pause switch itself must stay reachable in both directions. |
 | `execute_upgrade`, `migrate` | The upgrade + migrate flow is the incident-response path for a paused contract: you pause first, then upgrade and migrate to ship the fix. |

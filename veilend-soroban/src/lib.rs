@@ -1,10 +1,12 @@
 #![no_std]
 
 mod interest;
+mod rewards;
 
 // Re-export accrual constants so integration tests and external callers can
 // use them without reaching into the private `interest` module.
 pub use interest::{DEFAULT_PARAMS as INTEREST_DEFAULT_PARAMS, RATE_SCALE, SECONDS_PER_YEAR};
+pub use rewards::SECONDS_PER_DAY;
 
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error,
@@ -29,16 +31,16 @@ pub use flash_loan::{
 };
 
 /// Increment this only when a contract interface change requires consumers to adapt.
-pub const CONTRACT_VERSION: u32 = 10;
+pub const CONTRACT_VERSION: u32 = 11;
 
 /// Increment this only when the serialized `DataKey` or stored value layout changes.
-pub const STORAGE_SCHEMA_VERSION: u32 = 7;
+pub const STORAGE_SCHEMA_VERSION: u32 = 8;
 
 /// Values <= this amount after repay/withdraw are rounded to zero.
 pub const DUST_THRESHOLD: i128 = 100;
 
 /// A compact, stable identifier for the current `DataKey` storage layout.
-const STORAGE_SCHEMA_ID: Symbol = symbol_short!("VLENDV7");
+const STORAGE_SCHEMA_ID: Symbol = symbol_short!("VLENDV8");
 
 // ─── Storage TTL policy ───────────────────────────────────────────────────────
 //
@@ -104,13 +106,14 @@ pub struct ContractMetadata {
     pub storage_schema_id: Symbol,
 }
 
-/// Keys and value shapes that make up storage schema `VLENDV7`.
+/// Keys and value shapes that make up storage schema `VLENDV8`.
 ///
 /// Instance storage: `AdminSet: Vec<Address>`, `MinCollateralRatioBps: u32`,
 /// `TimelockLedgers: u32`, `NextActionId: u64`,
 /// `StorageSchemaVersion: u32`,
 /// `PendingAction(u64): PendingAction`. Instance storage additionally
-/// holds `GlobalCloseFactorBps: u32`.
+/// holds `GlobalCloseFactorBps: u32`, `RewardToken`, `RewardPoolFunded`,
+/// `VestingCliffSeconds`, and `VestingDurationSeconds`.
 /// Persistent storage: `SupportedAsset(Address): bool`,
 /// `Position(Address, Address): Position`, `OraclePrice(Address): i128`,
 /// `DepositCap(Address)`/`BorrowCap(Address): i128`,
@@ -230,6 +233,28 @@ pub enum DataKey {
     /// regardless of nonce. Always read/written/bumped alongside
     /// `PermitNonce` for the same user so the two can never drift apart.
     PermitEpoch(Address),
+
+    /// Per-asset reward indexes, speeds, and last-poke timestamp.
+    /// See `AssetRewardState`.
+    AssetRewardState(Address),
+    /// Per-user per-asset earned-but-unclaimed supply/borrow counters
+    /// plus the index snapshots they were last realized against.
+    UserRewardState(Address, Address),
+    /// Address of the VEIL-style reward token. The contract never mints
+    /// this token; the admin funds the pool by transferring pre-minted
+    /// tokens in `fund_reward_pool`.
+    RewardToken,
+    /// Cumulative reward-token amount verified as received by
+    /// `fund_reward_pool` (actual balance delta, not the requested
+    /// amount).
+    RewardPoolFunded,
+    /// Global vesting cliff, in seconds, snapshotted into each new grant.
+    VestingCliffSeconds,
+    /// Global linear vesting duration, in seconds, snapshotted into each
+    /// new grant. `0` means instant vest.
+    VestingDurationSeconds,
+    /// Per-user list of vesting grants created by `claim_asset`/`claim_all`.
+    VestingGrants(Address),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -252,6 +277,56 @@ pub struct InterestState {
     pub supply_index: i128,
     pub borrow_index: i128,
     pub last_accrual_timestamp: u64,
+}
+
+/// Per-asset reward distribution state. Indexes are fixed-point with
+/// `RATE_SCALE`, analogous to `InterestState`. Speeds are reward-token
+/// units per second streamed pro-rata to depositors / borrowers.
+///
+/// Storage: persistent, keyed by `DataKey::AssetRewardState(asset)`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct AssetRewardState {
+    pub supply_index: i128,
+    pub borrow_index: i128,
+    pub supply_speed: i128,
+    pub borrow_speed: i128,
+    pub last_reward_ts: u64,
+}
+
+/// Per-user per-asset earned-but-unclaimed reward counters, plus the
+/// reward-index snapshots they were last realized against.
+///
+/// Storage: persistent, keyed by `DataKey::UserRewardState(user, asset)`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct UserRewardState {
+    pub supply_index_snapshot: i128,
+    pub borrow_index_snapshot: i128,
+    pub unclaimed_supply: i128,
+    pub unclaimed_borrow: i128,
+}
+
+/// A single vesting grant created when a user claims earned rewards.
+/// `cliff_seconds` / `duration_seconds` are snapshotted from the global
+/// config at claim time so later admin changes cannot rewrite in-flight
+/// grants.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct VestingGrant {
+    pub amount: i128,
+    pub claimed: i128,
+    pub start_ts: u64,
+    pub cliff_seconds: u64,
+    pub duration_seconds: u64,
+}
+
+/// Global cliff + linear vesting configuration applied to new grants.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct VestingParams {
+    pub cliff_seconds: u64,
+    pub duration_seconds: u64,
 }
 
 /// Per-asset interest-rate model parameters (two-slope / kink model).
@@ -366,6 +441,10 @@ pub enum ActionKind {
     /// Sets per-asset risk parameters (collateral factor, liquidation threshold,
     /// liquidation bonus).
     SetAssetRiskParams,
+    /// Recovers stranded reward tokens from the contract to an admin-chosen
+    /// destination. Timelocked so a compromised key cannot instantly drain
+    /// the reward pool.
+    RecoverRewards,
 }
 
 /// The arguments captured when a privileged action is proposed. Stored in
@@ -386,6 +465,8 @@ pub enum ActionPayload {
     Upgrade(BytesN<32>),
     /// (asset, collateral_factor_bps, liquidation_threshold_bps, liquidation_bonus_bps)
     SetAssetRiskParams(Address, u32, u32, u32),
+    /// (to, amount) — recover `amount` of the reward token to `to`.
+    RecoverRewards(Address, i128),
 }
 
 /// A proposed privileged action awaiting its timelock window.
@@ -811,6 +892,52 @@ pub struct ContractUpgraded {
 pub struct StorageMigrated {
     pub from_version: u32,
     pub to_version: u32,
+}
+
+#[contractevent(topics = ["veillend", "reward_pool_funded"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RewardPoolFunded {
+    #[topic]
+    pub funder: Address,
+    pub amount: i128,
+    pub new_total_funded: i128,
+}
+
+#[contractevent(topics = ["veillend", "reward_speeds_updated"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RewardSpeedsUpdated {
+    #[topic]
+    pub admin: Address,
+    #[topic]
+    pub asset: Address,
+    pub supply_speed: i128,
+    pub borrow_speed: i128,
+}
+
+#[contractevent(topics = ["veillend", "rewards_claimed"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RewardsClaimed {
+    #[topic]
+    pub user: Address,
+    pub amount: i128,
+    pub grant_start_ts: u64,
+}
+
+#[contractevent(topics = ["veillend", "rewards_vested"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RewardsVested {
+    #[topic]
+    pub user: Address,
+    pub amount: i128,
+}
+
+#[contractevent(topics = ["veillend", "rewards_recovered"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RewardsRecovered {
+    #[topic]
+    pub to: Address,
+    pub amount: i128,
+    pub executed_by: Address,
 }
 
 #[contract]
@@ -1404,6 +1531,9 @@ impl VeilLendContract {
             &Self::read_position(&env, &user, &asset),
             &interest_state,
         );
+        // Snapshot-on-touch: fold pending rewards against the pre-mutation
+        // balance before the deposit is written.
+        Self::accrue_user_rewards(&env, &user, &asset, &position);
         let mut reserve = Self::read_asset_reserve(&env, &asset);
         position.deposited += amount;
         reserve.total_balance += amount;
@@ -1448,6 +1578,7 @@ impl VeilLendContract {
             &Self::read_position(&env, &user, &borrow_asset),
             &interest_state,
         );
+        Self::accrue_user_rewards(&env, &user, &borrow_asset, &position);
         let mut reserve = Self::read_asset_reserve(&env, &borrow_asset);
         if amount > reserve.total_balance {
             panic_with_error!(&env, VeilLendError::InsufficientReserve);
@@ -1494,6 +1625,7 @@ impl VeilLendContract {
             &Self::read_position(&env, &user, &asset),
             &interest_state,
         );
+        Self::accrue_user_rewards(&env, &user, &asset, &position);
         let mut reserve = Self::read_asset_reserve(&env, &asset);
         if amount > position.borrowed {
             panic_with_error!(&env, VeilLendError::RepayTooLarge);
@@ -1543,6 +1675,7 @@ impl VeilLendContract {
             &Self::read_position(&env, &user, &withdrawn_asset),
             &interest_state,
         );
+        Self::accrue_user_rewards(&env, &user, &withdrawn_asset, &position);
         let mut reserve = Self::read_asset_reserve(&env, &withdrawn_asset);
         if amount > position.deposited {
             panic_with_error!(&env, VeilLendError::InsufficientDeposit);
@@ -1957,6 +2090,13 @@ impl VeilLendContract {
             &Self::read_position(&env, &user, &collateral_asset),
             &collateral_interest_state,
         );
+        // Realize rewards against pre-liquidation balances for both the
+        // borrower (debt + collateral) and the liquidator (collateral they
+        // are about to receive) before any position is rewritten.
+        Self::accrue_user_rewards(&env, &user, &debt_asset, &debt_position);
+        Self::accrue_user_rewards(&env, &user, &collateral_asset, &collateral_position);
+        let liquidator_pre = Self::read_accrued_position(&env, &liquidator, &collateral_asset);
+        Self::accrue_user_rewards(&env, &liquidator, &collateral_asset, &liquidator_pre);
 
         if debt_position.borrowed == 0 {
             panic_with_error!(&env, VeilLendError::PositionNotLiquidatable);
@@ -2219,6 +2359,7 @@ impl VeilLendContract {
                 &Self::read_position(&env, &user, asset),
                 &interest_state,
             );
+            Self::accrue_user_rewards(&env, &user, asset, &position);
             let mut reserve = Self::read_asset_reserve(&env, asset);
 
             position.deposited += amount;
@@ -2311,6 +2452,7 @@ impl VeilLendContract {
                 &Self::read_position(&env, &user, asset),
                 &interest_state,
             );
+            Self::accrue_user_rewards(&env, &user, asset, &position);
             let mut reserve = Self::read_asset_reserve(&env, asset);
 
             if amount > position.deposited {
@@ -2412,6 +2554,7 @@ impl VeilLendContract {
                 &Self::read_position(&env, &user, asset),
                 &interest_state,
             );
+            Self::accrue_user_rewards(&env, &user, asset, &position);
             let mut reserve = Self::read_asset_reserve(&env, asset);
 
             if amount > reserve.total_balance {
@@ -2491,6 +2634,7 @@ impl VeilLendContract {
                 &Self::read_position(&env, &user, asset),
                 &interest_state,
             );
+            Self::accrue_user_rewards(&env, &user, asset, &position);
             let mut reserve = Self::read_asset_reserve(&env, asset);
 
             if amount > position.borrowed {
@@ -2743,6 +2887,7 @@ impl VeilLendContract {
             &Self::read_position(env, user, asset),
             &interest_state,
         );
+        Self::accrue_user_rewards(env, user, asset, &position);
         let mut reserve = Self::read_asset_reserve(env, asset);
         position.deposited += amount;
         reserve.total_balance += amount;
@@ -2779,6 +2924,7 @@ impl VeilLendContract {
             &Self::read_position(env, user, withdrawn_asset),
             &interest_state,
         );
+        Self::accrue_user_rewards(env, user, withdrawn_asset, &position);
         let mut reserve = Self::read_asset_reserve(env, withdrawn_asset);
         if amount > position.deposited {
             panic_with_error!(env, VeilLendError::InsufficientDeposit);
@@ -2837,6 +2983,7 @@ impl VeilLendContract {
             &Self::read_position(env, user, borrow_asset),
             &interest_state,
         );
+        Self::accrue_user_rewards(env, user, borrow_asset, &position);
         let mut reserve = Self::read_asset_reserve(env, borrow_asset);
         if amount > reserve.total_balance {
             panic_with_error!(env, VeilLendError::InsufficientReserve);
@@ -2876,6 +3023,7 @@ impl VeilLendContract {
             &Self::read_position(env, user, asset),
             &interest_state,
         );
+        Self::accrue_user_rewards(env, user, asset, &position);
         let mut reserve = Self::read_asset_reserve(env, asset);
         if amount > position.borrowed {
             panic_with_error!(env, VeilLendError::RepayTooLarge);
@@ -3024,6 +3172,9 @@ impl VeilLendContract {
                     panic_with_error!(env, VeilLendError::LiquidationThresholdPlusBonusExceedsMax);
                 }
             }
+            ActionPayload::RecoverRewards(_to, amount) => {
+                Self::require_positive_amount(env, *amount);
+            }
         }
     }
 
@@ -3157,6 +3308,9 @@ impl VeilLendContract {
                 *liquidation_threshold_bps,
                 *liquidation_bonus_bps,
             ),
+            ActionPayload::RecoverRewards(to, amount) => {
+                Self::apply_recover_rewards(env, admin, to, *amount)
+            }
         }
     }
 
@@ -3222,6 +3376,11 @@ impl VeilLendContract {
     /// a match arm the next time the storage layout changes, each stepping the
     /// version by exactly one.
     fn migrate_storage_from(env: &Env, from_version: u32) {
+        // 7 -> 8: reward-index / vesting keys are additive. Missing entries
+        // default to zero speeds, zero indexes, and instant vesting, so
+        // existing deployments need no backfill — users simply start earning
+        // from the first post-upgrade poke after an admin sets speeds.
+        //
         // 6 -> 7: `read_interest_state` now treats a supported asset with no
         // `InterestState` as archival (see `VeilLendError::InterestStateMissing`)
         // rather than a legitimately fresh asset, because `apply_configure_asset`
@@ -4608,7 +4767,7 @@ mod tests {
         let metadata = client.contract_metadata();
         assert_eq!(metadata.contract_version, CONTRACT_VERSION);
         assert_eq!(metadata.storage_schema_version, STORAGE_SCHEMA_VERSION);
-        assert_eq!(metadata.storage_schema_id, symbol_short!("VLENDV7"));
+        assert_eq!(metadata.storage_schema_id, symbol_short!("VLENDV8"));
     }
 
     #[test]
@@ -4677,5 +4836,187 @@ mod tests {
             VeilLendError::Unauthorized as u32,
             "NotInitialized and Unauthorized must be distinct error codes"
         );
+    }
+
+    #[test]
+    fn test_two_equal_depositors_split_reward_window() {
+        use soroban_sdk::testutils::{Address as _, Ledger as _};
+
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        let asset = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        let action_id = client.propose_configure_asset(&admin, &asset, &true);
+        env.ledger().set_sequence_number(
+            env.ledger()
+                .sequence()
+                .saturating_add(DEFAULT_TIMELOCK_LEDGERS),
+        );
+        client.execute_configure_asset(&admin, &action_id);
+
+        client.deposit(&alice, &asset, &1_000);
+        client.deposit(&bob, &asset, &1_000);
+        client.set_reward_speeds(&admin, &asset, &10, &10);
+
+        env.ledger()
+            .set_timestamp(env.ledger().timestamp().saturating_add(100));
+
+        assert_eq!(client.get_unclaimed_rewards(&alice, &asset), 500);
+        assert_eq!(client.get_unclaimed_rewards(&bob, &asset), 500);
+    }
+
+    #[test]
+    fn test_late_joiner_earns_only_from_join_forward() {
+        use soroban_sdk::testutils::{Address as _, Ledger as _};
+
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let alice = Address::generate(&env);
+        let bob = Address::generate(&env);
+        let asset = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        let action_id = client.propose_configure_asset(&admin, &asset, &true);
+        env.ledger().set_sequence_number(
+            env.ledger()
+                .sequence()
+                .saturating_add(DEFAULT_TIMELOCK_LEDGERS),
+        );
+        client.execute_configure_asset(&admin, &action_id);
+
+        client.deposit(&alice, &asset, &1_000);
+        client.set_reward_speeds(&admin, &asset, &10, &0);
+
+        // Solo window: Alice is the only depositor for 100 seconds.
+        env.ledger()
+            .set_timestamp(env.ledger().timestamp().saturating_add(100));
+        assert_eq!(client.get_unclaimed_rewards(&alice, &asset), 1_000);
+
+        // Bob joins. Snapshot-on-touch means he does not harvest Alice's
+        // 100-second solo window.
+        client.deposit(&bob, &asset, &1_000);
+        assert_eq!(client.get_unclaimed_rewards(&bob, &asset), 0);
+
+        // Shared window of another 100 seconds at 50/50.
+        env.ledger()
+            .set_timestamp(env.ledger().timestamp().saturating_add(100));
+        assert_eq!(client.get_unclaimed_rewards(&alice, &asset), 1_500);
+        assert_eq!(client.get_unclaimed_rewards(&bob, &asset), 500);
+    }
+
+    #[test]
+    fn test_vesting_cliff_then_linear_then_full() {
+        use soroban_sdk::testutils::{Address as _, Ledger as _};
+
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let alice = Address::generate(&env);
+        let asset = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        let action_id = client.propose_configure_asset(&admin, &asset, &true);
+        env.ledger().set_sequence_number(
+            env.ledger()
+                .sequence()
+                .saturating_add(DEFAULT_TIMELOCK_LEDGERS),
+        );
+        client.execute_configure_asset(&admin, &action_id);
+
+        let cliff = 30 * SECONDS_PER_DAY;
+        let duration = 90 * SECONDS_PER_DAY;
+        client.set_vesting_params(&admin, &cliff, &duration);
+
+        client.deposit(&alice, &asset, &1_000);
+        // Emit 9_000 tokens over 900 seconds at 10/s so the linear fractions
+        // (0, 1/2, 1) land on round numbers.
+        client.set_reward_speeds(&admin, &asset, &10, &0);
+        env.ledger()
+            .set_timestamp(env.ledger().timestamp().saturating_add(900));
+        assert_eq!(client.get_unclaimed_rewards(&alice, &asset), 9_000);
+
+        client.claim_all(&alice);
+        let start = env.ledger().timestamp();
+        assert_eq!(client.get_vested_claimable(&alice), 0);
+
+        // Day 10: still inside the 30-day cliff.
+        env.ledger().set_timestamp(start + 10 * SECONDS_PER_DAY);
+        assert_eq!(client.get_vested_claimable(&alice), 0);
+
+        // Day 45 of a 90-day vest: linear fraction 45/90.
+        env.ledger().set_timestamp(start + 45 * SECONDS_PER_DAY);
+        assert_eq!(client.get_vested_claimable(&alice), 4_500);
+
+        // After day 91: fully vested.
+        env.ledger().set_timestamp(start + 91 * SECONDS_PER_DAY);
+        assert_eq!(client.get_vested_claimable(&alice), 9_000);
+    }
+
+    #[test]
+    fn test_vest_claimable_underfunded_does_not_mutate_claimed() {
+        use soroban_sdk::testutils::{Address as _, Ledger as _};
+        use soroban_sdk::token::{StellarAssetClient, TokenClient};
+
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let alice = Address::generate(&env);
+        let asset = Address::generate(&env);
+        let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+        let client = VeilLendContractClient::new(&env, &contract_id);
+
+        let action_id = client.propose_configure_asset(&admin, &asset, &true);
+        env.ledger().set_sequence_number(
+            env.ledger()
+                .sequence()
+                .saturating_add(DEFAULT_TIMELOCK_LEDGERS),
+        );
+        client.execute_configure_asset(&admin, &action_id);
+
+        // Instant vest so the whole grant is immediately releasable.
+        client.set_vesting_params(&admin, &0, &0);
+
+        let sac = env.register_stellar_asset_contract_v2(admin.clone());
+        let token_id = sac.address();
+        client.set_reward_token(&admin, &token_id);
+
+        client.deposit(&alice, &asset, &1_000);
+        client.set_reward_speeds(&admin, &asset, &10, &0);
+        env.ledger()
+            .set_timestamp(env.ledger().timestamp().saturating_add(100));
+        assert_eq!(client.get_unclaimed_rewards(&alice, &asset), 1_000);
+
+        client.claim_all(&alice);
+        assert_eq!(client.get_vested_claimable(&alice), 1_000);
+        let grants_before = client.get_vesting_grants(&alice);
+        assert_eq!(grants_before.len(), 1);
+        assert_eq!(grants_before.get(0).unwrap().claimed, 0);
+        assert_eq!(grants_before.get(0).unwrap().amount, 1_000);
+
+        // Pool is unfunded: vest_claimable must revert without mutating
+        // claimed counters.
+        let result = client.try_vest_claimable(&alice);
+        assert!(result.is_err());
+
+        let grants_after = client.get_vesting_grants(&alice);
+        assert_eq!(grants_after.len(), 1);
+        assert_eq!(grants_after.get(0).unwrap().claimed, 0);
+        assert_eq!(grants_after.get(0).unwrap().amount, 1_000);
+
+        // Sanity: once the pool is funded the same grant can be released.
+        StellarAssetClient::new(&env, &token_id).mint(&admin, &1_000);
+        client.fund_reward_pool(&admin, &1_000);
+        client.vest_claimable(&alice);
+        assert_eq!(TokenClient::new(&env, &token_id).balance(&alice), 1_000);
+        assert_eq!(client.get_vested_claimable(&alice), 0);
+        assert_eq!(client.get_vesting_grants(&alice).len(), 0);
     }
 }
