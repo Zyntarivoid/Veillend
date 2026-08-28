@@ -129,11 +129,11 @@ impl VeilLendContract {
         Self::require_not_paused(&env);
 
         if !(MIN_FLASH_LOAN_PREMIUM_BPS..=MAX_FLASH_LOAN_PREMIUM_BPS).contains(&premium_bps) {
-            panic_with_error!(&env, VeilLendError::InvalidFlashLoanPremium);
+            panic_with_error!(&env, VeilLendError::InvalidFlashLoanParams);
         }
 
         if !(1..=10_000).contains(&max_bps) {
-            panic_with_error!(&env, VeilLendError::InvalidFlashLoanMaxBps);
+            panic_with_error!(&env, VeilLendError::InvalidFlashLoanParams);
         }
 
         let state = FlashLoanState {
@@ -400,3 +400,4 @@ mod tests {
         assert_eq!(calculate_premium_rounded_up(&env, 0, 9), 0);
     }
 }
+

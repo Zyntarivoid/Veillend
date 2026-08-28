@@ -198,6 +198,8 @@ pub enum DataKey {
     /// Max fraction (bps) of a position's outstanding debt that may be
     /// seized in a single `liquidate` call. Default 5_000 (50%).
     GlobalCloseFactorBps,
+    LiquidationCloseFactorBps,
+    LiquidationDiscountBps,
 
     /// Flash loan reentrancy guard (stored in instance storage)
     ReentrancyGuard,
@@ -519,9 +521,9 @@ pub enum VeilLendError {
     /// Operation blocked: contract is paused
     ContractPaused = 12,
     /// Deposit cap would be exceeded
-    DepositCapExceeded = 13,
+    CapExceeded = 13,
     /// Borrow cap would be exceeded
-    BorrowCapExceeded = 14,
+    InvalidLiquidationParams = 14,
     /// Invalid cap value (must be positive or -1 for unlimited)
     InvalidCap = 15,
     // 16 is retired (formerly CircuitBreakerTriggered, dead code — pause
@@ -545,9 +547,9 @@ pub enum VeilLendError {
     /// Oracle price change exceeds maximum allowed change
     OraclePriceChangeExceedsLimit = 24,
     /// Oracle price is below minimum allowed price
-    OraclePriceBelowMin = 25,
+    OraclePriceOutOfBounds = 25,
     /// Oracle price is above maximum allowed price
-    OraclePriceAboveMax = 26,
+    LiquidationTooLarge = 26,
     /// Cannot disable an asset that still has active deposited or borrowed balances.
     /// Disabling such an asset would permanently trap user funds because every
     /// lending entrypoint calls require_supported_asset.
@@ -562,7 +564,7 @@ pub enum VeilLendError {
     /// Arithmetic overflow or underflow in interest accrual or index computation.
     ArithmeticOverflow = 30,
     /// Aggregate supply (deposit) cap for this asset would be exceeded.
-    SupplyCapExceeded = 31,
+    SeizeExceedsCollateral = 31,
     /// Position's health factor is at or above 1.0; nothing to liquidate.
     PositionNotLiquidatable = 32,
     /// Flash loan is not configured for this asset
@@ -576,9 +578,9 @@ pub enum VeilLendError {
     /// Flash loan reentrancy detected (nested flash loan on same asset)
     FlashLoanReentrancy = 37,
     /// Invalid flash loan premium (outside allowed range)
-    InvalidFlashLoanPremium = 38,
+    InvalidFlashLoanParams = 38,
     /// Invalid flash loan max bps (outside allowed range)
-    InvalidFlashLoanMaxBps = 39,
+    BadDebtStillCollateralized = 39,
     /// Interest-rate model parameters are out of the allowed bounds.
     /// See `set_interest_params` for the exact validation rules.
     InvalidInterestParams = 40,
@@ -628,6 +630,14 @@ pub enum VeilLendError {
     /// no room to add another without retiring one first, the same way `16`
     /// was retired below rather than reused.
     InterestStateMissing = 51,
+}
+
+#[contractevent(topics = ["veillend", "bad_debt_written_off"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BadDebtWrittenOff {
+    #[topic]
+    pub asset: Address,
+    pub amount_written_off: i128,
 }
 
 #[contractevent(topics = ["veillend", "asset_configured"])]
@@ -2024,29 +2034,90 @@ impl VeilLendContract {
             .unwrap_or(0)
     }
 
-    /// Sets the global liquidation close factor, in bps of a position's
-    /// outstanding debt that may be seized in a single `liquidate` call.
-    /// Bounded to `[1_000, 10_000]` (10%-100%). Admin-only, immediate.
-    pub fn set_close_factor(env: Env, admin: Address, bps: u32) {
+    /// Sets the global liquidation parameters.
+    pub fn writeoff_bad_debt(env: Env, admin: Address, user: Address, debt_asset: Address) {
+        Self::require_admin(&env, &admin);
+        admin.require_auth();
+        Self::require_not_paused(&env);
+        
+        // Accrue interest to ensure we have the most up-to-date debt balance.
+        let debt_interest_state = Self::accrue_and_persist_interest(&env, &debt_asset).state;
+        let debt_position = interest::compute_accrued_position(
+            &Self::read_position(&env, &user, &debt_asset),
+            &debt_interest_state,
+        );
+        
+        if debt_position.borrowed == 0 {
+            return;
+        }
+
+        // Verify the user has no collateral across any asset
+        if env.storage().persistent().has(&DataKey::SupportedAssetList) {
+            let asset_list: Vec<Address> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::SupportedAssetList)
+                .unwrap_or_else(|| Vec::new(&env));
+                
+            for asset in asset_list.iter() {
+                let col_interest_state = Self::accrue_and_persist_interest(&env, &asset).state;
+                let col_position = interest::compute_accrued_position(
+                    &Self::read_position(&env, &user, &asset),
+                    &col_interest_state,
+                );
+                if col_position.deposited > 0 {
+                    panic_with_error!(&env, VeilLendError::BadDebtStillCollateralized);
+                }
+            }
+        }
+        
+        let amount_written_off = debt_position.borrowed;
+        
+        // Zero out the debt
+        let mut new_debt_position = debt_position;
+        new_debt_position.borrowed = 0;
+        Self::write_position(&env, &user, &debt_asset, &new_debt_position);
+        
+        // Decrease global borrow tracking
+        let total_borrowed = Self::get_total_borrowed(env.clone(), debt_asset.clone()) - amount_written_off;
+        Self::write_total_borrowed(&env, &debt_asset, total_borrowed);
+        
+        BadDebtWrittenOff {
+            asset: debt_asset,
+            amount_written_off,
+        }
+        .publish(&env);
+    }
+
+    pub fn set_liquidation_params(env: Env, admin: Address, close_bps: u32, discount_bps: u32) {
         Self::require_admin(&env, &admin);
         admin.require_auth();
         Self::require_not_paused(&env);
 
-        if !(1_000..=10_000).contains(&bps) {
-            panic_with_error!(&env, VeilLendError::InvalidCap);
+        if close_bps > 10_000 || discount_bps > 10_000 {
+            panic_with_error!(&env, VeilLendError::InvalidLiquidationParams);
         }
 
         env.storage()
             .instance()
-            .set(&DataKey::GlobalCloseFactorBps, &bps);
-    }
-
-    /// Returns the current global close factor in bps (default 5_000 = 50%).
-    pub fn close_factor_bps(env: Env) -> u32 {
+            .set(&DataKey::LiquidationCloseFactorBps, &close_bps);
         env.storage()
             .instance()
-            .get(&DataKey::GlobalCloseFactorBps)
+            .set(&DataKey::LiquidationDiscountBps, &discount_bps);
+    }
+
+    pub fn liquidation_close_factor_bps(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::LiquidationCloseFactorBps)
             .unwrap_or(5_000)
+    }
+
+    pub fn liquidation_discount_bps(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::LiquidationDiscountBps)
+            .unwrap_or(500)
     }
 
     /// Liquidates part (or, in a severe undercollateralization zone, all) of
@@ -2139,66 +2210,28 @@ impl VeilLendContract {
 
         const SEVERE_HEALTH_FACTOR_BPS: i128 = 9_500; // 0.95
 
-        let max_repay = if health_factor_bps < SEVERE_HEALTH_FACTOR_BPS {
-            debt_position.borrowed
-        } else {
-            let close_factor_bps = Self::close_factor_bps(env.clone()) as i128;
-            (debt_position.borrowed * close_factor_bps) / 10_000
-        };
+        let close_factor_bps = Self::liquidation_close_factor_bps(env.clone()) as i128;
+        let max_repay = (debt_position.borrowed * close_factor_bps) / 10_000;
 
-        let mut actual_repay = repay_amount.min(debt_position.borrowed);
+        let actual_repay = repay_amount.min(debt_position.borrowed);
         if actual_repay > max_repay {
-            let by_bps = (((actual_repay - max_repay) * 10_000) / actual_repay) as u32;
-            actual_repay = max_repay;
-
-            LiquidationClipped {
-                liquidator: liquidator.clone(),
-                user: user.clone(),
-                by_bps,
-            }
-            .publish(&env);
+            panic_with_error!(&env, VeilLendError::LiquidationTooLarge);
         }
 
         if actual_repay <= 0 {
             panic_with_error!(&env, VeilLendError::ZeroAmount);
         }
 
-        // Compute seize amount with liquidation bonus.
-        let bonus_bps = Self::read_liquidation_bonus_bps(&env, &collateral_asset);
+        let bonus_bps = Self::liquidation_discount_bps(env.clone());
         let collateral_price = Self::read_oracle_price(&env, &collateral_asset);
         let repay_value = actual_repay * debt_price;
-        // seize_value = repay_value * (10_000 + bonus_bps) / 10_000
+        
         let seize_value = repay_value
             .checked_mul(10_000_i128 + bonus_bps as i128)
             .and_then(|v| v.checked_div(10_000))
             .unwrap_or(i128::MAX);
-        let mut seize_amount = (seize_value / collateral_price).min(collateral_position.deposited);
-
-        // If the cap binds (seize_amount == collateral_position.deposited
-        // but seize_value > actual value of that collateral), record bad
-        // debt via LiquidationClipped and cap the bonus.
-        let mut clipped_bonus = false;
-        if seize_amount >= collateral_position.deposited && collateral_position.deposited > 0 {
-            // Check if we wanted to seize more than available.
-            let available_value = collateral_position.deposited * collateral_price;
-            if seize_value > available_value {
-                seize_amount = collateral_position.deposited;
-                clipped_bonus = true;
-            }
-        }
-
-        if clipped_bonus && bonus_bps > 0 {
-            // Emit LiquidationClipped with a synthetic by_bps indicating the
-            // bonus was clipped. The by_bps encodes how much of the bonus
-            // was lost, capped at u32::MAX.
-            let bonus_lost_bps = bonus_bps.min(10_000);
-            LiquidationClipped {
-                liquidator: liquidator.clone(),
-                user: user.clone(),
-                by_bps: bonus_lost_bps,
-            }
-            .publish(&env);
-        }
+            
+        let seize_amount = (seize_value / collateral_price).min(collateral_position.deposited);
 
         let mut new_debt_position = debt_position;
         new_debt_position.borrowed -= actual_repay;
@@ -3586,7 +3619,7 @@ impl VeilLendContract {
             .get::<DataKey, i128>(&DataKey::OracleMinPrice(asset.clone()))
         {
             if price < min_price {
-                panic_with_error!(env, VeilLendError::OraclePriceBelowMin);
+                panic_with_error!(env, VeilLendError::OraclePriceOutOfBounds);
             }
         }
 
@@ -3596,7 +3629,7 @@ impl VeilLendContract {
             .get::<DataKey, i128>(&DataKey::OracleMaxPrice(asset.clone()))
         {
             if price > max_price {
-                panic_with_error!(env, VeilLendError::OraclePriceAboveMax);
+                panic_with_error!(env, VeilLendError::LiquidationTooLarge);
             }
         }
 
@@ -4192,7 +4225,7 @@ impl VeilLendContract {
             .unwrap_or(0);
 
         if current_total + amount > cap {
-            panic_with_error!(env, VeilLendError::DepositCapExceeded);
+            panic_with_error!(env, VeilLendError::CapExceeded);
         }
     }
 
@@ -4215,7 +4248,7 @@ impl VeilLendContract {
             .unwrap_or(0);
 
         if current_total + amount > cap {
-            panic_with_error!(env, VeilLendError::BorrowCapExceeded);
+            panic_with_error!(env, VeilLendError::InvalidLiquidationParams);
         }
     }
 
@@ -4236,7 +4269,7 @@ impl VeilLendContract {
 
         let current_total = Self::get_total_deposited(env.clone(), asset.clone());
         if current_total + amount > cap {
-            panic_with_error!(env, VeilLendError::SupplyCapExceeded);
+            panic_with_error!(env, VeilLendError::SeizeExceedsCollateral);
         }
     }
 
@@ -4257,7 +4290,7 @@ impl VeilLendContract {
 
         let current_total = Self::get_total_borrowed(env.clone(), asset.clone());
         if current_total + amount > cap {
-            panic_with_error!(env, VeilLendError::BorrowCapExceeded);
+            panic_with_error!(env, VeilLendError::InvalidLiquidationParams);
         }
     }
 
@@ -4724,8 +4757,8 @@ mod tests {
         assert_eq!(VeilLendError::ZeroAmount as u32, 10);
         assert_eq!(VeilLendError::OraclePriceMissing as u32, 11);
         assert_eq!(VeilLendError::ContractPaused as u32, 12);
-        assert_eq!(VeilLendError::DepositCapExceeded as u32, 13);
-        assert_eq!(VeilLendError::BorrowCapExceeded as u32, 14);
+        assert_eq!(VeilLendError::CapExceeded as u32, 13);
+        assert_eq!(VeilLendError::InvalidLiquidationParams as u32, 14);
         assert_eq!(VeilLendError::InvalidCap as u32, 15);
         assert_eq!(VeilLendError::InsufficientReserve as u32, 17);
         assert_eq!(VeilLendError::TimelockNotReady as u32, 18);
@@ -4735,13 +4768,13 @@ mod tests {
         assert_eq!(VeilLendError::TimelockRequired as u32, 22);
         assert_eq!(VeilLendError::OraclePriceStale as u32, 23);
         assert_eq!(VeilLendError::OraclePriceChangeExceedsLimit as u32, 24);
-        assert_eq!(VeilLendError::OraclePriceBelowMin as u32, 25);
-        assert_eq!(VeilLendError::OraclePriceAboveMax as u32, 26);
+        assert_eq!(VeilLendError::OraclePriceOutOfBounds as u32, 25);
+        assert_eq!(VeilLendError::LiquidationTooLarge as u32, 26);
         assert_eq!(VeilLendError::AssetHasActivePositions as u32, 27);
         assert_eq!(VeilLendError::CapBelowOutstanding as u32, 28);
         assert_eq!(VeilLendError::ProtocolFeeExceedsLimit as u32, 29);
         assert_eq!(VeilLendError::ArithmeticOverflow as u32, 30);
-        assert_eq!(VeilLendError::SupplyCapExceeded as u32, 31);
+        assert_eq!(VeilLendError::SeizeExceedsCollateral as u32, 31);
         assert_eq!(VeilLendError::PositionNotLiquidatable as u32, 32);
         assert_eq!(VeilLendError::InvalidUpgradeVersion as u32, 45);
         assert_eq!(VeilLendError::AlreadyMigrated as u32, 46);
@@ -4786,8 +4819,8 @@ mod tests {
             VeilLendError::ZeroAmount as u32,
             VeilLendError::OraclePriceMissing as u32,
             VeilLendError::ContractPaused as u32,
-            VeilLendError::DepositCapExceeded as u32,
-            VeilLendError::BorrowCapExceeded as u32,
+            VeilLendError::CapExceeded as u32,
+            VeilLendError::InvalidLiquidationParams as u32,
             VeilLendError::InvalidCap as u32,
             VeilLendError::InsufficientReserve as u32,
             VeilLendError::TimelockNotReady as u32,
@@ -4797,13 +4830,13 @@ mod tests {
             VeilLendError::TimelockRequired as u32,
             VeilLendError::OraclePriceStale as u32,
             VeilLendError::OraclePriceChangeExceedsLimit as u32,
-            VeilLendError::OraclePriceBelowMin as u32,
-            VeilLendError::OraclePriceAboveMax as u32,
+            VeilLendError::OraclePriceOutOfBounds as u32,
+            VeilLendError::LiquidationTooLarge as u32,
             VeilLendError::AssetHasActivePositions as u32,
             VeilLendError::CapBelowOutstanding as u32,
             VeilLendError::ProtocolFeeExceedsLimit as u32,
             VeilLendError::ArithmeticOverflow as u32,
-            VeilLendError::SupplyCapExceeded as u32,
+            VeilLendError::SeizeExceedsCollateral as u32,
             VeilLendError::PositionNotLiquidatable as u32,
             VeilLendError::InvalidUpgradeVersion as u32,
             VeilLendError::AlreadyMigrated as u32,
