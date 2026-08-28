@@ -29,7 +29,7 @@ pub use flash_loan::{
 };
 
 /// Increment this only when a contract interface change requires consumers to adapt.
-pub const CONTRACT_VERSION: u32 = 10;
+pub const CONTRACT_VERSION: u32 = 11;
 
 /// Increment this only when the serialized `DataKey` or stored value layout changes.
 pub const STORAGE_SCHEMA_VERSION: u32 = 7;
@@ -230,7 +230,12 @@ pub enum DataKey {
     /// regardless of nonce. Always read/written/bumped alongside
     /// `PermitNonce` for the same user so the two can never drift apart.
     PermitEpoch(Address),
+    /// A user's list of active assets, to optimize pairwise collateral checks.
+    UserAssets(Address),
 }
+
+/// Max number of active assets a single user can have.
+pub const MAX_USER_ASSETS: u32 = 20;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
@@ -479,7 +484,7 @@ pub enum VeilLendError {
     /// limit. Without this bound an admin could drain user funds disguised as fees.
     ProtocolFeeExceedsLimit = 29,
     /// Arithmetic overflow or underflow in interest accrual or index computation.
-    ArithmeticOverflow = 30,
+    MathOverflow = 30,
     /// Aggregate supply (deposit) cap for this asset would be exceeded.
     SupplyCapExceeded = 31,
     /// Position's health factor is at or above 1.0; nothing to liquidate.
@@ -1427,12 +1432,10 @@ impl VeilLendContract {
         env: Env,
         user: Address,
         borrow_asset: Address,
-        collateral_asset: Address,
         amount: i128,
     ) {
         Self::require_not_paused(&env);
         Self::require_supported_asset(&env, &borrow_asset);
-        Self::require_supported_asset(&env, &collateral_asset);
         Self::require_positive_amount(&env, amount);
         user.require_auth();
 
@@ -1454,15 +1457,11 @@ impl VeilLendContract {
         }
         position.borrowed += amount;
         reserve.total_balance -= amount;
-        Self::assert_collateralized(
-            &env,
-            &collateral_asset,
-            &borrow_asset,
-            &user,
-            CollateralAction::Borrow { amount },
-        );
+
         Self::write_position(&env, &user, &borrow_asset, &position);
         Self::write_asset_reserve(&env, &borrow_asset, &reserve);
+
+        Self::assert_collateralized(&env, &user);
 
         // Update total borrows
         let total = Self::get_total_borrowed(env.clone(), borrow_asset.clone()) + amount;
@@ -1528,12 +1527,10 @@ impl VeilLendContract {
         env: Env,
         user: Address,
         withdrawn_asset: Address,
-        debt_asset: Address,
         amount: i128,
     ) {
         // Withdraw is allowed even when paused (users can always remove collateral)
         Self::require_supported_asset(&env, &withdrawn_asset);
-        Self::require_supported_asset(&env, &debt_asset);
         Self::require_positive_amount(&env, amount);
         user.require_auth();
 
@@ -1553,15 +1550,11 @@ impl VeilLendContract {
 
         position.deposited -= amount;
         reserve.total_balance -= amount;
-        Self::assert_collateralized(
-            &env,
-            &withdrawn_asset,
-            &debt_asset,
-            &user,
-            CollateralAction::Withdraw { amount },
-        );
+
         Self::write_position(&env, &user, &withdrawn_asset, &position);
         Self::write_asset_reserve(&env, &withdrawn_asset, &reserve);
+
+        Self::assert_collateralized(&env, &user);
 
         // Update total deposits
         let total = Self::get_total_deposited(env.clone(), withdrawn_asset.clone()) - amount;
@@ -1588,6 +1581,18 @@ impl VeilLendContract {
     pub fn get_position(env: Env, user: Address, asset: Address) -> Position {
         let state = Self::simulate_accrued_interest_state(&env, &asset);
         interest::compute_accrued_position(&Self::read_position(&env, &user, &asset), &state)
+    }
+
+    /// Returns the account health summary for a given user.
+    /// Returns a tuple: (total_collateral_value_raw, total_debt_value, health_factor_bps)
+    pub fn get_account_health(env: Env, user: Address) -> (i128, i128, u32) {
+        let (raw_collateral, _, liq_capacity, debt) = Self::account_health(&env, &user).unwrap_or((0, 0, 0, 0));
+        let health_factor_bps = if debt == 0 {
+            u32::MAX
+        } else {
+            ((liq_capacity * 10_000) / debt).min(u32::MAX as i128) as u32
+        };
+        (raw_collateral, debt, health_factor_bps)
     }
 
     pub fn get_asset_reserve(env: Env, asset: Address) -> AssetReserve {
@@ -1962,30 +1967,10 @@ impl VeilLendContract {
             panic_with_error!(&env, VeilLendError::PositionNotLiquidatable);
         }
 
-        // Compute weighted collateral value across ALL supported assets,
-        // using per-asset liquidation_threshold_bps (not collateral_factor).
-        if env.storage().persistent().has(&DataKey::SupportedAssetList) {
-            Self::bump_persistent(&env, &DataKey::SupportedAssetList);
-        }
-        let asset_list: Vec<Address> = env
-            .storage()
-            .persistent()
-            .get(&DataKey::SupportedAssetList)
-            .unwrap_or_else(|| Vec::new(&env));
+        let (_, _, weighted_collateral_value, borrowed_value) = Self::account_health(&env, &user)
+            .unwrap_or_else(|e| panic_with_error!(&env, e));
 
         let debt_price = Self::read_oracle_price(&env, &debt_asset);
-        let borrowed_value = debt_position.borrowed * debt_price;
-
-        let mut weighted_collateral_value: i128 = 0;
-        for asset in asset_list.iter() {
-            let deposited = Self::read_accrued_position(&env, &user, &asset).deposited;
-            if deposited <= 0 {
-                continue;
-            }
-            let price = Self::read_oracle_price(&env, &asset);
-            let threshold = Self::read_liquidation_threshold_bps(&env, &asset) as i128;
-            weighted_collateral_value += deposited * price * threshold;
-        }
 
         // Only positions whose weighted collateral falls below the
         // liquidation threshold may be liquidated.
@@ -2277,21 +2262,14 @@ impl VeilLendContract {
     pub fn withdraw_batch(
         env: Env,
         user: Address,
-        debt_asset: Address,
         operations: Vec<BatchOperation>,
     ) {
         // Withdraw is allowed even when paused (users can always remove collateral)
-        Self::require_supported_asset(&env, &debt_asset);
         user.require_auth();
 
         // Deduplicate assets and accrue interest once per asset
         let unique_assets = Self::deduplicate_assets(&env, &operations);
-        // Include debt_asset in accrual
-        let mut all_assets = unique_assets;
-        if !all_assets.contains(&debt_asset) {
-            all_assets.push_back(debt_asset.clone());
-        }
-        Self::accrue_assets_once(&env, &all_assets);
+        Self::accrue_assets_once(&env, &unique_assets);
 
         // Pre-validate all operations
         for op in operations.iter() {
@@ -2342,7 +2320,7 @@ impl VeilLendContract {
         }
 
         // Single health factor check at the end, against each withdrawn asset
-        Self::enforce_batch_health_factor_for_withdraw(&env, &user, &debt_asset, &operations);
+        Self::enforce_batch_health_factor_for_withdraw(&env, &user);
 
         // Emit batch summary event
         Self::emit_batch_executed(&env, &user, "withdraw_batch", total_operations);
@@ -2376,20 +2354,14 @@ impl VeilLendContract {
     pub fn borrow_batch(
         env: Env,
         user: Address,
-        collateral_asset: Address,
         operations: Vec<BatchOperation>,
     ) {
         Self::require_not_paused(&env);
-        Self::require_supported_asset(&env, &collateral_asset);
         user.require_auth();
 
         // Deduplicate assets and accrue interest once per asset
         let unique_assets = Self::deduplicate_assets(&env, &operations);
-        let mut all_assets = unique_assets;
-        if !all_assets.contains(&collateral_asset) {
-            all_assets.push_back(collateral_asset.clone());
-        }
-        Self::accrue_assets_once(&env, &all_assets);
+        Self::accrue_assets_once(&env, &unique_assets);
 
         // Pre-validate all operations
         for op in operations.iter() {
@@ -2440,7 +2412,7 @@ impl VeilLendContract {
         }
 
         // Single health factor check at the end, against each borrowed asset
-        Self::enforce_batch_health_factor_for_borrow(&env, &user, &collateral_asset, &operations);
+        Self::enforce_batch_health_factor_for_borrow(&env, &user);
 
         // Emit batch summary event
         Self::emit_batch_executed(&env, &user, "borrow_batch", total_operations);
@@ -2643,7 +2615,6 @@ impl VeilLendContract {
         permit: Permit,
         signature: Bytes,
         withdrawn_asset: Address,
-        debt_asset: Address,
         amount: i128,
     ) {
         let domain = Self::get_domain_separator(env.clone());
@@ -2660,7 +2631,7 @@ impl VeilLendContract {
             panic_with_error!(&env, VeilLendError::InvalidAmount);
         }
 
-        Self::do_withdraw(&env, &verified.user, &withdrawn_asset, &debt_asset, amount);
+        Self::do_withdraw(&env, &verified.user, &withdrawn_asset, amount);
     }
 
     /// Borrow on behalf of a user using a signed permit.
@@ -2676,7 +2647,6 @@ impl VeilLendContract {
         permit: Permit,
         signature: Bytes,
         borrow_asset: Address,
-        collateral_asset: Address,
         amount: i128,
     ) {
         let domain = Self::get_domain_separator(env.clone());
@@ -2697,7 +2667,6 @@ impl VeilLendContract {
             &env,
             &verified.user,
             &borrow_asset,
-            &collateral_asset,
             amount,
         );
     }
@@ -2766,11 +2735,9 @@ impl VeilLendContract {
         env: &Env,
         user: &Address,
         withdrawn_asset: &Address,
-        debt_asset: &Address,
         amount: i128,
     ) {
         Self::require_supported_asset(env, withdrawn_asset);
-        Self::require_supported_asset(env, debt_asset);
         Self::require_positive_amount(env, amount);
 
         let interest_state = Self::accrue_and_persist_interest(env, withdrawn_asset).state;
@@ -2789,15 +2756,11 @@ impl VeilLendContract {
 
         position.deposited -= amount;
         reserve.total_balance -= amount;
-        Self::assert_collateralized(
-            env,
-            withdrawn_asset,
-            debt_asset,
-            user,
-            CollateralAction::Withdraw { amount },
-        );
+
         Self::write_position(env, user, withdrawn_asset, &position);
         Self::write_asset_reserve(env, withdrawn_asset, &reserve);
+
+        Self::assert_collateralized(env, user);
 
         let total = Self::get_total_deposited(env.clone(), withdrawn_asset.clone()) - amount;
         Self::write_total_deposited(env, withdrawn_asset, total);
@@ -2821,12 +2784,10 @@ impl VeilLendContract {
         env: &Env,
         user: &Address,
         borrow_asset: &Address,
-        collateral_asset: &Address,
         amount: i128,
     ) {
         Self::require_not_paused(env);
         Self::require_supported_asset(env, borrow_asset);
-        Self::require_supported_asset(env, collateral_asset);
         Self::require_positive_amount(env, amount);
 
         let interest_state = Self::accrue_and_persist_interest(env, borrow_asset).state;
@@ -2843,15 +2804,11 @@ impl VeilLendContract {
         }
         position.borrowed += amount;
         reserve.total_balance -= amount;
-        Self::assert_collateralized(
-            env,
-            collateral_asset,
-            borrow_asset,
-            user,
-            CollateralAction::Borrow { amount },
-        );
+
         Self::write_position(env, user, borrow_asset, &position);
         Self::write_asset_reserve(env, borrow_asset, &reserve);
+
+        Self::assert_collateralized(env, user);
 
         let total = Self::get_total_borrowed(env.clone(), borrow_asset.clone()) + amount;
         Self::write_total_borrowed(env, borrow_asset, total);
@@ -3928,11 +3885,43 @@ impl VeilLendContract {
 
     fn write_position(env: &Env, user: &Address, asset: &Address, position: &Position) {
         let key = DataKey::Position(user.clone(), asset.clone());
-        if position.deposited == 0 && position.borrowed == 0 {
-            env.storage().persistent().remove(&key);
-        } else {
+        let mut user_assets: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::UserAssets(user.clone()))
+            .unwrap_or_else(|| Vec::new(env));
+
+        let is_active = position.deposited > 0 || position.borrowed > 0;
+        let index = user_assets.iter().position(|a| a == *asset);
+
+        if is_active {
             env.storage().persistent().set(&key, position);
             Self::bump_persistent(env, &key);
+
+            if index.is_none() {
+                if user_assets.len() >= MAX_USER_ASSETS {
+                    panic_with_error!(env, VeilLendError::InvalidAmount); // Ideally a specific error for max assets exceeded
+                }
+                user_assets.push_back(asset.clone());
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::UserAssets(user.clone()), &user_assets);
+                Self::bump_persistent(env, &DataKey::UserAssets(user.clone()));
+            }
+        } else {
+            env.storage().persistent().remove(&key);
+            
+            if let Some(i) = index {
+                user_assets.remove(i as u32);
+                if user_assets.is_empty() {
+                    env.storage().persistent().remove(&DataKey::UserAssets(user.clone()));
+                } else {
+                    env.storage()
+                        .persistent()
+                        .set(&DataKey::UserAssets(user.clone()), &user_assets);
+                    Self::bump_persistent(env, &DataKey::UserAssets(user.clone()));
+                }
+            }
         }
     }
 
@@ -4112,56 +4101,58 @@ impl VeilLendContract {
     /// `action_delta` is applied to the specified position before computing
     /// the check, so the caller may invoke this before persisting its own
     /// mutation.
-    fn assert_collateralized(
-        env: &Env,
-        collateral_asset: &Address,
-        debt_asset: &Address,
-        user: &Address,
-        action_delta: CollateralAction,
-    ) {
-        // Compute total debt value.
-        let debt_position = Self::read_accrued_position(env, user, debt_asset);
-        let mut debt_borrowed = debt_position.borrowed;
-        if let CollateralAction::Borrow { amount } = action_delta {
-            debt_borrowed += amount;
-        }
-        if debt_borrowed == 0 {
-            return;
-        }
-        let debt_price = Self::read_oracle_price(env, debt_asset);
-        let debt_value = debt_borrowed * debt_price;
-
-        // Compute weighted collateral value across ALL supported assets.
-        if env.storage().persistent().has(&DataKey::SupportedAssetList) {
-            Self::bump_persistent(env, &DataKey::SupportedAssetList);
-        }
-        let asset_list: Vec<Address> = env
+    /// Returns (total_collateral_raw, total_borrow_capacity, total_liquidation_capacity, total_debt)
+    fn account_health(env: &Env, user: &Address) -> Result<(i128, i128, i128, i128), VeilLendError> {
+        let user_assets: Vec<Address> = env
             .storage()
             .persistent()
-            .get(&DataKey::SupportedAssetList)
+            .get(&DataKey::UserAssets(user.clone()))
             .unwrap_or_else(|| Vec::new(env));
 
-        let mut weighted_collateral_value: i128 = 0;
-        for asset in asset_list.iter() {
-            let mut deposited = Self::read_accrued_position(env, user, &asset).deposited;
-            // Apply the action delta if it pertains to this asset.
-            match action_delta {
-                CollateralAction::Withdraw { amount } if asset == *collateral_asset => {
-                    deposited -= amount;
-                }
-                _ => {}
+        let mut total_debt_value: i128 = 0;
+        let mut total_collateral_raw: i128 = 0;
+        let mut total_borrow_capacity: i128 = 0;
+        let mut total_liquidation_capacity: i128 = 0;
+
+        for asset in user_assets.iter() {
+            let position = Self::read_accrued_position(env, user, &asset);
+            
+            if position.borrowed > 0 {
+                let price = Self::read_oracle_price(env, &asset);
+                let debt_value = position.borrowed.checked_mul(price).ok_or(VeilLendError::MathOverflow)?;
+                total_debt_value = total_debt_value.checked_add(debt_value).ok_or(VeilLendError::MathOverflow)?;
             }
-            if deposited <= 0 {
-                continue;
+            
+            if position.deposited > 0 {
+                let price = Self::read_oracle_price(env, &asset);
+                let col_value_base = position.deposited.checked_mul(price).ok_or(VeilLendError::MathOverflow)?;
+                
+                let collateral_factor = Self::read_collateral_factor_bps(env, &asset) as i128;
+                let col_value_borrow = col_value_base.checked_mul(collateral_factor).ok_or(VeilLendError::MathOverflow)?;
+                
+                let liquidation_threshold = Self::read_liquidation_threshold_bps(env, &asset) as i128;
+                let col_value_liq = col_value_base.checked_mul(liquidation_threshold).ok_or(VeilLendError::MathOverflow)?;
+
+                total_collateral_raw = total_collateral_raw.checked_add(col_value_base).ok_or(VeilLendError::MathOverflow)?;
+                total_borrow_capacity = total_borrow_capacity.checked_add(col_value_borrow).ok_or(VeilLendError::MathOverflow)?;
+                total_liquidation_capacity = total_liquidation_capacity.checked_add(col_value_liq).ok_or(VeilLendError::MathOverflow)?;
             }
-            let price = Self::read_oracle_price(env, &asset);
-            let collateral_factor = Self::read_collateral_factor_bps(env, &asset) as i128;
-            weighted_collateral_value += deposited * price * collateral_factor;
         }
 
-        // weighted_collateral_value is already in units of (value * bps),
-        // so compare: weighted_collateral_value >= debt_value * 10_000
-        if weighted_collateral_value < debt_value * 10_000 {
+        Ok((total_collateral_raw, total_borrow_capacity, total_liquidation_capacity, total_debt_value))
+    }
+
+    fn assert_collateralized(
+        env: &Env,
+        user: &Address,
+    ) {
+        let (_, borrow_capacity, _, debt_value) = Self::account_health(env, user).unwrap_or_else(|e| panic_with_error!(env, e));
+        
+        if debt_value == 0 {
+            return;
+        }
+
+        if borrow_capacity < debt_value.checked_mul(10_000).unwrap_or(i128::MAX) {
             panic_with_error!(env, VeilLendError::InsufficientCollateral);
         }
     }
@@ -4416,39 +4407,8 @@ impl VeilLendContract {
     fn enforce_batch_health_factor_for_withdraw(
         env: &Env,
         user: &Address,
-        debt_asset: &Address,
-        _operations: &Vec<BatchOperation>,
     ) {
-        let debt_borrowed = Self::read_accrued_position(env, user, debt_asset).borrowed;
-        if debt_borrowed == 0 {
-            return;
-        }
-
-        let debt_value = debt_borrowed * Self::read_oracle_price(env, debt_asset);
-
-        if env.storage().persistent().has(&DataKey::SupportedAssetList) {
-            Self::bump_persistent(env, &DataKey::SupportedAssetList);
-        }
-        let asset_list: Vec<Address> = env
-            .storage()
-            .persistent()
-            .get(&DataKey::SupportedAssetList)
-            .unwrap_or_else(|| Vec::new(env));
-
-        let mut weighted_collateral_value: i128 = 0;
-        for asset in asset_list.iter() {
-            let deposited = Self::read_accrued_position(env, user, &asset).deposited;
-            if deposited <= 0 {
-                continue;
-            }
-            let price = Self::read_oracle_price(env, &asset);
-            let collateral_factor = Self::read_collateral_factor_bps(env, &asset) as i128;
-            weighted_collateral_value += deposited * price * collateral_factor;
-        }
-
-        if weighted_collateral_value < debt_value * 10_000 {
-            panic_with_error!(env, VeilLendError::InsufficientCollateral);
-        }
+        Self::assert_collateralized(env, user);
     }
 
     /// Enforces the collateral ratio after a batch borrow.
@@ -4463,43 +4423,8 @@ impl VeilLendContract {
     fn enforce_batch_health_factor_for_borrow(
         env: &Env,
         user: &Address,
-        _collateral_asset: &Address,
-        operations: &Vec<BatchOperation>,
     ) {
-        let touched_assets = Self::deduplicate_assets(env, operations);
-        let mut debt_value: i128 = 0;
-        for asset in touched_assets.iter() {
-            let borrowed = Self::read_accrued_position(env, user, &asset).borrowed;
-            debt_value += borrowed * Self::read_oracle_price(env, &asset);
-        }
-
-        if debt_value == 0 {
-            return;
-        }
-
-        if env.storage().persistent().has(&DataKey::SupportedAssetList) {
-            Self::bump_persistent(env, &DataKey::SupportedAssetList);
-        }
-        let asset_list: Vec<Address> = env
-            .storage()
-            .persistent()
-            .get(&DataKey::SupportedAssetList)
-            .unwrap_or_else(|| Vec::new(env));
-
-        let mut weighted_collateral_value: i128 = 0;
-        for asset in asset_list.iter() {
-            let deposited = Self::read_accrued_position(env, user, &asset).deposited;
-            if deposited <= 0 {
-                continue;
-            }
-            let price = Self::read_oracle_price(env, &asset);
-            let collateral_factor = Self::read_collateral_factor_bps(env, &asset) as i128;
-            weighted_collateral_value += deposited * price * collateral_factor;
-        }
-
-        if weighted_collateral_value < debt_value * 10_000 {
-            panic_with_error!(env, VeilLendError::InsufficientCollateral);
-        }
+        Self::assert_collateralized(env, user);
     }
 
     /// Emits a batch summary event.
@@ -4581,7 +4506,7 @@ mod tests {
         assert_eq!(VeilLendError::AssetHasActivePositions as u32, 27);
         assert_eq!(VeilLendError::CapBelowOutstanding as u32, 28);
         assert_eq!(VeilLendError::ProtocolFeeExceedsLimit as u32, 29);
-        assert_eq!(VeilLendError::ArithmeticOverflow as u32, 30);
+        assert_eq!(VeilLendError::MathOverflow as u32, 30);
         assert_eq!(VeilLendError::SupplyCapExceeded as u32, 31);
         assert_eq!(VeilLendError::PositionNotLiquidatable as u32, 32);
         assert_eq!(VeilLendError::InvalidUpgradeVersion as u32, 45);
@@ -4643,7 +4568,7 @@ mod tests {
             VeilLendError::AssetHasActivePositions as u32,
             VeilLendError::CapBelowOutstanding as u32,
             VeilLendError::ProtocolFeeExceedsLimit as u32,
-            VeilLendError::ArithmeticOverflow as u32,
+            VeilLendError::MathOverflow as u32,
             VeilLendError::SupplyCapExceeded as u32,
             VeilLendError::PositionNotLiquidatable as u32,
             VeilLendError::InvalidUpgradeVersion as u32,

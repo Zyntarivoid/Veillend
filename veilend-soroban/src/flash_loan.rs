@@ -351,7 +351,7 @@ impl VeilLendContract {
 pub fn calculate_premium_rounded_up(env: &Env, amount: i128, premium_bps: u32) -> i128 {
     let numerator = amount
         .checked_mul(premium_bps as i128)
-        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::ArithmeticOverflow));
+        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::MathOverflow));
     let denominator = 10_000_i128;
     (numerator + denominator - 1) / denominator
 }

@@ -43,7 +43,7 @@ pub fn utilization_ratio(env: &Env, total_supplied: i128, total_borrowed: i128) 
     let util = total_borrowed
         .checked_mul(10_000)
         .and_then(|v| v.checked_div(total_supplied))
-        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::ArithmeticOverflow));
+        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::MathOverflow));
     util.min(10_000) as u32
 }
 
@@ -80,19 +80,19 @@ pub fn borrow_rate_bps_per_second(
             .checked_mul(util)
             .and_then(|v| v.checked_div(10_000))
             .and_then(|v| v.checked_add(base))
-            .unwrap_or_else(|| panic_with_error!(env, VeilLendError::ArithmeticOverflow))
+            .unwrap_or_else(|| panic_with_error!(env, VeilLendError::MathOverflow))
     } else {
         let kink_piece = slope1
             .checked_mul(kink)
             .and_then(|v| v.checked_div(10_000))
-            .unwrap_or_else(|| panic_with_error!(env, VeilLendError::ArithmeticOverflow));
+            .unwrap_or_else(|| panic_with_error!(env, VeilLendError::MathOverflow));
         let excess_piece = slope2
             .checked_mul(util - kink)
             .and_then(|v| v.checked_div(10_000))
-            .unwrap_or_else(|| panic_with_error!(env, VeilLendError::ArithmeticOverflow));
+            .unwrap_or_else(|| panic_with_error!(env, VeilLendError::MathOverflow));
         base.checked_add(kink_piece)
             .and_then(|v| v.checked_add(excess_piece))
-            .unwrap_or_else(|| panic_with_error!(env, VeilLendError::ArithmeticOverflow))
+            .unwrap_or_else(|| panic_with_error!(env, VeilLendError::MathOverflow))
     }
 }
 
@@ -112,7 +112,7 @@ pub fn supply_rate_bps_per_second(
         .checked_mul(util)
         .and_then(|v| v.checked_mul(pass_through))
         .and_then(|v| v.checked_div(10_000 * 10_000))
-        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::ArithmeticOverflow))
+        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::MathOverflow))
 }
 
 /// Advances `state`'s indexes and `last_accrual_timestamp` to `now`, using the
@@ -154,44 +154,44 @@ pub fn compute_accrual(
     // growth = annual_bps × elapsed × RATE_SCALE / (10_000 × SECONDS_PER_YEAR)
     let denominator = 10_000i128
         .checked_mul(SECONDS_PER_YEAR)
-        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::ArithmeticOverflow));
+        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::MathOverflow));
 
     let borrow_growth = borrow_rate_annual
         .checked_mul(elapsed)
         .and_then(|v| v.checked_mul(RATE_SCALE))
         .and_then(|v| v.checked_div(denominator))
-        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::ArithmeticOverflow));
+        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::MathOverflow));
     let supply_growth = supply_rate_annual
         .checked_mul(elapsed)
         .and_then(|v| v.checked_mul(RATE_SCALE))
         .and_then(|v| v.checked_div(denominator))
-        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::ArithmeticOverflow));
+        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::MathOverflow));
 
     let new_borrow_index = state
         .borrow_index
         .checked_mul(borrow_growth)
         .and_then(|v| v.checked_div(RATE_SCALE))
         .and_then(|v| v.checked_add(state.borrow_index))
-        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::ArithmeticOverflow));
+        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::MathOverflow));
     let new_supply_index = state
         .supply_index
         .checked_mul(supply_growth)
         .and_then(|v| v.checked_div(RATE_SCALE))
         .and_then(|v| v.checked_add(state.supply_index))
-        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::ArithmeticOverflow));
+        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::MathOverflow));
 
     let interest_to_borrowers = total_borrowed
         .checked_mul(borrow_growth)
         .and_then(|v| v.checked_div(RATE_SCALE))
-        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::ArithmeticOverflow));
+        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::MathOverflow));
     let interest_to_suppliers = total_supplied
         .checked_mul(supply_growth)
         .and_then(|v| v.checked_div(RATE_SCALE))
-        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::ArithmeticOverflow));
+        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::MathOverflow));
 
     let dust_to_reserves = interest_to_borrowers
         .checked_sub(interest_to_suppliers)
-        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::ArithmeticOverflow));
+        .unwrap_or_else(|| panic_with_error!(env, VeilLendError::MathOverflow));
 
     AccrualResult {
         state: InterestState {
