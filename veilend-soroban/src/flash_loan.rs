@@ -257,10 +257,17 @@ impl VeilLendContract {
         let total_deposited = Self::get_total_deposited(env.clone(), asset.clone()) - amount;
         Self::write_total_deposited(&env, &asset, total_deposited);
 
+        // Transfer principal to receiver before callback
+        Self::transfer_to(&env, &asset, &receiver, amount);
+
         // Invoke the receiver callback. If it panics, the entire flash loan
-        // (including the debit above) reverts atomically.
+        // (including the debit and transfer above) reverts atomically.
         let receiver_client = FlashLoanReceiverClient::new(&env, &receiver);
         receiver_client.flash_loan_receiver(&initiator, &asset, &amount, &premium, &params);
+
+        // The callback returned without panicking: expect the receiver to have
+        // repaid principal + premium. Transfer it from receiver to contract.
+        Self::transfer_from(&env, &asset, &receiver, &env.current_contract_address(), total_repayment);
 
         // The callback returned without panicking: record the repayment.
         let mut final_reserve = Self::read_asset_reserve(&env, &asset);
