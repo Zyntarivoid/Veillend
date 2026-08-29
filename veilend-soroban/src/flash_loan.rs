@@ -400,4 +400,3 @@ mod tests {
         assert_eq!(calculate_premium_rounded_up(&env, 0, 9), 0);
     }
 }
-

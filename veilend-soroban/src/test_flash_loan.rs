@@ -377,4 +377,3 @@ fn test_flash_loan_events_emitted() {
 
     assert_eq!(flash_loan_event_count, 1);
 }
-

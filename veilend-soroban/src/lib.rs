@@ -2039,14 +2039,14 @@ impl VeilLendContract {
         Self::require_admin(&env, &admin);
         admin.require_auth();
         Self::require_not_paused(&env);
-        
+
         // Accrue interest to ensure we have the most up-to-date debt balance.
         let debt_interest_state = Self::accrue_and_persist_interest(&env, &debt_asset).state;
         let debt_position = interest::compute_accrued_position(
             &Self::read_position(&env, &user, &debt_asset),
             &debt_interest_state,
         );
-        
+
         if debt_position.borrowed == 0 {
             return;
         }
@@ -2058,7 +2058,7 @@ impl VeilLendContract {
                 .persistent()
                 .get(&DataKey::SupportedAssetList)
                 .unwrap_or_else(|| Vec::new(&env));
-                
+
             for asset in asset_list.iter() {
                 let col_interest_state = Self::accrue_and_persist_interest(&env, &asset).state;
                 let col_position = interest::compute_accrued_position(
@@ -2070,18 +2070,19 @@ impl VeilLendContract {
                 }
             }
         }
-        
+
         let amount_written_off = debt_position.borrowed;
-        
+
         // Zero out the debt
         let mut new_debt_position = debt_position;
         new_debt_position.borrowed = 0;
         Self::write_position(&env, &user, &debt_asset, &new_debt_position);
-        
+
         // Decrease global borrow tracking
-        let total_borrowed = Self::get_total_borrowed(env.clone(), debt_asset.clone()) - amount_written_off;
+        let total_borrowed =
+            Self::get_total_borrowed(env.clone(), debt_asset.clone()) - amount_written_off;
         Self::write_total_borrowed(&env, &debt_asset, total_borrowed);
-        
+
         BadDebtWrittenOff {
             asset: debt_asset,
             amount_written_off,
@@ -2225,12 +2226,12 @@ impl VeilLendContract {
         let bonus_bps = Self::liquidation_discount_bps(env.clone());
         let collateral_price = Self::read_oracle_price(&env, &collateral_asset);
         let repay_value = actual_repay * debt_price;
-        
+
         let seize_value = repay_value
             .checked_mul(10_000_i128 + bonus_bps as i128)
             .and_then(|v| v.checked_div(10_000))
             .unwrap_or(i128::MAX);
-            
+
         let seize_amount = (seize_value / collateral_price).min(collateral_position.deposited);
 
         let mut new_debt_position = debt_position;
