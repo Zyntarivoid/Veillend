@@ -3623,7 +3623,6 @@ fn test_borrow_blocked_by_low_factor_collateral() {
     assert!(result.is_err(), "borrow 201 must fail with factor=2_000");
 }
 
-
 /// Liquidation bonus math at 0 bps, 500 bps, and the 2_000 bps ceiling.
 #[test]
 fn test_liquidation_bonus_math() {
@@ -3679,7 +3678,6 @@ fn test_liquidation_bonus_math() {
     let liquidator_pos = client.get_position(&liquidator, &collateral);
     assert_eq!(liquidator_pos.deposited, 214);
 }
-
 
 /// Every bounds-violation error for `propose_set_asset_risk_params`.
 #[test]

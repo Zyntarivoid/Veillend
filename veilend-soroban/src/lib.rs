@@ -2205,7 +2205,6 @@ impl VeilLendContract {
             panic_with_error!(&env, VeilLendError::PositionNotLiquidatable);
         }
 
-
         let close_factor_bps = Self::liquidation_close_factor_bps(env.clone()) as i128;
         let max_repay = (debt_position.borrowed * close_factor_bps) / 10_000;
 
@@ -4401,8 +4400,6 @@ impl VeilLendContract {
         }
         (10_000_u32 * 10_000_u32).div_ceil(ratio)
     }
-
-
 
     /// Reads a position with interest accrued up to the current ledger time
     /// simulated in, without persisting anything.
