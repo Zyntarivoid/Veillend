@@ -2205,11 +2205,6 @@ impl VeilLendContract {
             panic_with_error!(&env, VeilLendError::PositionNotLiquidatable);
         }
 
-        // health_factor_bps == 10_000 at exactly the liquidation threshold;
-        // below that the position is undercollateralized.
-        let health_factor_bps = (weighted_collateral_value * 10_000) / (borrowed_value * 10_000);
-
-        const SEVERE_HEALTH_FACTOR_BPS: i128 = 9_500; // 0.95
 
         let close_factor_bps = Self::liquidation_close_factor_bps(env.clone()) as i128;
         let max_repay = (debt_position.borrowed * close_factor_bps) / 10_000;
@@ -4407,21 +4402,7 @@ impl VeilLendContract {
         (10_000_u32 * 10_000_u32).div_ceil(ratio)
     }
 
-    /// Returns the effective `liquidation_bonus_bps` for `asset`.
-    /// Uses per-asset `AssetRiskParams` if set, otherwise returns 0.
-    fn read_liquidation_bonus_bps(env: &Env, asset: &Address) -> u32 {
-        let key = DataKey::AssetRiskParams(asset.clone());
-        if let Some(params) = env
-            .storage()
-            .persistent()
-            .get::<DataKey, AssetRiskParams>(&key)
-        {
-            Self::bump_persistent(env, &key);
-            params.liquidation_bonus_bps
-        } else {
-            0
-        }
-    }
+
 
     /// Reads a position with interest accrued up to the current ledger time
     /// simulated in, without persisting anything.
