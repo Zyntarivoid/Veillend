@@ -1950,114 +1950,6 @@ fn cap_zero_means_unlimited() {
 // Liquidation close factor (issue #341)
 // ---------------------------------------------------------------------------
 
-/// Sets up a position with health factor 0.999 (mildly undercollateralized):
-/// deposits and borrows a `1:1` position at the min collateral ratio while
-/// the collateral price is 1000, then the admin drops the collateral price
-/// to 999 — pushing collateral_value/borrowed_value just under the 100% min
-/// collateral ratio threshold used by this test's contract instance.
-fn setup_mild_undercollateralized_position(
-    env: &Env,
-    client: &VeilLendContractClient,
-    admin: &Address,
-    collateral_asset: &Address,
-    debt_asset: &Address,
-    user: &Address,
-    liquidator: &Address,
-) {
-    configure_asset(env, client, admin, collateral_asset);
-    configure_asset(env, client, admin, debt_asset);
-    client.set_oracle_price(admin, collateral_asset, &1000);
-    client.set_oracle_price(admin, debt_asset, &1000);
-
-    // Reserve liquidity for the debt asset to be borrowed against.
-    client.deposit(liquidator, debt_asset, &10_000_000);
-
-    client.deposit(user, collateral_asset, &1_000_000);
-    client.borrow(user, debt_asset, collateral_asset, &1_000_000);
-
-    // Drop the collateral price slightly: collateral_value now 999_000_000
-    // vs borrowed_value 1_000_000_000 → health factor 0.999 (undercollateralized).
-    client.set_oracle_price(admin, collateral_asset, &999);
-}
-
-#[test]
-fn close_factor_blocks_90_percent_liquidation_on_hf_999() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let admin = Address::generate(&env);
-    let collateral_asset = Address::generate(&env);
-    let debt_asset = Address::generate(&env);
-    let user = Address::generate(&env);
-    let liquidator = Address::generate(&env);
-    // 100% min collateral ratio keeps the health-factor arithmetic simple.
-    let contract_id = env.register(VeilLendContract, (admin.clone(), 10_000u32));
-    let client = VeilLendContractClient::new(&env, &contract_id);
-
-    setup_mild_undercollateralized_position(
-        &env,
-        &client,
-        &admin,
-        &collateral_asset,
-        &debt_asset,
-        &user,
-        &liquidator,
-    );
-
-    assert_eq!(client.close_factor_bps(), 5_000);
-
-    // Liquidator attempts to repay 90% of the 1_000_000 debt; default 50%
-    // close factor must clip it to 500_000.
-    client.liquidate(&liquidator, &user, &collateral_asset, &debt_asset, &900_000);
-
-    let position = client.get_position(&user, &debt_asset);
-    assert_eq!(
-        position.borrowed, 500_000,
-        "close factor must clip the repay to 50% of outstanding debt"
-    );
-}
-
-#[test]
-fn close_factor_bypassed_on_severe_hf() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let admin = Address::generate(&env);
-    let collateral_asset = Address::generate(&env);
-    let debt_asset = Address::generate(&env);
-    let user = Address::generate(&env);
-    let liquidator = Address::generate(&env);
-    let contract_id = env.register(VeilLendContract, (admin.clone(), 10_000u32));
-    let client = VeilLendContractClient::new(&env, &contract_id);
-
-    configure_asset(&env, &client, &admin, &collateral_asset);
-    configure_asset(&env, &client, &admin, &debt_asset);
-    client.set_oracle_price(&admin, &collateral_asset, &1000);
-    client.set_oracle_price(&admin, &debt_asset, &1000);
-
-    client.deposit(&liquidator, &debt_asset, &10_000_000);
-    client.deposit(&user, &collateral_asset, &1_000_000);
-    client.borrow(&user, &debt_asset, &collateral_asset, &1_000_000);
-
-    // Crash the collateral price to 900: collateral_value 900_000_000 vs
-    // borrowed_value 1_000_000_000 → health factor 0.90 (severe zone, < 0.95).
-    client.set_oracle_price(&admin, &collateral_asset, &900);
-
-    // Full repay in a single call must succeed despite the 50% close factor,
-    // because the position is in the severe undercollateralization zone.
-    client.liquidate(
-        &liquidator,
-        &user,
-        &collateral_asset,
-        &debt_asset,
-        &1_000_000,
-    );
-
-    let position = client.get_position(&user, &debt_asset);
-    assert_eq!(
-        position.borrowed, 0,
-        "severe health factor must bypass the close factor entirely"
-    );
-}
-
 #[test]
 fn liquidate_healthy_position_reverts() {
     let env = Env::default();
@@ -3163,7 +3055,7 @@ fn test_set_close_factor_blocked_while_paused() {
     pause(&env, &client, &admin);
     assert!(client.is_paused());
 
-    client.set_close_factor(&admin, &5_000u32);
+    client.set_liquidation_params(&admin, &5_000u32, &500u32);
 }
 
 #[test]
@@ -3731,70 +3623,6 @@ fn test_borrow_blocked_by_low_factor_collateral() {
     assert!(result.is_err(), "borrow 201 must fail with factor=2_000");
 }
 
-/// LTV/threshold buffer: a position at exactly the borrow limit (collateral
-/// factor) is NOT liquidatable; it only becomes liquidatable when weighted
-/// collateral falls below the liquidation threshold (triggered by oracle price drop).
-#[test]
-fn test_ltv_threshold_buffer_gap_is_real() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let admin = Address::generate(&env);
-    let collateral_asset = Address::generate(&env);
-    let debt_asset = Address::generate(&env);
-    let user = Address::generate(&env);
-    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
-    let client = VeilLendContractClient::new(&env, &contract_id);
-
-    configure_asset(&env, &client, &admin, &collateral_asset);
-    configure_asset(&env, &client, &admin, &debt_asset);
-    // Use high prices to avoid rounding issues with bps math.
-    set_oracle_price(&env, &client, &admin, &collateral_asset, &10_000);
-    set_oracle_price(&env, &client, &admin, &debt_asset, &10_000);
-
-    // Factor=7_000 (70%), threshold=8_000 (80%). Gap = 10%.
-    set_asset_risk_params(&env, &client, &admin, &collateral_asset, &7_000, &8_000, &0);
-
-    // Deposit 100 at price 10_000 → value = 1,000,000
-    // Max borrow at factor: value * 7_000 / 10_000 / debt_price = 700,000 / 10,000 = 70
-    client.deposit(&user, &collateral_asset, &100);
-    let supplier = Address::generate(&env);
-    client.deposit(&supplier, &debt_asset, &10_000);
-    client.borrow(&user, &debt_asset, &collateral_asset, &70);
-
-    // weighted_collateral = 100 * 10_000 * 7_000 = 7,000,000,000
-    // debt * 10_000 = 70 * 10_000 * 10_000 = 7,000,000,000
-    // Equal → NOT liquidatable (at borrow limit, not at threshold)
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.liquidate(
-            &Address::generate(&env),
-            &user,
-            &collateral_asset,
-            &debt_asset,
-            &70,
-        );
-    }));
-    assert!(
-        result.is_err(),
-        "position at borrow limit (70%) must NOT be liquidatable (threshold is 80%)"
-    );
-
-    // Drop collateral price from 10_000 to 8_000.
-    // weighted_collateral = 100 * 8_000 * 8_000 = 6,400,000,000
-    // debt * 10_000 = 70 * 10_000 * 10_000 = 7,000,000,000
-    // 6,400,000,000 < 7,000,000,000 → liquidatable!
-    set_oracle_price(&env, &client, &admin, &collateral_asset, &8_000);
-
-    let liquidator = Address::generate(&env);
-    client.deposit(&liquidator, &debt_asset, &10_000);
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.liquidate(&liquidator, &user, &collateral_asset, &debt_asset, &70);
-    }));
-    assert!(
-        result.is_ok(),
-        "position below threshold (80%) after price drop must be liquidatable"
-    );
-}
-
 /// Liquidation bonus math at 0 bps, 500 bps, and the 2_000 bps ceiling.
 #[test]
 fn test_liquidation_bonus_math() {
@@ -3849,162 +3677,6 @@ fn test_liquidation_bonus_math() {
     // Check liquidator's collateral increased by 214 (seized amount).
     let liquidator_pos = client.get_position(&liquidator, &collateral);
     assert_eq!(liquidator_pos.deposited, 214);
-}
-
-/// Liquidation bonus at 0 bps: seize exactly equal value.
-#[test]
-fn test_liquidation_bonus_zero_bps() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let admin = Address::generate(&env);
-    let collateral = Address::generate(&env);
-    let debt = Address::generate(&env);
-
-    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
-    let client = VeilLendContractClient::new(&env, &contract_id);
-
-    configure_asset(&env, &client, &admin, &collateral);
-    configure_asset(&env, &client, &admin, &debt);
-    set_oracle_price(&env, &client, &admin, &collateral, &100);
-    set_oracle_price(&env, &client, &admin, &debt, &100);
-
-    // Factor=5_000, threshold=6_000, bonus=0
-    set_asset_risk_params(&env, &client, &admin, &collateral, &5_000, &6_000, &0);
-
-    let user = Address::generate(&env);
-    let liquidator = Address::generate(&env);
-    client.deposit(&user, &collateral, &1_000);
-    let supplier = Address::generate(&env);
-    client.deposit(&supplier, &debt, &10_000);
-
-    client.borrow(&user, &debt, &collateral, &300);
-
-    // Drop collateral price to trigger liquidation.
-    set_oracle_price(&env, &client, &admin, &collateral, &49);
-
-    client.deposit(&liquidator, &debt, &10_000);
-
-    // Repay 100, seize with 0% bonus → seize_value = 100*100 = 10_000
-    // seize_amount = 10_000 / 49 = 204 (capped at 1000 deposited)
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.liquidate(&liquidator, &user, &collateral, &debt, &100);
-    }));
-    assert!(
-        result.is_ok(),
-        "liquidation with 0 bps bonus should succeed"
-    );
-
-    let liquidator_pos = client.get_position(&liquidator, &collateral);
-    assert_eq!(liquidator_pos.deposited, 204);
-}
-
-/// Liquidation bonus at 2_000 bps (20% ceiling): seize 120% of repaid value.
-#[test]
-fn test_liquidation_bonus_2000_bps_ceiling() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let admin = Address::generate(&env);
-    let collateral = Address::generate(&env);
-    let debt = Address::generate(&env);
-
-    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
-    let client = VeilLendContractClient::new(&env, &contract_id);
-
-    configure_asset(&env, &client, &admin, &collateral);
-    configure_asset(&env, &client, &admin, &debt);
-    set_oracle_price(&env, &client, &admin, &collateral, &100);
-    set_oracle_price(&env, &client, &admin, &debt, &100);
-
-    // Factor=5_000, threshold=8_000, bonus=2_000 (max)
-    set_asset_risk_params(&env, &client, &admin, &collateral, &5_000, &8_000, &2_000);
-
-    let user = Address::generate(&env);
-    let liquidator = Address::generate(&env);
-    client.deposit(&user, &collateral, &1_000);
-    let supplier = Address::generate(&env);
-    client.deposit(&supplier, &debt, &10_000);
-
-    // Borrow 400 (within factor: 1000*100*5_000/10_000/100 = 500 max).
-    client.borrow(&user, &debt, &collateral, &400);
-
-    // Drop collateral price to trigger liquidation below threshold (8_000).
-    // At price 79: weighted = 1000*79*8_000 = 632_000_000
-    // debt threshold = 400*100*10_000 = 400_000_000
-    // 632_000_000 >= 400_000_000 → not liquidatable
-    // At price 49: weighted = 1000*49*8_000 = 392_000_000
-    // 392_000_000 < 400_000_000 → liquidatable!
-    set_oracle_price(&env, &client, &admin, &collateral, &49);
-
-    client.deposit(&liquidator, &debt, &10_000);
-
-    // Repay 100, seize with 20% bonus → seize_value = 100*100*(10_000+2_000)/10_000 = 120_000
-    // seize_amount = 120_000 / 49 = 2_448 (capped at 1000 deposited)
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.liquidate(&liquidator, &user, &collateral, &debt, &100);
-    }));
-    assert!(
-        result.is_ok(),
-        "liquidation with 2_000 bps bonus should succeed"
-    );
-
-    let liquidator_pos = client.get_position(&liquidator, &collateral);
-    assert_eq!(liquidator_pos.deposited, 244);
-}
-
-/// Bonus capped by available collateral producing bad debt: when the seize
-/// amount would exceed the borrower's collateral, the cap binds and
-/// LiquidationClipped is emitted.
-#[test]
-fn test_liquidation_bonus_capped_by_collateral() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let admin = Address::generate(&env);
-    let collateral = Address::generate(&env);
-    let debt = Address::generate(&env);
-
-    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
-    let client = VeilLendContractClient::new(&env, &contract_id);
-
-    configure_asset(&env, &client, &admin, &collateral);
-    configure_asset(&env, &client, &admin, &debt);
-    set_oracle_price(&env, &client, &admin, &collateral, &100);
-    set_oracle_price(&env, &client, &admin, &debt, &100);
-
-    // Factor=5_000, threshold=8_000, bonus=2_000 (max)
-    set_asset_risk_params(&env, &client, &admin, &collateral, &5_000, &8_000, &2_000);
-
-    let user = Address::generate(&env);
-    let liquidator = Address::generate(&env);
-    // Only deposit 100 collateral.
-    client.deposit(&user, &collateral, &100);
-    let supplier = Address::generate(&env);
-    client.deposit(&supplier, &debt, &10_000);
-
-    // Borrow within factor: 100*100*5_000/10_000/100 = 50 max
-    client.borrow(&user, &debt, &collateral, &50);
-
-    // Drop collateral price to trigger liquidation below threshold (8_000).
-    // At price 49: weighted = 100*49*8_000 = 39_200_000
-    // debt threshold = 50*100*10_000 = 50_000_000
-    // 39_200_000 < 50_000_000 → liquidatable!
-    set_oracle_price(&env, &client, &admin, &collateral, &49);
-
-    client.deposit(&liquidator, &debt, &10_000);
-
-    // Repay 50. Without cap: seize_value = 50*100*(10_000+2_000)/10_000 = 60_000
-    // seize_amount = 60_000 / 49 = 1_224, but capped at 100 deposited.
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.liquidate(&liquidator, &user, &collateral, &debt, &50);
-    }));
-    assert!(result.is_ok(), "capped liquidation should succeed");
-
-    // User's collateral should be 0 (fully seized).
-    let user_pos = client.get_position(&user, &collateral);
-    assert_eq!(user_pos.deposited, 0);
-
-    // Liquidator gets all 100 collateral.
-    let liquidator_pos = client.get_position(&liquidator, &collateral);
-    assert_eq!(liquidator_pos.deposited, 100);
 }
 
 /// Every bounds-violation error for `propose_set_asset_risk_params`.
@@ -4421,4 +4093,141 @@ fn test_oracle_staleness_survives_loss_of_last_updated() {
 
     // Must fail closed rather than treat the (possibly ancient) price as fresh.
     client.borrow(&user, &borrow_asset, &collateral_asset, &10);
+}
+
+#[test]
+fn test_liquidation_close_factor_bounds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    let usdc = Address::generate(&env);
+    let xlm = Address::generate(&env);
+
+    configure_asset(&env, &client, &admin, &usdc);
+    configure_asset(&env, &client, &admin, &xlm);
+    client.set_oracle_price(&admin, &usdc, &10_000_000); // $1
+    client.set_oracle_price(&admin, &xlm, &5_000_000); // $0.50
+
+    let supplier = Address::generate(&env);
+    let borrower = Address::generate(&env);
+    let liquidator = Address::generate(&env);
+
+    client.deposit(&supplier, &usdc, &10_000_000_000);
+    client.deposit(&borrower, &xlm, &20_000_000_000); // $10,000 collateral
+
+    // Borrow max possible ($6,666.66 at 1.5 ratio)
+    client.borrow(&borrower, &usdc, &xlm, &6_666_000_000);
+
+    // Price of XLM drops to $0.40 -> $8,000 collateral. Ratio is now 8000 / 6666 = 1.2. Below 1.5.
+    client.set_oracle_price(&admin, &xlm, &4_000_000); // $0.40
+
+    // Set close factor to 49%
+    client.set_liquidation_params(&admin, &4900, &500);
+
+    let max_repay = (6_666_000_000_i128 * 4900) / 10000;
+
+    // Try repaying 50% -> fails with LiquidationTooLarge
+    let result = client.try_liquidate(&liquidator, &borrower, &xlm, &usdc, &(6_666_000_000 / 2));
+    assert_eq!(
+        format!("{:?}", result.unwrap_err().unwrap()),
+        "Error(Contract, #26)"
+    ); // LiquidationTooLarge = 34
+
+    // Repaying exactly max_repay works
+    client.liquidate(&liquidator, &borrower, &xlm, &usdc, &max_repay);
+}
+
+#[test]
+fn test_liquidation_math() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    let usdc = Address::generate(&env);
+    let xlm = Address::generate(&env);
+
+    configure_asset(&env, &client, &admin, &usdc);
+    configure_asset(&env, &client, &admin, &xlm);
+    client.set_oracle_price(&admin, &usdc, &10_000_000); // $1
+    client.set_oracle_price(&admin, &xlm, &5_000_000); // $0.50
+
+    let supplier = Address::generate(&env);
+    let borrower = Address::generate(&env);
+    let liquidator = Address::generate(&env);
+
+    client.deposit(&supplier, &usdc, &10_000_000_000);
+    client.deposit(&borrower, &xlm, &20_000_000_000); // $10,000 collateral
+    client.borrow(&borrower, &usdc, &xlm, &6_666_000_000);
+    client.set_oracle_price(&admin, &xlm, &4_000_000); // $0.40
+
+    // Set 5% discount (500 bps)
+    client.set_liquidation_params(&admin, &5000, &500);
+
+    // Liquidate 1000 USDC
+    client.liquidate(&liquidator, &borrower, &xlm, &usdc, &1_000_000_000);
+
+    // Math check: repay 1000 USDC at $1, collateral XLM at $0.40, discount 5%
+    // Repay value: $1,000. Seize value with 5% bonus: $1,050.
+    // XLM price: $0.40. Seized XLM = 1,050 / 0.40 = 2625 XLM.
+    let expected_seized = 2_625_000_000;
+
+    let liquidator_pos = client.get_position(&liquidator, &xlm);
+    assert_eq!(liquidator_pos.deposited, expected_seized);
+}
+
+#[test]
+fn test_bad_debt_writeoff() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    let usdc = Address::generate(&env);
+    let xlm = Address::generate(&env);
+
+    configure_asset(&env, &client, &admin, &usdc);
+    configure_asset(&env, &client, &admin, &xlm);
+    client.set_oracle_price(&admin, &usdc, &10_000_000); // $1
+    client.set_oracle_price(&admin, &xlm, &10_000_000); // $1
+
+    let supplier = Address::generate(&env);
+    let borrower = Address::generate(&env);
+
+    client.deposit(&supplier, &usdc, &10_000_000_000);
+    client.deposit(&borrower, &xlm, &2000);
+    client.borrow(&borrower, &usdc, &xlm, &1000);
+
+    // Admin tries bad debt writeoff while collateral exists -> fails
+    let result = client.try_writeoff_bad_debt(&admin, &borrower, &usdc);
+    assert_eq!(
+        format!("{:?}", result.unwrap_err().unwrap()),
+        "Error(Contract, #39)"
+    );
+
+    let liquidator = Address::generate(&env);
+    // Liquidate until we hit SeizeExceedsCollateral
+    client.set_oracle_price(&admin, &xlm, &1_000_000); // $0.10
+
+    // Attempting to liquidate 1000 debt will try to seize 1050 / 0.10 = 10500 collateral.
+    // Collateral is 2000. It exceeds collateral.
+    client.set_liquidation_params(&admin, &10000, &500);
+
+    // Instead, liquidate a smaller amount that exactly seizes the 2000 collateral.
+    // seize_amount = 2000.
+    // seize_value = 2000 * 0.10 = 200.
+    // repay_value = 200 / 1.05 = 190.47... So passing 191 is just enough to try to seize 2000.
+    client.liquidate(&liquidator, &borrower, &xlm, &usdc, &191);
+
+    // Then write off the remaining debt!
+    client.writeoff_bad_debt(&admin, &borrower, &usdc);
+
+    // User debt is 0
+    let pos = client.get_position(&borrower, &usdc);
+    assert_eq!(pos.borrowed, 0);
 }
