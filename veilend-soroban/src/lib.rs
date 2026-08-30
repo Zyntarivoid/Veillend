@@ -886,6 +886,14 @@ pub struct TimelockUpdated {
     pub ledgers: u32,
 }
 
+#[contractevent(topics = ["veillend", "oracle_price_bootstrapped"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OraclePriceBootstrapped {
+    #[topic]
+    pub asset: Address,
+    pub price: i128,
+}
+
 #[contractevent(topics = ["veillend", "contract_upgraded"])]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContractUpgraded {
@@ -1245,6 +1253,18 @@ impl VeilLendContract {
         Self::require_supported_asset(&env, &asset);
         admin.require_auth();
         Self::require_not_paused(&env);
+
+        Self::validate_oracle_price_bounds_config(&env, min, max);
+
+        if let Some(current_price) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, i128>(&DataKey::OraclePrice(asset.clone()))
+        {
+            if current_price < min || current_price > max {
+                panic_with_error!(&env, VeilLendError::OraclePriceOutOfBounds);
+            }
+        }
 
         env.storage()
             .persistent()
@@ -3144,9 +3164,7 @@ impl VeilLendContract {
         match payload {
             ActionPayload::ConfigureAsset(_, _) => {}
             ActionPayload::SetOraclePrice(_, price) => {
-                if *price <= 0 {
-                    panic_with_error!(env, VeilLendError::InvalidAmount);
-                }
+                Self::validate_oracle_price_amount(env, *price);
             }
             ActionPayload::UpdateAssetCaps(asset, deposit_cap, borrow_cap) => {
                 if *deposit_cap != -1 && *deposit_cap <= 0 {
@@ -3573,10 +3591,27 @@ impl VeilLendContract {
         }
     }
 
-    fn apply_set_oracle_price(env: &Env, asset: &Address, price: i128) {
-        if price < 0 {
+    /// Rejects non-positive oracle prices. Shared by the timelocked propose path
+    /// (`validate_payload`) and the immediate setter (`apply_set_oracle_price`)
+    /// so the two paths cannot diverge.
+    fn validate_oracle_price_amount(env: &Env, price: i128) {
+        if price <= 0 {
             panic_with_error!(env, VeilLendError::InvalidAmount);
         }
+    }
+
+    /// Validates absolute oracle bounds before they are stored.
+    fn validate_oracle_price_bounds_config(env: &Env, min: i128, max: i128) {
+        if min <= 0 {
+            panic_with_error!(env, VeilLendError::InvalidAmount);
+        }
+        if min > max {
+            panic_with_error!(env, VeilLendError::OraclePriceOutOfBounds);
+        }
+    }
+
+    fn apply_set_oracle_price(env: &Env, asset: &Address, price: i128) {
+        Self::validate_oracle_price_amount(env, price);
 
         // Get current price for volatility checking
         let current_price_opt = env
@@ -3584,23 +3619,38 @@ impl VeilLendContract {
             .persistent()
             .get::<DataKey, i128>(&DataKey::OraclePrice(asset.clone()));
 
-        // Check max change if configured (before bounds, check against current price)
-        if let Some(max_change_bps) = env
-            .storage()
-            .persistent()
-            .get::<DataKey, u32>(&DataKey::OracleMaxChangeBps(asset.clone()))
-        {
-            if max_change_bps > 0 {
-                if let Some(current_price) = current_price_opt {
-                    if current_price > 0 {
-                        let change = if price > current_price {
-                            price - current_price
-                        } else {
-                            current_price - price
-                        };
-                        let change_bps = (change * 10_000) / current_price;
-                        if change_bps > max_change_bps as i128 {
-                            panic_with_error!(env, VeilLendError::OraclePriceChangeExceedsLimit);
+        match current_price_opt {
+            None => {
+                OraclePriceBootstrapped {
+                    asset: asset.clone(),
+                    price,
+                }
+                .publish(env);
+            }
+            Some(current_price) => {
+                // A prior price exists — always enforce max-change when configured.
+                // Invalid stored values (<= 0) are rejected at read time; here we
+                // still guard the division and allow an admin to replace corrupt
+                // legacy state without trapping.
+                if current_price > 0 {
+                    if let Some(max_change_bps) = env
+                        .storage()
+                        .persistent()
+                        .get::<DataKey, u32>(&DataKey::OracleMaxChangeBps(asset.clone()))
+                    {
+                        if max_change_bps > 0 {
+                            let change = if price > current_price {
+                                price - current_price
+                            } else {
+                                current_price - price
+                            };
+                            let change_bps = (change * 10_000) / current_price;
+                            if change_bps > max_change_bps as i128 {
+                                panic_with_error!(
+                                    env,
+                                    VeilLendError::OraclePriceChangeExceedsLimit
+                                );
+                            }
                         }
                     }
                 }
@@ -4446,7 +4496,9 @@ impl VeilLendContract {
     }
 
     /// Returns an asset's oracle price, panicking with `OraclePriceMissing`
-    /// if unset and `OraclePriceStale` if it has exceeded `MaxOracleAge`.
+    /// if unset or if the timestamp entry is absent/archived,
+    /// `InvalidAmount` if the stored price is non-positive, and
+    /// `OraclePriceStale` if it has exceeded `MaxOracleAge`.
     ///
     /// Only called from mutating-entrypoint internals (`liquidate`,
     /// `assert_collateralized`, the batch health-factor checks) — never from
@@ -4459,20 +4511,18 @@ impl VeilLendContract {
             .get(&DataKey::OraclePrice(asset.clone()))
             .unwrap_or_else(|| panic_with_error!(env, VeilLendError::OraclePriceMissing));
 
-        // Check price staleness. `OracleLastUpdated` is always written in the
-        // same call as `OraclePrice` (`apply_set_oracle_price`) and the two
-        // are always bumped together (`bump_oracle_keys`), so an `OraclePrice`
-        // with no `OracleLastUpdated` should not happen in normal operation —
-        // treating it as missing (rather than skipping the check) closes the
-        // gap this fix exists for: a live price next to a *lost* timestamp
-        // must not silently read as fresh. `migrate` backfills
-        // `OracleLastUpdated` for any pre-existing asset so this is not a
-        // breaking change for assets configured before the field existed.
+        if price <= 0 {
+            panic_with_error!(env, VeilLendError::InvalidAmount);
+        }
+
+        // Fail closed: a live `OraclePrice` without `OracleLastUpdated` (e.g.
+        // partial archival per #432) is incomplete oracle state, not a fresh
+        // price. Distinct from age-based staleness below.
         let last_updated: u64 = env
             .storage()
             .persistent()
             .get(&DataKey::OracleLastUpdated(asset.clone()))
-            .unwrap_or_else(|| panic_with_error!(env, VeilLendError::OraclePriceStale));
+            .unwrap_or_else(|| panic_with_error!(env, VeilLendError::OraclePriceMissing));
 
         let now = env.ledger().timestamp();
         let max_age = env

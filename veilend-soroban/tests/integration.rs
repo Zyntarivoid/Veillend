@@ -8,9 +8,10 @@ use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
 use soroban_sdk::{Address, Bytes, BytesN, Env, Symbol, Val};
 use veillend_contract::{
     compute_permit_digest, signer_address, ActionKind, ActionPayload, ContractUpgraded, DataKey,
-    InterestAccrued, InterestParams, Permit, StorageMigrated, VeilLendContract,
-    VeilLendContractClient, CONTRACT_VERSION, PERMIT_TTL_EXTEND_TO, PERSISTENT_TTL_EXTEND_TO,
-    PERSISTENT_TTL_THRESHOLD, STORAGE_SCHEMA_VERSION, UPGRADE_MIN_TIMELOCK_LEDGERS,
+    InterestAccrued, InterestParams, OraclePriceBootstrapped, Permit, StorageMigrated,
+    VeilLendContract, VeilLendContractClient, CONTRACT_VERSION, PERMIT_TTL_EXTEND_TO,
+    PERSISTENT_TTL_EXTEND_TO, PERSISTENT_TTL_THRESHOLD, STORAGE_SCHEMA_VERSION,
+    UPGRADE_MIN_TIMELOCK_LEDGERS,
 };
 
 const SECONDS_PER_YEAR: u64 = 31_536_000;
@@ -996,6 +997,194 @@ fn test_oracle_price_bounds() {
     // Set price in middle - should succeed
     client.set_oracle_price(&admin, &asset, &500);
     assert_eq!(client.get_oracle_price(&asset), Some(500));
+}
+
+#[test]
+fn test_set_oracle_price_rejects_zero_without_bounds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let asset = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    client.add_admin(&admin, &admin);
+    configure_asset(&env, &client, &admin, &asset);
+
+    // No OracleMinPrice configured (defaults to 0) — zero must still revert.
+    let result = client.try_set_oracle_price(&admin, &asset, &0);
+    assert_eq!(
+        format!("{:?}", result.unwrap_err().unwrap()),
+        "Error(Contract, #4)"
+    );
+}
+
+#[test]
+fn test_oracle_max_change_zero_hop_bypass_blocked() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let asset = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    client.add_admin(&admin, &admin);
+    configure_asset(&env, &client, &admin, &asset);
+
+    client.set_oracle_price(&admin, &asset, &100);
+    client.set_oracle_max_change_bps(&admin, &asset, &500);
+
+    // Hop 1: zero is rejected outright.
+    let zero_result = client.try_set_oracle_price(&admin, &asset, &0);
+    assert_eq!(
+        format!("{:?}", zero_result.unwrap_err().unwrap()),
+        "Error(Contract, #4)"
+    );
+
+    // Hop 2: even if a corrupt zero were present, a large jump must not bypass
+    // max-change when a valid prior price exists.
+    let jump_result = client.try_set_oracle_price(&admin, &asset, &200);
+    assert_eq!(
+        format!("{:?}", jump_result.unwrap_err().unwrap()),
+        "Error(Contract, #24)"
+    );
+}
+
+#[test]
+fn test_oracle_price_bootstrap_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let asset = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    client.add_admin(&admin, &admin);
+    configure_asset(&env, &client, &admin, &asset);
+
+    client.set_oracle_price(&admin, &asset, &100);
+
+    let expected = OraclePriceBootstrapped {
+        asset: asset.clone(),
+        price: 100,
+    };
+    let expected_data = expected.data(&env);
+
+    let events = env.events().all();
+    assert!(
+        !events.is_empty(),
+        "set_oracle_price must emit at least one event"
+    );
+
+    let mut bootstrap_count = 0u32;
+    for (_, topics, data) in events.iter() {
+        if topics.len() >= 2 {
+            let topic0 = topics.get(0).unwrap();
+            let topic1 = topics.get(1).unwrap();
+            if let Ok(sym0) = Symbol::try_from_val(&env, &topic0) {
+                if sym0 == Symbol::new(&env, "veillend") {
+                    if let Ok(sym1) = Symbol::try_from_val(&env, &topic1) {
+                        if sym1 == Symbol::new(&env, "oracle_price_bootstrapped")
+                            && val_eq(&env, &data, &expected_data)
+                        {
+                            bootstrap_count += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(
+        bootstrap_count, 1,
+        "first-ever price set must emit OraclePriceBootstrapped exactly once"
+    );
+
+    assert_eq!(client.get_oracle_price(&asset), Some(100));
+}
+
+#[test]
+fn test_set_oracle_price_bounds_rejects_invalid_windows() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let asset = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    client.add_admin(&admin, &admin);
+    configure_asset(&env, &client, &admin, &asset);
+
+    // min > max
+    let min_gt_max = client.try_set_oracle_price_bounds(&admin, &asset, &1000, &100);
+    assert_eq!(
+        format!("{:?}", min_gt_max.unwrap_err().unwrap()),
+        "Error(Contract, #25)"
+    );
+
+    // min <= 0
+    let non_positive_min = client.try_set_oracle_price_bounds(&admin, &asset, &0, &1000);
+    assert_eq!(
+        format!("{:?}", non_positive_min.unwrap_err().unwrap()),
+        "Error(Contract, #4)"
+    );
+
+    let negative_min = client.try_set_oracle_price_bounds(&admin, &asset, &-1, &1000);
+    assert_eq!(
+        format!("{:?}", negative_min.unwrap_err().unwrap()),
+        "Error(Contract, #4)"
+    );
+
+    // Window excluding the stored price
+    client.set_oracle_price(&admin, &asset, &500);
+    let excludes_current = client.try_set_oracle_price_bounds(&admin, &asset, &600, &1000);
+    assert_eq!(
+        format!("{:?}", excludes_current.unwrap_err().unwrap()),
+        "Error(Contract, #25)"
+    );
+
+    // Valid bounds that include the current price succeed
+    client.set_oracle_price_bounds(&admin, &asset, &100, &1000);
+    assert_eq!(client.get_oracle_price_bounds(&asset), (100, 1000));
+}
+
+#[test]
+fn test_liquidate_rejects_zero_collateral_price() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(VeilLendContract, (admin.clone(), 15_000u32));
+    let client = VeilLendContractClient::new(&env, &contract_id);
+
+    let usdc = Address::generate(&env);
+    let xlm = Address::generate(&env);
+
+    configure_asset(&env, &client, &admin, &usdc);
+    configure_asset(&env, &client, &admin, &xlm);
+    client.set_oracle_price(&admin, &usdc, &10_000_000);
+    client.set_oracle_price(&admin, &xlm, &5_000_000);
+
+    let supplier = Address::generate(&env);
+    let borrower = Address::generate(&env);
+    let liquidator = Address::generate(&env);
+
+    client.deposit(&supplier, &usdc, &10_000_000_000);
+    client.deposit(&borrower, &xlm, &20_000_000_000);
+    client.borrow(&borrower, &usdc, &xlm, &6_666_000_000);
+    client.set_oracle_price(&admin, &xlm, &4_000_000);
+
+    // Simulate legacy corrupt state: a zero collateral price that can no longer
+    // be written via the setter path.
+    env.as_contract(&contract_id, || {
+        env.storage()
+            .persistent()
+            .set(&DataKey::OraclePrice(xlm.clone()), &0i128);
+    });
+
+    let result = client.try_liquidate(&liquidator, &borrower, &xlm, &usdc, &1_000_000_000);
+    assert_eq!(
+        format!("{:?}", result.unwrap_err().unwrap()),
+        "Error(Contract, #4)"
+    );
 }
 
 #[test]
@@ -4053,14 +4242,14 @@ fn test_supported_asset_with_live_balance_survives_long_dormancy() {
 
 /// Oracle staleness enforcement must survive the loss of `OracleLastUpdated`
 /// specifically: a live `OraclePrice` next to a *missing* `OracleLastUpdated`
-/// must fail closed (`OraclePriceStale`), not silently skip the staleness
+/// must fail closed (`OraclePriceMissing`), not silently skip the staleness
 /// check and let an arbitrarily stale price read as fresh. Normal operation
 /// always writes and bumps the two keys together (`apply_set_oracle_price`,
 /// `bump_oracle_keys`), so this simulates the only way they could
 /// realistically diverge — using `env.as_contract` to reach into storage
 /// directly, standing in for a partial-archival edge case.
 #[test]
-#[should_panic(expected = "Contract, #23")]
+#[should_panic(expected = "Contract, #11")]
 fn test_oracle_staleness_survives_loss_of_last_updated() {
     let env = Env::default();
     env.mock_all_auths();
