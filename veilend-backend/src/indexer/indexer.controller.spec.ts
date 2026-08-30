@@ -48,7 +48,7 @@ describe('IndexerController', () => {
     configService = {
       get: jest.fn((_key: string, fallback: unknown) => fallback),
     };
-    prisma = { adminAuditLog: { create: jest.fn() } };
+    prisma = { adminAuditLog: { create: jest.fn().mockResolvedValue({}) } };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [IndexerController],
@@ -161,13 +161,16 @@ describe('IndexerController', () => {
         data: {
           actorWallet: VALID_ADDRESS_A,
           action: 'INDEXER_REPLAY',
-          payload: {
+          payload: expect.objectContaining({
             fromLedger: 0,
             toLedger: 500,
             chunk: 100,
             inserted: 0,
             already_processed: 500,
-          },
+            scope: 'bad-only',
+            confirmFullWipe: false,
+            success: true,
+          }),
         },
       });
       expect(result).toEqual(
@@ -203,6 +206,8 @@ describe('IndexerController', () => {
         undefined,
         undefined,
         undefined,
+        undefined, // scope
+        undefined, // confirmHeader
         body,
       );
 
@@ -302,10 +307,17 @@ describe('IndexerController', () => {
 
   describe('Concurrent replay calls', () => {
     it('only one concurrent call succeeds when two POSTs are made simultaneously', async () => {
-      const req = { user: { walletAddress: VALID_ADDRESS_A } };
+      const req = { user: { walletAddress: VALID_ADDRESS_A } } as any;
+      let replayRunning = false;
+      
+      indexerService.isReplayRunning.mockImplementation(() => replayRunning);
+      indexerService.setReplayRunning.mockImplementation((value: boolean) => {
+        replayRunning = value;
+      });
+      
       indexerService.replay.mockImplementation(async () => {
         // Simulate a delay
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        await new Promise((resolve) => setTimeout(resolve, 50));
         return {
           success: true,
           message: 'Replay completed',

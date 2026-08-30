@@ -374,8 +374,8 @@ describe('IndexerRepository', () => {
   });
 
   describe('resetDatabase', () => {
-    it('clears indexer-owned rows including dedup table, but preserves users/assets', async () => {
-      await repository.resetDatabase();
+    it('clears indexer-owned rows including dedup table, but preserves users/assets (full scope)', async () => {
+      await repository.resetDatabase('full');
 
       expect(prisma.transactionHistory.deleteMany).toHaveBeenCalledWith({
         where: { sorobanEventId: { not: null } },
@@ -386,6 +386,28 @@ describe('IndexerRepository', () => {
       });
       expect(prisma.indexerEventDedup.deleteMany).toHaveBeenCalled();
       expect(prisma.user.upsert).not.toHaveBeenCalled();
+    });
+
+    it('clears only rows newer than checkpoint when using bad-only scope', async () => {
+      // Set up checkpoint with lastIndexedLedger = 10
+      prisma.indexerCheckpoint.findUnique.mockResolvedValue({
+        id: 'global',
+        lastIndexedLedger: 10,
+      });
+
+      await repository.resetDatabase('bad-only');
+
+      expect(prisma.transactionHistory.deleteMany).toHaveBeenCalledWith({
+        where: { 
+          sorobanEventId: { not: null },
+          ledgerSequence: { gt: 10 },
+        },
+      });
+      expect(prisma.position.deleteMany).toHaveBeenCalled();
+      expect(prisma.indexerCheckpoint.deleteMany).toHaveBeenCalledWith({
+        where: { id: 'global' },
+      });
+      expect(prisma.indexerEventDedup.deleteMany).toHaveBeenCalled();
     });
   });
 });
