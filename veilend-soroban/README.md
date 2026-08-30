@@ -214,7 +214,16 @@ Every **persistent** entry above (and instance storage as a whole) is on a finit
 
 Meta-transactions (`deposit_for`/`withdraw_for`/`borrow_for`/`repay_for`) are authorized by an off-chain-signed `Permit`, gated on a per-user `nonce` (must equal the stored value exactly) and a per-user `epoch` (must equal the stored `PermitEpoch`, default `0`). Both are read together, and both are bumped together on every consumption, so they can never drift independently of one another.
 
-- `get_permit_nonce(user)` / `get_permit_epoch(user)`: read-only, no bump.
+### Client-Side Signing Change: `extra_asset`
+
+Starting in `CONTRACT_VERSION` 12, the signed `Permit` structure now includes an `extra_asset: Option<Address>` field, and `PermitWithExtra` has been removed. The domain separator version has also been bumped to 12.
+- For `withdraw_for`, clients must set `extra_asset = Some(debt_asset)` to bind the signature to the specific asset solvency check.
+- For `borrow_for`, clients must set `extra_asset = Some(collateral_asset)`.
+- For `deposit_for` and `repay_for`, clients must set `extra_asset = None`.
+
+Old signatures signed with domain version 11 will no longer be accepted.
+
+### Permit Revocation
 - `revoke_permits(user)` (user-authenticated): increments `PermitEpoch(user)`, immediately invalidating **every** permit ever signed for that user, regardless of nonce — a kill switch for a suspected-leaked signature, without needing to know which nonce it was signed against. Emits `PermitsRevoked`.
 - An epoch mismatch and a nonce mismatch both surface as `VeilLendError::PermitNonceMismatch` (code 43): `#[contracterror]` enums are XDR-bounded to 50 cases and `VeilLendError` is already at that cap (see `InterestStateMissing`, code 51 — note the enum has 50 *cases* even though the highest discriminant is 51, because code 16 is permanently retired), so the two conditions intentionally share a code. Both call for the same client response: fetch the current nonce/epoch and re-sign.
 - Bumping `CONTRACT_VERSION` also invalidates every previously-signed permit on its own: the signed digest includes `DomainSeparator.version`, which is always the running `CONTRACT_VERSION`.

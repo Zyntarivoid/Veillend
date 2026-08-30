@@ -19,7 +19,7 @@ mod flash_loan_receiver_example;
 mod permit;
 mod permit_helpers;
 
-pub use permit::{compute_permit_digest, signer_address, DomainSeparator, Permit, PermitWithExtra};
+pub use permit::{compute_permit_digest, signer_address, DomainSeparator, Permit};
 pub use permit_helpers::{verify_and_consume_permit, VerifiedPermit};
 
 #[cfg(test)]
@@ -31,7 +31,7 @@ pub use flash_loan::{
 };
 
 /// Increment this only when a contract interface change requires consumers to adapt.
-pub const CONTRACT_VERSION: u32 = 11;
+pub const CONTRACT_VERSION: u32 = 12;
 
 /// Increment this only when the serialized `DataKey` or stored value layout changes.
 pub const STORAGE_SCHEMA_VERSION: u32 = 8;
@@ -2813,6 +2813,9 @@ impl VeilLendContract {
         if verified.amount != amount {
             panic_with_error!(&env, VeilLendError::InvalidAmount);
         }
+        if verified.extra_asset.is_some() {
+            panic_with_error!(&env, VeilLendError::InvalidSignature);
+        }
 
         // Execute the deposit using the internal helper
         Self::do_deposit(&env, &verified.user, &asset, amount);
@@ -2851,6 +2854,9 @@ impl VeilLendContract {
         if verified.amount != amount {
             panic_with_error!(&env, VeilLendError::InvalidAmount);
         }
+        if verified.extra_asset != Some(debt_asset.clone()) {
+            panic_with_error!(&env, VeilLendError::InvalidSignature);
+        }
 
         Self::do_withdraw(&env, &verified.user, &withdrawn_asset, &debt_asset, amount);
     }
@@ -2884,6 +2890,9 @@ impl VeilLendContract {
         if verified.amount != amount {
             panic_with_error!(&env, VeilLendError::InvalidAmount);
         }
+        if verified.extra_asset != Some(collateral_asset.clone()) {
+            panic_with_error!(&env, VeilLendError::InvalidSignature);
+        }
 
         Self::do_borrow(
             &env,
@@ -2914,6 +2923,9 @@ impl VeilLendContract {
         }
         if verified.amount != amount {
             panic_with_error!(&env, VeilLendError::InvalidAmount);
+        }
+        if verified.extra_asset.is_some() {
+            panic_with_error!(&env, VeilLendError::InvalidSignature);
         }
 
         Self::do_repay(&env, &verified.user, &asset, amount);
