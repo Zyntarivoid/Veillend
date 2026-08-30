@@ -713,20 +713,60 @@ export class IndexerRepository {
   /**
    * Clears indexer-owned read models (positions, indexed transactions, checkpoints,
    * and dedup lookaside rows) so a replay can rebuild them from scratch.
+   *
+   * @param scope - 'full' deletes all rows, 'bad-only' (default) only deletes rows newer than checkpoint
    */
-  async resetDatabase(): Promise<void> {
-    this.logger.log('Resetting indexer database read models (for replay)...');
-    await this.prisma.$transaction([
-      this.prisma.transactionHistory.deleteMany({
-        where: { sorobanEventId: { not: null } },
-      }),
-      this.prisma.position.deleteMany({}),
-      this.prisma.indexerCheckpoint.deleteMany({
-        where: { id: CHECKPOINT_ID },
-      }),
-      this.prisma.indexerEventDedup.deleteMany({}),
-      this.prisma.assetInterestState.deleteMany({}),
-      this.prisma.assetInterestParams.deleteMany({}),
-    ]);
+  async resetDatabase(scope: 'full' | 'bad-only' = 'bad-only'): Promise<void> {
+    this.logger.log(
+      `Resetting indexer database read models (for replay)... scope: ${scope}`,
+    );
+
+    if (scope === 'full') {
+      // Full wipe: delete all indexer-owned rows
+      await this.prisma.$transaction([
+        this.prisma.transactionHistory.deleteMany({
+          where: { sorobanEventId: { not: null } },
+        }),
+        this.prisma.position.deleteMany({}),
+        this.prisma.indexerCheckpoint.deleteMany({
+          where: { id: CHECKPOINT_ID },
+        }),
+        this.prisma.indexerEventDedup.deleteMany({}),
+        this.prisma.assetInterestState.deleteMany({}),
+        this.prisma.assetInterestParams.deleteMany({}),
+      ]);
+    } else {
+      // Scoped wipe: only delete rows newer than checkpoint ledger
+      const checkpoint = await this.getCheckpoint();
+      const lastIndexedLedger = checkpoint.lastIndexedLedger;
+
+      await this.prisma.$transaction([
+        this.prisma.transactionHistory.deleteMany({
+          where: {
+            sorobanEventId: { not: null },
+            ledgerSequence: { gt: lastIndexedLedger },
+          },
+        }),
+        this.prisma.position.deleteMany({
+          where: {
+            user: {
+              transactions: {
+                some: {
+                  ledgerSequence: { gt: lastIndexedLedger },
+                },
+              },
+            },
+          },
+        }),
+        this.prisma.indexerCheckpoint.deleteMany({
+          where: { id: CHECKPOINT_ID },
+        }),
+        this.prisma.indexerEventDedup.deleteMany({
+          where: { ledger: { gt: lastIndexedLedger } },
+        }),
+        this.prisma.assetInterestState.deleteMany({}),
+        this.prisma.assetInterestParams.deleteMany({}),
+      ]);
+    }
   }
 }

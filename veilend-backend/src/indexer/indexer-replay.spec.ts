@@ -25,12 +25,15 @@ describe('Indexer Replay (E2E)', () => {
             }),
             getReplayState: jest.fn(),
             getSyncStats: jest.fn(),
+            getIsProcessing: jest.fn().mockReturnValue(false),
+            isReplayRunning: jest.fn().mockReturnValue(false),
+            setReplayRunning: jest.fn(),
           },
         },
         {
           provide: PrismaService,
           useValue: {
-            adminAuditLog: { create: jest.fn() },
+            adminAuditLog: { create: jest.fn().mockResolvedValue({}) },
           },
         },
         {

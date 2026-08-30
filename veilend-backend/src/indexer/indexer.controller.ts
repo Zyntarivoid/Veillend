@@ -9,6 +9,9 @@ import {
   UseGuards,
   Req,
   UnauthorizedException,
+  ConflictException,
+  BadRequestException,
+  Headers,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
@@ -34,6 +37,7 @@ export interface ReplayRequestDto {
   fromLedger?: number;
   toLedger?: number;
   chunk?: number;
+  scope?: 'full' | 'bad-only';
 }
 
 @Controller('indexer')
@@ -123,14 +127,40 @@ export class IndexerController {
     @Query('fromLedger') queryFrom?: string,
     @Query('toLedger') queryTo?: string,
     @Query('chunk') queryChunk?: string,
+    @Query('scope') queryScope?: 'full' | 'bad-only',
+    @Headers('x-confirm-full-wipe') confirmHeader?: string,
     @Body() body?: ReplayRequestDto,
   ) {
     if (!req.user?.walletAddress) {
       throw new UnauthorizedException('No user authenticated');
     }
     const actorWallet = req.user.walletAddress;
+
+    // Check if indexer is already processing
+    if (this.indexerService.getIsProcessing()) {
+      throw new ConflictException(
+        'Indexer already running; replay not started',
+      );
+    }
+
+    // Idempotency guard: check if replay is already running
+    if (this.indexerService.isReplayRunning()) {
+      throw new ConflictException('Replay already in progress');
+    }
+
+    const scope = queryScope || body?.scope || 'bad-only';
+
+    // Validate scope and confirm header for full wipe
+    if (scope === 'full') {
+      if (confirmHeader !== 'yes') {
+        throw new BadRequestException(
+          'Full wipe requires x-confirm-full-wipe: yes header',
+        );
+      }
+    }
+
     this.logger.log(
-      `Manually triggered database replay of contract events... actorWallet: ${actorWallet}`,
+      `Manually triggered database replay of contract events... actorWallet: ${actorWallet}, scope: ${scope}`,
     );
 
     const fromLedger =
@@ -154,25 +184,71 @@ export class IndexerController {
           ? Number(body.chunk)
           : undefined;
 
-    const result = await this.indexerService.replay({
-      fromLedger: !isNaN(fromLedger as number) ? fromLedger : undefined,
-      toLedger: !isNaN(toLedger as number) ? toLedger : undefined,
-      chunk: !isNaN(chunk as number) ? chunk : undefined,
-    });
+    const startTime = Date.now();
+    let result:
+      | {
+          message: string;
+          success: boolean;
+          status: string;
+          fromLedger: number;
+          toLedger: number;
+          chunk: number;
+          inserted: number;
+          already_processed: number;
+          alreadyProcessed: number;
+          currentLedger: number;
+          percent: number;
+        }
+      | undefined;
+    let error: Error | null = null;
 
-    await this.prisma.adminAuditLog.create({
-      data: {
-        actorWallet,
-        action: AdminActionType.INDEXER_REPLAY,
-        payload: {
-          fromLedger: result.fromLedger,
-          toLedger: result.toLedger,
-          chunk: result.chunk,
-          inserted: result.inserted,
-          already_processed: result.already_processed,
-        },
-      },
-    });
+    try {
+      // Set replay running flag
+      this.indexerService.setReplayRunning(true);
+
+      // If scope is full, call forceReplay with confirmation
+      if (scope === 'full') {
+        await this.indexerService.forceReplay('full');
+      }
+
+      result = await this.indexerService.replay({
+        fromLedger: !isNaN(fromLedger as number) ? fromLedger : undefined,
+        toLedger: !isNaN(toLedger as number) ? toLedger : undefined,
+        chunk: !isNaN(chunk as number) ? chunk : undefined,
+      });
+    } catch (err) {
+      error = err instanceof Error ? err : new Error(String(err));
+      this.logger.error(`Replay failed: ${error.message}`);
+      throw error;
+    } finally {
+      // Clear replay running flag
+      this.indexerService.setReplayRunning(false);
+
+      // Audit log entry
+      const durationMs = Date.now() - startTime;
+      await this.prisma.adminAuditLog
+        .create({
+          data: {
+            actorWallet,
+            action: AdminActionType.INDEXER_REPLAY,
+            payload: {
+              fromLedger: result?.fromLedger,
+              toLedger: result?.toLedger,
+              chunk: result?.chunk,
+              inserted: result?.inserted,
+              already_processed: result?.already_processed,
+              scope,
+              confirmFullWipe: confirmHeader === 'yes',
+              durationMs,
+              success: !error,
+              error: error?.message,
+            },
+          },
+        })
+        .catch((auditErr) => {
+          this.logger.error(`Failed to create audit log: ${auditErr}`);
+        });
+    }
 
     return {
       message: result.message,
