@@ -161,6 +161,7 @@ describe('IndexerController', () => {
         data: {
           actorWallet: VALID_ADDRESS_A,
           action: 'INDEXER_REPLAY',
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
           payload: expect.objectContaining({
             fromLedger: 0,
             toLedger: 500,
@@ -172,7 +173,7 @@ describe('IndexerController', () => {
             success: true,
           }),
         },
-      });
+      } as any);
       expect(result).toEqual(
         expect.objectContaining({
           fromLedger: 0,
@@ -307,14 +308,15 @@ describe('IndexerController', () => {
 
   describe('Concurrent replay calls', () => {
     it('only one concurrent call succeeds when two POSTs are made simultaneously', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       const req = { user: { walletAddress: VALID_ADDRESS_A } } as any;
       let replayRunning = false;
-      
+
       indexerService.isReplayRunning.mockImplementation(() => replayRunning);
       indexerService.setReplayRunning.mockImplementation((value: boolean) => {
         replayRunning = value;
       });
-      
+
       indexerService.replay.mockImplementation(async () => {
         // Simulate a delay
         await new Promise((resolve) => setTimeout(resolve, 50));

@@ -398,7 +398,7 @@ describe('IndexerRepository', () => {
       await repository.resetDatabase('bad-only');
 
       expect(prisma.transactionHistory.deleteMany).toHaveBeenCalledWith({
-        where: { 
+        where: {
           sorobanEventId: { not: null },
           ledgerSequence: { gt: 10 },
         },
