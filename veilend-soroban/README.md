@@ -203,7 +203,7 @@ Every **persistent** entry above (and instance storage as a whole) is on a finit
 - **`bump_persistent(env, key)`** / **`bump_instance(env)`** (private helpers in `lib.rs`) wrap `extend_ttl`, driven by four constants: `PERSISTENT_TTL_THRESHOLD` / `PERSISTENT_TTL_EXTEND_TO` (~7 / ~30 days at a 5s ledger) and `INSTANCE_TTL_THRESHOLD` / `INSTANCE_TTL_EXTEND_TO` (~30 / ~180 days). Both extend-to values sit well under Soroban's protocol-wide `max_entry_ttl` (~3,110,400 ledgers / ~6 months on Mainnet), so `extend_ttl` can never panic with `ExceededLimit`.
 - **Every mutating entrypoint bumps the entries it touches.** `deposit`/`borrow`/`repay`/`withdraw`/`liquidate`/`accrue_interest`, the four `*_batch` variants, the four `*_for` permit variants, and `flash_loan` all route their `Position`/`InterestState`/`AssetReserve`/`TotalDeposited`/`TotalBorrowed`/`OraclePrice`/`SupportedAsset` accesses through helpers that bump on write (`write_position`, `write_asset_reserve`, `write_interest_state`, `write_total_deposited`, `write_total_borrowed`, …), or through the two read chokepoints every one of them already calls — `require_supported_asset` (bumps `SupportedAsset` + instance storage) and `read_oracle_price` (bumps the whole oracle key group). No entrypoint calls `storage().persistent()` directly outside of these helpers.
 - **Read-only entrypoints never bump** (`get_position`, `get_interest_state`, `get_asset_reserve`, `is_asset_supported`, `get_oracle_price`, …). Bumping on a free, unauthenticated read would let anyone keep arbitrary entries alive at the protocol's expense, and would make `simulateTransaction` results depend on invocation history. This is deliberate — do not "fix" it by adding a bump to a getter.
-- **Oracle keys are bumped as a group.** `OraclePrice`, `OracleLastUpdated`, `OraclePrevPrice`, `OracleMinPrice`, and `OracleMaxPrice` are refreshed together (`bump_oracle_keys`) on every oracle write and on every `read_oracle_price` call, because a *partially* archived group is worse than a fully archived one: `read_oracle_price`'s staleness check only runs `if let Some(last_updated) = ...`, so a live `OraclePrice` next to a gone `OracleLastUpdated` would make an arbitrarily stale price read as fresh.
+- **Oracle keys are bumped as a group.** `OraclePrice`, `OracleLastUpdated`, `OraclePrevPrice`, `OracleMinPrice`, and `OracleMaxPrice` are refreshed together (`bump_oracle_keys`) on every oracle write and on every `read_oracle_price` call. `read_oracle_price` fails closed if `OracleLastUpdated` is missing (e.g. partial archival per #432): an `OraclePrice` without its timestamp is treated as incomplete oracle state (`OraclePriceMissing`), not as a fresh price.
 - **`SupportedAsset` cannot archive out from under a live-balance asset.** Every entrypoint that touches an asset calls `require_supported_asset` first, which bumps `SupportedAsset` on success — the same guard `apply_configure_asset`'s active-positions check exists to prevent (disabling an asset with live balances) can't be reproduced by TTL expiry either, as long as *something* (a user action or a permissionless `accrue_interest` keeper call) touches the asset within the TTL window.
 - **`PermitNonce`/`PermitEpoch` get the longest TTL in the contract** (`PERMIT_TTL_EXTEND_TO`, ~180 days), armed on every permit consumption — a permit-nonce entry is the single highest-severity key in this contract, since historically it also carried a `.unwrap_or(0)` fallback that could not tell "never used" apart from "lost". That ambiguity is now closed a different way: see `revoke_permits` below, which does not depend on TTL bookkeeping at all.
 - **`InterestState` cannot silently reset to a fresh 1.0x index.** Every supported asset gets one seeded at `apply_configure_asset` time (and backfilled by `migrate` for assets configured before this existed). If a supported asset's `InterestState` is ever missing, `read_interest_state` panics with `InterestStateMissing` instead of quietly re-anchoring at `RATE_SCALE` — a defaulted state and a genuinely-fresh one are indistinguishable otherwise, and treating the former as the latter would wipe real accrued interest.
@@ -219,13 +219,29 @@ Meta-transactions (`deposit_for`/`withdraw_for`/`borrow_for`/`repay_for`) are au
 - An epoch mismatch and a nonce mismatch both surface as `VeilLendError::PermitNonceMismatch` (code 43): `#[contracterror]` enums are XDR-bounded to 50 cases and `VeilLendError` is already at that cap (see `InterestStateMissing`, code 51 — note the enum has 50 *cases* even though the highest discriminant is 51, because code 16 is permanently retired), so the two conditions intentionally share a code. Both call for the same client response: fetch the current nonce/epoch and re-sign.
 - Bumping `CONTRACT_VERSION` also invalidates every previously-signed permit on its own: the signed digest includes `DomainSeparator.version`, which is always the running `CONTRACT_VERSION`.
 
-The admin authority is a `Vec<Address>` (`AdminSet`): any one of N admins can act, and `add_admin`/`remove_admin` manage membership (with a last-admin lockout guard). Privileged mutations — `configure_asset`, `set_oracle_price`, `update_asset_caps`, `set_min_collateral_ratio`, pausing, `record_protocol_fee`, `withdraw_reserves`, `recover_rewards`, and upgrading — follow a `propose_*` → `execute_*` (after the `TimelockLedgers` delay) → `cancel_*` flow, with `set_paused(false)` exempt so unpausing stays immediate.
+The admin authority is a `Vec<Address>` (`AdminSet`): any one of N admins can act, and `add_admin`/`remove_admin` manage membership (with a last-admin lockout guard). Most privileged mutations follow a `propose_*` → `execute_*` (after the `TimelockLedgers` delay) → `cancel_*` flow, with `set_paused(false)` exempt so unpausing stays immediate.
+
+**Oracle price updates — timelock exemption:** Price feeds may need to move faster than the ~5-minute admin timelock during volatility. The contract therefore exposes two admin paths that share identical validation (`validate_oracle_price_amount`):
+
+| Path | Timelock | When to use |
+| :--- | :--- | :--- |
+| `set_oracle_price` | **None** (immediate) | Routine oracle-feed updates during market hours |
+| `propose_set_oracle_price` / `execute_set_oracle_price` | Yes | Deliberate, governance-visible price changes |
+
+Both paths reject non-positive prices, enforce configured max-change and absolute bounds, and emit `OraclePriceBootstrapped` on an asset's first-ever price. The immediate path is intentional — removing it would force every feed tick through the timelock — but both paths must stay validation-identical so callers cannot pick a weaker gate. A future **price-feeder role** (narrower than full admin) is recommended so routine updates do not require full admin rights.
+
+Other timelocked privileged mutations: `configure_asset`, `update_asset_caps`, `set_min_collateral_ratio`, pausing, `record_protocol_fee`, `withdraw_reserves`, `recover_rewards`, and upgrading.
 
 Upgrades (`propose_upgrade`/`execute_upgrade`/`cancel_upgrade`) are timelocked like every other privileged mutation but with a hard floor: the delay is `max(TimelockLedgers, UPGRADE_MIN_TIMELOCK_LEDGERS)` and is snapshotted into the pending action at proposal time, so an admin cannot shrink the global timelock and immediately swap the wasm. `execute_upgrade` is **not** blocked while the contract is paused — pausing is the expected response to a discovered bug and must never lock out the fix. It also rejects downgrades: a wasm whose `contract_metadata().contract_version` is lower than the running one fails with `InvalidUpgradeVersion`.
 
 After an upgrade to a wasm with a newer storage layout, an admin calls `migrate(admin)` (idempotent, admin-only) to run the post-upgrade storage migration and advance the stored `StorageSchemaVersion`; a second call for the same target version fails with `AlreadyMigrated`. See [`UPGRADING.md`](./UPGRADING.md) for the operational runbook.
 
 **Oracle Safety Rails:** The contract includes comprehensive oracle price safety mechanisms including staleness tracking (`OracleLastUpdated`), volatility limits (`OracleMaxChangeBps`, `OraclePrevPrice`), and absolute bounds (`OracleMinPrice`, `OracleMaxPrice`). These protect against stale prices, excessive volatility, and absurd values that could compromise the protocol.
+
+- **Non-positive prices** are rejected at write time (`price <= 0` → `InvalidAmount`) and at read time (`read_oracle_price` defensively rejects stored `price <= 0`).
+- **Max-change** applies whenever a prior price exists; only a first-ever bootstrap (`OraclePriceBootstrapped` event) skips the volatility check.
+- **Bounds configuration** requires `0 < min <= max` and rejects windows that exclude the currently stored price.
+- **Missing timestamp** (`OracleLastUpdated` archived while `OraclePrice` survives) surfaces as `OraclePriceMissing`, distinct from age-based `OraclePriceStale`.
 
 ## Global Pause
 
@@ -281,7 +297,7 @@ All contract errors are typed via `VeilLendError` (`#[contracterror]`, `#[repr(u
 | 8 | `InvalidCollateralRatio` | Minimum collateral ratio is below 100% (10_000 bps) |
 | 9 | `NotInitialized` | Contract has not been initialized yet |
 | 10 | `ZeroAmount` | Amount of zero is not allowed |
-| 11 | `OraclePriceMissing` | Oracle price not configured for the asset |
+| 11 | `OraclePriceMissing` | Oracle price not configured, or `OracleLastUpdated` absent (incomplete oracle state) |
 | 12 | `ContractPaused` | Operation blocked: contract is paused |
 | 13 | `DepositCapExceeded` | Deposit cap would be exceeded |
 | 14 | `BorrowCapExceeded` | Borrow cap would be exceeded |
