@@ -73,6 +73,7 @@ const DEFAULT_CHUNK_SIZE = 100;
 export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(IndexerService.name);
   private isProcessing = false;
+  private replayRunning = false;
   private pollTimeout?: NodeJS.Timeout;
 
   private syncStatus: 'idle' | 'syncing' | 'replaying' | 'error' = 'idle';
@@ -719,12 +720,12 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
     return this.repository.getPositions(userAddress);
   }
 
-  async forceReplay(): Promise<void> {
-    await this.repository.resetDatabase();
+  async forceReplay(scope: 'full' | 'bad-only' = 'full'): Promise<void> {
+    await this.repository.resetDatabase(scope);
     this.dedupCounter = 0;
     this.insertedCounter = 0;
     this.logger.log(
-      'Force replay requested. Database reset and replay triggered.',
+      `Force replay requested. Database reset (scope: ${scope}) and replay triggered.`,
     );
     void this.replay({ fromLedger: this.configService.indexer.startLedger });
   }
@@ -779,5 +780,17 @@ export class IndexerService implements OnApplicationBootstrap, OnModuleDestroy {
 
   getReplayState(): ReplayState {
     return { ...this.replayState };
+  }
+
+  getIsProcessing(): boolean {
+    return this.isProcessing;
+  }
+
+  isReplayRunning(): boolean {
+    return this.replayRunning;
+  }
+
+  setReplayRunning(value: boolean): void {
+    this.replayRunning = value;
   }
 }

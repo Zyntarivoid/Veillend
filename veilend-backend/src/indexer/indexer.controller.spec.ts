@@ -1,6 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
-import { UnauthorizedException } from '@nestjs/common';
+import {
+  UnauthorizedException,
+  ConflictException,
+  BadRequestException,
+} from '@nestjs/common';
 import { IndexerController } from './indexer.controller';
 import { IndexerService } from './indexer.service';
 import { IndexerRepository } from './indexer.repository';
@@ -20,6 +24,9 @@ describe('IndexerController', () => {
     replay: jest.Mock;
     getSyncStats: jest.Mock;
     getReplayState: jest.Mock;
+    getIsProcessing: jest.Mock;
+    isReplayRunning: jest.Mock;
+    setReplayRunning: jest.Mock;
   };
   let repository: { getCheckpoint: jest.Mock };
   let configService: { get: jest.Mock };
@@ -33,6 +40,9 @@ describe('IndexerController', () => {
       replay: jest.fn(),
       getSyncStats: jest.fn(),
       getReplayState: jest.fn(),
+      getIsProcessing: jest.fn().mockReturnValue(false),
+      isReplayRunning: jest.fn().mockReturnValue(false),
+      setReplayRunning: jest.fn(),
     };
     repository = { getCheckpoint: jest.fn() };
     configService = {
@@ -214,6 +224,119 @@ describe('IndexerController', () => {
         controller.triggerReplay(req, '0', '500', '100'),
       ).rejects.toThrow(UnauthorizedException);
       expect(indexerService.replay).not.toHaveBeenCalled();
+    });
+
+    it('returns 409 Conflict when indexer is already processing', async () => {
+      const req = { user: { walletAddress: VALID_ADDRESS_A } };
+      indexerService.getIsProcessing.mockReturnValue(true);
+
+      await expect(
+        controller.triggerReplay(req, '0', '500', '100'),
+      ).rejects.toThrow(ConflictException);
+      expect(indexerService.replay).not.toHaveBeenCalled();
+    });
+
+    it('returns 409 Conflict when replay is already running', async () => {
+      const req = { user: { walletAddress: VALID_ADDRESS_A } };
+      indexerService.isReplayRunning.mockReturnValue(true);
+
+      await expect(
+        controller.triggerReplay(req, '0', '500', '100'),
+      ).rejects.toThrow(ConflictException);
+      expect(indexerService.replay).not.toHaveBeenCalled();
+    });
+
+    it('returns 400 when scope=full without confirm header', async () => {
+      const req = { user: { walletAddress: VALID_ADDRESS_A } };
+
+      await expect(
+        controller.triggerReplay(req, '0', '500', '100', 'full'),
+      ).rejects.toThrow(BadRequestException);
+      expect(indexerService.replay).not.toHaveBeenCalled();
+    });
+
+    it('returns 400 when scope=full with wrong confirm header', async () => {
+      const req = {
+        user: { walletAddress: VALID_ADDRESS_A },
+        headers: { 'x-confirm-full-wipe': 'no' },
+      };
+
+      await expect(
+        controller.triggerReplay(req, '0', '500', '100', 'full', 'no'),
+      ).rejects.toThrow(BadRequestException);
+      expect(indexerService.replay).not.toHaveBeenCalled();
+    });
+
+    it('proceeds with full wipe when scope=full with correct confirm header', async () => {
+      const req = {
+        user: { walletAddress: VALID_ADDRESS_A },
+        headers: { 'x-confirm-full-wipe': 'yes' },
+      };
+      indexerService.replay.mockResolvedValue({
+        success: true,
+        message: 'Replay completed',
+        status: 'completed',
+        fromLedger: 0,
+        toLedger: 500,
+        chunk: 100,
+        inserted: 10,
+        already_processed: 490,
+        alreadyProcessed: 490,
+        currentLedger: 500,
+        percent: 100,
+      });
+
+      const result = await controller.triggerReplay(
+        req,
+        '0',
+        '500',
+        '100',
+        'full',
+        'yes',
+      );
+
+      expect(indexerService.forceReplay).toHaveBeenCalledWith('full');
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe('Concurrent replay calls', () => {
+    it('only one concurrent call succeeds when two POSTs are made simultaneously', async () => {
+      const req = { user: { walletAddress: VALID_ADDRESS_A } };
+      indexerService.replay.mockImplementation(async () => {
+        // Simulate a delay
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        return {
+          success: true,
+          message: 'Replay completed',
+          status: 'completed',
+          fromLedger: 0,
+          toLedger: 500,
+          chunk: 100,
+          inserted: 10,
+          already_processed: 490,
+          alreadyProcessed: 490,
+          currentLedger: 500,
+          percent: 100,
+        };
+      });
+
+      // Make two concurrent calls
+      const call1 = controller.triggerReplay(req, '0', '500', '100');
+      const call2 = controller.triggerReplay(req, '0', '500', '100');
+
+      const results = await Promise.allSettled([call1, call2]);
+
+      // One should succeed, one should fail with ConflictException
+      const successCount = results.filter(
+        (r) => r.status === 'fulfilled',
+      ).length;
+      const failureCount = results.filter(
+        (r) => r.status === 'rejected',
+      ).length;
+
+      expect(successCount).toBe(1);
+      expect(failureCount).toBe(1);
     });
   });
 });
