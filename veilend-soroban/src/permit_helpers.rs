@@ -14,6 +14,7 @@ pub struct VerifiedPermit {
     pub asset: Address,
     pub amount: i128,
     pub nonce: u64,
+    pub extra_asset: Option<Address>,
 }
 
 /// Verifies a permit and advances the nonce if valid.
@@ -56,7 +57,7 @@ pub fn verify_and_consume_permit(
     // transaction directly inside the host call and never reaches here, so
     // it cannot be reported through `emit_permit_failed`.
     if let Err(e) = verify_permit(env, domain, permit, signature) {
-        emit_permit_failed(env, &user, &permit.action, e as u32);
+        emit_permit_failed(env, &user, &permit.action, &permit.extra_asset, e as u32);
         return Err(e);
     }
 
@@ -66,7 +67,7 @@ pub fn verify_and_consume_permit(
 
     // Validate deadline, epoch, and nonce
     if let Err(e) = validate_permit(env, permit, current_nonce, current_epoch) {
-        emit_permit_failed(env, &user, &permit.action, e as u32);
+        emit_permit_failed(env, &user, &permit.action, &permit.extra_asset, e as u32);
         return Err(e);
     }
 
@@ -81,6 +82,7 @@ pub fn verify_and_consume_permit(
         &permit.asset,
         permit.amount,
         new_nonce,
+        &permit.extra_asset,
     );
 
     Ok(VerifiedPermit {
@@ -89,5 +91,6 @@ pub fn verify_and_consume_permit(
         asset: permit.asset.clone(),
         amount: permit.amount,
         nonce: new_nonce,
+        extra_asset: permit.extra_asset.clone(),
     })
 }

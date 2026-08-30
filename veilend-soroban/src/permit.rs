@@ -59,16 +59,9 @@ pub struct Permit {
     pub chain_id: u64,
     /// Contract ID to prevent cross-contract replay
     pub contract_id: Address,
-}
-
-/// Additional parameters for withdraw and borrow permits.
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
-pub struct PermitWithExtra {
-    pub permit: Permit,
     /// For withdraw: the debt asset to check against
     /// For borrow: the collateral asset to use
-    pub extra_asset: Address,
+    pub extra_asset: Option<Address>,
 }
 
 /// Derives the Address controlled by an Ed25519 public key.
@@ -247,6 +240,7 @@ pub fn emit_permit_executed(
     asset: &Address,
     amount: i128,
     nonce: u64,
+    extra_asset: &Option<Address>,
 ) {
     #[contractevent(topics = ["veillend", "permit_executed"])]
     #[derive(Clone, Debug, Eq, PartialEq)]
@@ -258,6 +252,7 @@ pub fn emit_permit_executed(
         pub asset: Address,
         pub amount: i128,
         pub nonce: u64,
+        pub extra_asset: Option<Address>,
         pub timestamp: u64,
     }
 
@@ -267,13 +262,20 @@ pub fn emit_permit_executed(
         asset: asset.clone(),
         amount,
         nonce,
+        extra_asset: extra_asset.clone(),
         timestamp: env.ledger().timestamp(),
     };
     event.publish(env);
 }
 
 /// Emits a permit failed event.
-pub fn emit_permit_failed(env: &Env, user: &Address, action: &Symbol, error_code: u32) {
+pub fn emit_permit_failed(
+    env: &Env,
+    user: &Address,
+    action: &Symbol,
+    extra_asset: &Option<Address>,
+    error_code: u32,
+) {
     #[contractevent(topics = ["veillend", "permit_failed"])]
     #[derive(Clone, Debug, Eq, PartialEq)]
     struct PermitFailed {
@@ -281,6 +283,7 @@ pub fn emit_permit_failed(env: &Env, user: &Address, action: &Symbol, error_code
         pub user: Address,
         #[topic]
         pub action: Symbol,
+        pub extra_asset: Option<Address>,
         pub error_code: u32,
         pub timestamp: u64,
     }
@@ -288,6 +291,7 @@ pub fn emit_permit_failed(env: &Env, user: &Address, action: &Symbol, error_code
     let event = PermitFailed {
         user: user.clone(),
         action: action.clone(),
+        extra_asset: extra_asset.clone(),
         error_code,
         timestamp: env.ledger().timestamp(),
     };
